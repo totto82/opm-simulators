@@ -524,6 +524,130 @@ namespace Opm
 
             return sol;
         }
+
+        /**
+         * Checks if the summaryConfig has a keyword with the standardized field, region, or block prefixes.
+         */
+        inline bool hasFRBKeyword(const SummaryConfig& summaryConfig, const std::string keyword) {
+            std::string field_kw = "F" + keyword;
+            std::string region_kw = "R" + keyword;
+            std::string block_kw = "B" + keyword;
+            return summaryConfig.hasKeyword(field_kw)
+                    || summaryConfig.hasKeyword(region_kw)
+                    || summaryConfig.hasKeyword(block_kw);
+        }
+
+
+        /**
+         * Returns the data as asked for in the summaryConfig
+         */
+        template<class Model>
+        void getSummaryData(data::Solution& output,
+                            const Opm::PhaseUsage& phaseUsage,
+                            const Model& physicalModel,
+                            const SummaryConfig& summaryConfig) {
+
+            const typename Model::FIPData& fip = physicalModel.getFIPData();
+
+            //Get shorthands for water, oil, gas
+            const int aqua_active = phaseUsage.phase_used[Opm::PhaseUsage::Aqua];
+            const int liquid_active = phaseUsage.phase_used[Opm::PhaseUsage::Liquid];
+            const int vapour_active = phaseUsage.phase_used[Opm::PhaseUsage::Vapour];
+
+            /**
+             * Now process all of the summary config files
+             */
+            // Water in place
+            if (aqua_active && hasFRBKeyword(summaryConfig, "WIP")) {
+                output.insert("WIP",
+                              Opm::UnitSystem::measure::volume,
+                              fip.fip[Model::FIPData::FIP_AQUA],
+                              data::TargetType::SUMMARY );
+            }
+            if (liquid_active) {
+                const std::vector<double>& oipl = fip.fip[Model::FIPData::FIP_LIQUID];
+                const int size = oipl.size();
+
+                const std::vector<double>& oipg = vapour_active ? fip.fip[Model::FIPData::FIP_VAPORIZED_OIL] : std::vector<double>(size,0.0);
+                std::vector<double> oip = oipl;
+                if (vapour_active) {
+                    oip.insert(oip.end(), oipg.begin(), oipg.end());
+                }
+
+                //Oil in place (liquid phase only)
+                if (hasFRBKeyword(summaryConfig, "OIPL")) {
+                    output.insert("OIPL",
+                                  Opm::UnitSystem::measure::volume,
+                                  oipl,
+                                  data::TargetType::SUMMARY );
+                }
+
+                //Oil in place (gas phase only)
+                if (hasFRBKeyword(summaryConfig, "OIPG")) {
+                    output.insert("OIPG",
+                                  Opm::UnitSystem::measure::volume,
+                                  oipg,
+                                  data::TargetType::SUMMARY );
+                }
+                // Oil in place (in liquid and gas phases)
+                if (hasFRBKeyword(summaryConfig, "OIP")) {
+                    output.insert("OIP",
+                                  Opm::UnitSystem::measure::volume,
+                                  oip,
+                                  data::TargetType::SUMMARY );
+                }
+
+
+
+            }
+            if (vapour_active) {
+                const std::vector<double>& gipg = fip.fip[Model::FIPData::FIP_VAPOUR];
+                const int size = gipg.size();
+
+                const std::vector<double>& gipl= liquid_active ? fip.fip[Model::FIPData::FIP_DISSOLVED_GAS] : std::vector<double>(size,0.0);
+                std::vector<double> gip = gipg;
+                if (liquid_active) {
+                    gip.insert(gip.end(), gipl.begin(), gipl.end());
+                }
+
+                // Gas in place (gas phase only)
+                if (hasFRBKeyword(summaryConfig, "GIPG")) {
+                    output.insert("GIPG",
+                                  Opm::UnitSystem::measure::volume,
+                                  gipg,
+                                  data::TargetType::SUMMARY );
+                }
+                // Gas in place (liquid phase only)
+                if (hasFRBKeyword(summaryConfig, "GIPL")) {
+                    output.insert("GIPL",
+                                  Opm::UnitSystem::measure::volume,
+                                  gipl,
+                                  data::TargetType::SUMMARY );
+                }
+                // Gas in place (in both liquid and gas phases)
+                if (hasFRBKeyword(summaryConfig, "GIP")) {
+                    output.insert("GIP",
+                                  Opm::UnitSystem::measure::volume,
+                                  gip,
+                                  data::TargetType::SUMMARY );
+                }
+            }
+            // Cell pore volume in reservoir conditions
+            if (hasFRBKeyword(summaryConfig, "RPV")) {
+                output.insert("RPV",
+                              Opm::UnitSystem::measure::volume,
+                              fip.fip[Model::FIPData::FIP_PV],
+                              data::TargetType::SUMMARY );
+            }
+            // Pressure averaged value (hydrocarbon pore volume weighted)
+            if (summaryConfig.hasKeyword("FPRH") || summaryConfig.hasKeyword("RPRH")) {
+                output.insert("PRH",
+                              Opm::UnitSystem::measure::pressure,
+                              fip.fip[Model::FIPData::FIP_WEIGHTED_PRESSURE],
+                              data::TargetType::SUMMARY );
+            }
+        }
+
     }
 
 
@@ -539,8 +663,11 @@ namespace Opm
                   bool substep)
     {
         const RestartConfig& restartConfig = eclipseState_.getRestartConfig();
+        const SummaryConfig& summaryConfig = eclipseState_.getSummaryConfig();
         const int reportStepNum = timer.reportStepNum();
+        bool logMessages = output_ && parallelOutput_->isIORank();
         Opm::data::Solution sol = detail::getOutputDataEbos( phaseUsage_, physicalModel, restartConfig, reportStepNum );
+        detail::getSummaryData( sol, phaseUsage_, physicalModel, summaryConfig );
         writeTimeStepWithCellProperties(timer, localState, localWellState, sol, substep);
     }
 }
