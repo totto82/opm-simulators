@@ -69,14 +69,16 @@ namespace Opm {
         const int nperf = wells().well_connpos[nw];
         const int nc = numCells();
 
-#ifndef NDEBUG
         const auto pu = phase_usage_;
         const int np = pu.num_phases;
+#ifndef NDEBUG
 
         // assumes the gas fractions are stored after water fractions
         // WellVariablePositions needs to be changed for 2p runs
         assert (np == 3 || (np == 2 && !pu.phase_used[Gas]) );
 #endif
+        if( np == 2 && pu.phase_used[Gas])
+            std::abort();
 
         // set invDuneD
         invDuneD_.setSize( nw, nw, nw );
@@ -223,10 +225,12 @@ namespace Opm {
                     }
 
                     // add trivial equation for 2p cases (Only support water + oil)
+                    /*
                     if (np == 2) {
                         assert(!active_[ Gas ]);
                         invDuneD_[w][w][flowPhaseToEbosCompIdx(Gas)][flowToEbosPvIdx(Gas)] = 1.0;
                     }
+                    */
 
                     // Store the perforation phase flux for later usage.
                     well_state.perfPhaseRates()[perf*np + p1] = cq_s[p1].value();
@@ -1008,7 +1012,7 @@ namespace Opm {
         {
             bval/=global_nc_;
         }
-        
+
         auto res = residual();
         const int nw = res.size() / np;
 

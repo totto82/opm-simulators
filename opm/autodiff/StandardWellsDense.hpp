@@ -75,7 +75,7 @@ enum WellVariablePositions {
             typedef BlackoilModelParameters ModelParameters;
 
             typedef double Scalar;
-            static const int blocksize = 3;
+            static const int blocksize = BlackoilIndices :: numEq;
             typedef Dune::FieldVector<Scalar, blocksize    > VectorBlockType;
             typedef Dune::FieldMatrix<Scalar, blocksize, blocksize > MatrixBlockType;
             typedef Dune::BCRSMatrix <MatrixBlockType> Mat;
