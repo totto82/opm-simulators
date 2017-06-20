@@ -177,6 +177,7 @@ namespace Opm {
             // update the solution variables in ebos
             if ( timer.lastStepFailed() ) {
                 ebosSimulator_.model().updateFailed();
+	        ebosSimulator_.setReuseResidualandJacobians(false);
             } else {
                 ebosSimulator_.model().advanceTimeLevel();
             }
@@ -313,6 +314,22 @@ namespace Opm {
                 updateState(x);
 
                 report.update_time += perfTimer.stop();
+                ebosSimulator_.setReuseResidualandJacobians(false);
+            } else {
+                //const auto& ebosResid = ebosSimulator_.model().linearizer().residual();
+                //const auto& ebosJac = ebosSimulator_.model().linearizer().matrix();
+
+                //std::cout << "before remove" << std::endl;
+                //std::cout << ebosResid << std::endl;
+                //std::cout << ebosJac[0][0] << std::endl;
+
+                wellModel().assembleWellEq(timer.currentStepLength(), false, true);
+                //std::cout << "after remove" << std::endl;
+                //std::cout << ebosResid << std::endl;
+                //std::cout << ebosJac[0][0] << std::endl;
+
+                ebosSimulator_.setReuseResidualandJacobians(true);
+                ebosSimulator_.setPriviousTimeStepSize(timer.currentStepLength());
             }
 
             return report;
@@ -569,7 +586,6 @@ namespace Opm {
           virtual void apply( const X& x, Y& y ) const
           {
             A_.mv( x, y );
-
             // add well model modification to y
             wellMod_.apply(x, y );
 
@@ -583,7 +599,6 @@ namespace Opm {
           virtual void applyscaleadd (field_type alpha, const X& x, Y& y) const
           {
             A_.usmv(alpha,x,y);
-
             // add scaled well model modification to y
             wellMod_.applyScaleAdd( alpha, x, y );
 
@@ -1083,7 +1098,6 @@ namespace Opm {
         }
 
     private:
-
 
         double dpMaxRel() const { return param_.dp_max_rel_; }
         double dsMax() const { return param_.ds_max_; }

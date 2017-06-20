@@ -232,8 +232,12 @@ namespace Opm
     assembleWellEq(Simulator& ebosSimulator,
                    const double dt,
                    WellState& well_state,
-                   bool only_wells)
+                   bool only_wells,
+                   bool inverse)
     {
+
+        if (inverse)
+            OPM_THROW(std::runtime_error, "reuse + multiseg not supported yet");
 
         const bool use_inner_iterations = param_.use_inner_iterations_ms_wells_;
         if (use_inner_iterations) {

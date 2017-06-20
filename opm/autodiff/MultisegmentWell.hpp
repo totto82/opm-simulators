@@ -116,7 +116,8 @@ namespace Opm
         virtual void assembleWellEq(Simulator& ebosSimulator,
                                     const double dt,
                                     WellState& well_state,
-                                    bool only_wells);
+                                    bool only_wells,
+                                    bool inverse);
 
         /// updating the well state based the control mode specified with current
         // TODO: later will check wheter we need current

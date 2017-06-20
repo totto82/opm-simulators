@@ -168,7 +168,8 @@ namespace Opm
         virtual void assembleWellEq(Simulator& ebosSimulator,
                                     const double dt,
                                     WellState& well_state,
-                                    bool only_wells) = 0;
+                                    bool only_wells,
+                                    bool invert) = 0;
 
         void updateListEconLimited(const WellState& well_state,
                                    DynamicListEconLimited& list_econ_limited) const;

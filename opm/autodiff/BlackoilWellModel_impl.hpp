@@ -274,12 +274,10 @@ namespace Opm {
             // solve the well equations as a pre-processing step
             last_report_ = solveWellEq(dt);
         }
-        assembleWellEq(dt, false);
+        assembleWellEq(dt, false, false);
 
         last_report_.converged = true;
     }
-
-
 
 
 
@@ -287,10 +285,11 @@ namespace Opm {
     void
     BlackoilWellModel<TypeTag>::
     assembleWellEq(const double dt,
-                   bool only_wells)
+                   bool only_wells,
+                   bool inverse)
     {
         for (int w = 0; w < numWells(); ++w) {
-            well_container_[w]->assembleWellEq(ebosSimulator_, dt, well_state_, only_wells);
+            well_container_[w]->assembleWellEq(ebosSimulator_, dt, well_state_, only_wells, inverse);
         }
     }
 
@@ -461,7 +460,7 @@ namespace Opm {
         int it  = 0;
         bool converged;
         do {
-            assembleWellEq(dt, true);
+            assembleWellEq(dt, true, false);
 
             converged = getWellConvergence(B_avg);
 

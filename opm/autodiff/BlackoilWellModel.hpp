@@ -160,6 +160,11 @@ namespace Opm {
                 }
             }
 
+            void assembleWellEq(const double dt,
+                                bool only_wells,
+                                bool inverse);
+
+
         protected:
 
             Simulator& ebosSimulator_;
@@ -255,8 +260,6 @@ namespace Opm {
 
             void resetWellControlFromState() const;
 
-            void assembleWellEq(const double dt,
-                                bool only_wells);
 
             // some preparation work, mostly related to group control and RESV,
             // at the beginning of each time step (Not report step)

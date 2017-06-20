@@ -553,7 +553,8 @@ namespace Opm
     assembleWellEq(Simulator& ebosSimulator,
                    const double dt,
                    WellState& well_state,
-                   bool only_wells)
+                   bool only_wells,
+                   bool inverse)
     {
         const int np = number_of_phases_;
 
@@ -598,6 +599,9 @@ namespace Opm
             }
 
             for (int componentIdx = 0; componentIdx < num_components_; ++componentIdx) {
+
+                if (inverse && !only_wells)
+                    cq_s[componentIdx] *= -1;
                 // the cq_s entering mass balance equations need to consider the efficiency factors.
                 const EvalWell cq_s_effective = cq_s[componentIdx] * well_efficiency_factor_;
 
@@ -627,11 +631,13 @@ namespace Opm
                     }
                 }
 
+                if (!inverse) {
                 // Store the perforation phase flux for later usage.
                 if (has_solvent && componentIdx == contiSolventEqIdx) {
                     well_state.perfRateSolvent()[first_perf_ + perf] = cq_s[componentIdx].value();
                 } else {
                     well_state.perfPhaseRates()[(first_perf_ + perf) * np + ebosCompIdxToFlowCompIdx(componentIdx)] = cq_s[componentIdx].value();
+                }
                 }
             }
 
@@ -653,7 +659,8 @@ namespace Opm
             }
 
             // Store the perforation pressure for later usage.
-            well_state.perfPress()[first_perf_ + perf] = well_state.bhp()[index_of_well_] + perf_pressure_diffs_[perf];
+            if (!inverse)
+                well_state.perfPress()[first_perf_ + perf] = well_state.bhp()[index_of_well_] + perf_pressure_diffs_[perf];
         }
 
         // add vol * dF/dt + Q to the well equations;
