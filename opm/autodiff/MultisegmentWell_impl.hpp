@@ -230,16 +230,15 @@ namespace Opm
     MultisegmentWell<TypeTag>::
     assembleWellEq(Simulator& ebosSimulator,
                    const double dt,
-                   WellState& well_state,
                    bool only_wells)
     {
 
         const bool use_inner_iterations = param_.use_inner_iterations_ms_wells_;
         if (use_inner_iterations) {
-            iterateWellEquations(ebosSimulator, dt, well_state);
+            iterateWellEquations(ebosSimulator, dt);
         }
 
-        assembleWellEqWithoutIteration(ebosSimulator, dt, well_state, only_wells);
+        assembleWellEqWithoutIteration(ebosSimulator, dt, only_wells);
     }
 
 
@@ -249,16 +248,16 @@ namespace Opm
     template <typename TypeTag>
     void
     MultisegmentWell<TypeTag>::
-    updateWellStateWithTarget(WellState& well_state) const
+    updateWellStateWithTarget()
     {
         // Updating well state bas on well control
         // Target values are used as initial conditions for BHP, THP, and SURFACE_RATE
-        const int current = well_state.currentControls()[index_of_well_];
+        const int current = currentControl();
         const double target = well_controls_iget_target(well_controls_, current);
         const double* distr = well_controls_iget_distr(well_controls_, current);
         switch (well_controls_iget_type(well_controls_, current)) {
         case BHP: {
-            well_state.bhp()[index_of_well_] = target;
+            setBhp(target);
             const int top_segment_index = well_state.topSegmentIndex(index_of_well_);
             well_state.segPress()[top_segment_index] = well_state.bhp()[index_of_well_];
             // TODO: similar to the way below to handle THP
@@ -267,7 +266,7 @@ namespace Opm
         }
 
         case THP: {
-            well_state.thp()[index_of_well_] = target;
+            setThp(target);
 
             /* const Opm::PhaseUsage& pu = phaseUsage();
             std::vector<double> rates(3, 0.0);
@@ -326,7 +325,7 @@ namespace Opm
                     }
                 }
 
-                initSegmentRatesWithWellRates(well_state);
+                initSegmentRatesWithWellRates();
 
             } else if (well_type_ == PRODUCER) {
                 // update the rates of phases under control based on the target,
@@ -369,7 +368,7 @@ namespace Opm
             break;
         } // end of switch
 
-        updatePrimaryVariables(well_state);
+        updatePrimaryVariables();
     }
 
 
@@ -379,12 +378,12 @@ namespace Opm
     template <typename TypeTag>
     void
     MultisegmentWell<TypeTag>::
-    initSegmentRatesWithWellRates(WellState& well_state) const
+    initSegmentRatesWithWellRates() const
     {
         for (int phase = 0; phase < number_of_phases_; ++phase) {
-            const double perf_phaserate = well_state.wellRates()[number_of_phases_ * index_of_well_ + phase] / number_of_perforations_;
+            const double perf_phaserate = wellRate(phaseIdxToEnum(phase)) / number_of_perforations_;
             for (int perf = 0; perf < number_of_perforations_; ++perf) {
-                well_state.perfPhaseRates()[number_of_phases_ * (first_perf_ + perf) + phase] = perf_phaserate;
+                setConnectionRate(perf, phaseIdxToEnum(phase)) = perf_phaserate;
             }
         }
 
@@ -522,12 +521,11 @@ namespace Opm
     template <typename TypeTag>
     void
     MultisegmentWell<TypeTag>::
-    recoverWellSolutionAndUpdateWellState(const BVector& x,
-                                          WellState& well_state) const
+    recoverWellSolutionAndUpdateWellState(const BVector& x) const
     {
         BVectorWell xw(1);
         recoverSolutionWell(x, xw);
-        updateWellState(xw, false, well_state);
+        updateWellState(xw, false);
     }
 
 
@@ -538,7 +536,6 @@ namespace Opm
     void
     MultisegmentWell<TypeTag>::
     computeWellPotentials(const Simulator& /* ebosSimulator */,
-                          const WellState& /* well_state */,
                           std::vector<double>& /* well_potentials */)
     {
         OPM_THROW(std::runtime_error, "well potential calculation for multisegment wells is not supported yet");
@@ -551,7 +548,7 @@ namespace Opm
     template <typename TypeTag>
     void
     MultisegmentWell<TypeTag>::
-    updatePrimaryVariables(const WellState& well_state) const
+    updatePrimaryVariables() const
     {
         // TODO: to test using rate conversion coefficients to see if it will be better than
         // this default one
@@ -638,13 +635,13 @@ namespace Opm
     template <typename TypeTag>
     void
     MultisegmentWell<TypeTag>::
-    solveEqAndUpdateWellState(WellState& well_state)
+    solveEqAndUpdateWellState()
     {
         // We assemble the well equations, then we check the convergence,
         // which is why we do not put the assembleWellEq here.
         const BVectorWell dx_well = mswellhelpers::invDXDirect(duneD_, resWell_);
 
-        updateWellState(dx_well, false, well_state);
+        updateWellState(dx_well, false);
     }
 
 
@@ -728,8 +725,7 @@ namespace Opm
     void
     MultisegmentWell<TypeTag>::
     updateWellState(const BVectorWell& dwells,
-                    const bool inner_iteration,
-                    WellState& well_state) const
+                    const bool inner_iteration)
     {
         const bool use_inner_iterations = param_.use_inner_iterations_ms_wells_;
 
@@ -769,7 +765,7 @@ namespace Opm
 
         }
 
-        updateWellStateFromPrimaryVariables(well_state);
+        updateWellStateFromPrimaryVariables();
     }
 
 
@@ -779,8 +775,7 @@ namespace Opm
     template <typename TypeTag>
     void
     MultisegmentWell<TypeTag>::
-    calculateExplicitQuantities(const Simulator& ebosSimulator,
-                                const WellState& /* well_state */)
+    calculateExplicitQuantities(const Simulator& ebosSimulator)
     {
         computePerfCellPressDiffs(ebosSimulator);
         computeInitialComposition();
@@ -1618,7 +1613,7 @@ namespace Opm
     template <typename TypeTag>
     void
     MultisegmentWell<TypeTag>::
-    updateWellStateFromPrimaryVariables(WellState& well_state) const
+    updateWellStateFromPrimaryVariables()
     {
         const PhaseUsage& pu = phaseUsage();
         assert( FluidSystem::phaseIsActive(FluidSystem::oilPhaseIdx) );
@@ -1703,8 +1698,7 @@ namespace Opm
     void
     MultisegmentWell<TypeTag>::
     iterateWellEquations(Simulator& ebosSimulator,
-                         const double dt,
-                         WellState& well_state)
+                         const double dt)
     {
         // basically, it only iterate through the equations.
         // we update the primary variables
@@ -1715,7 +1709,7 @@ namespace Opm
         int it = 0;
         for (; it < max_iter_number; ++it) {
 
-            assembleWellEqWithoutIteration(ebosSimulator, dt, well_state, true);
+            assembleWellEqWithoutIteration(ebosSimulator, dt, true);
 
             const BVectorWell dx_well = mswellhelpers::invDXDirect(duneD_, resWell_);
 
@@ -1732,7 +1726,7 @@ namespace Opm
                 break;
             }
 
-            updateWellState(dx_well, true, well_state);
+            updateWellState(dx_well, true);
 
             initPrimaryVariablesEvaluation();
         }
@@ -1748,7 +1742,6 @@ namespace Opm
     MultisegmentWell<TypeTag>::
     assembleWellEqWithoutIteration(Simulator& ebosSimulator,
                                    const double dt,
-                                   WellState& well_state,
                                    bool only_wells)
     {
         // calculate the fluid properties needed.

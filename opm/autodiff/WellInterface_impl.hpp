@@ -367,13 +367,9 @@ namespace Opm
     template<typename TypeTag>
     void
     WellInterface<TypeTag>::
-    updateWellControl(WellState& well_state,
-                      wellhelpers::WellSwitchingLogger& logger) const
+    updateWellControl(wellhelpers::WellSwitchingLogger& logger)
     {
-        const int np = number_of_phases_;
-        const int w = index_of_well_;
-
-        const int old_control_index = well_state.currentControls()[w];
+        const int old_control_index = currentControl();
 
         // Find, for each well, if any constraints are broken. If so,
         // switch control to first broken constraint.
@@ -384,7 +380,7 @@ namespace Opm
         // handle those.
         const int nwc = well_controls_get_num(wc);
         // the current control index
-        int current = well_state.currentControls()[w];
+        int current = currentControl();
         int ctrl_index = 0;
         for (; ctrl_index < nwc; ++ctrl_index) {
             if (ctrl_index == current) {
@@ -393,23 +389,24 @@ namespace Opm
                 // inequality constraint, and therefore skipped.
                 continue;
             }
-            if (wellhelpers::constraintBroken(
-                    well_state.bhp(), well_state.thp(), well_state.wellRates(),
-                    w, np, well_type_, wc, ctrl_index)) {
-                // ctrl_index will be the index of the broken constraint after the loop.
-                break;
-            }
+#warning Need to rewrite!!!
+//            if (wellhelpers::constraintBroken(
+//                    well_state.bhp(), well_state.thp(), well_state.wellRates(),
+//                    w, np, well_type_, wc, ctrl_index)) {
+//                // ctrl_index will be the index of the broken constraint after the loop.
+//                break;
+//            }
         }
 
         if (ctrl_index != nwc) {
             // Constraint number ctrl_index was broken, switch to it.
-            well_state.currentControls()[w] = ctrl_index;
-            current = well_state.currentControls()[w];
+            setCurrentControl(ctrl_index);
+            current = ctrl_index;
             well_controls_set_current( wc, current);
         }
 
         // the new well control indices after all the related updates,
-        const int updated_control_index = well_state.currentControls()[w];
+        const int updated_control_index = currentControl();
 
         // checking whether control changed
         if (updated_control_index != old_control_index) {
@@ -419,7 +416,7 @@ namespace Opm
         }
 
         if (updated_control_index != old_control_index) { //  || well_collection_->groupControlActive()) {
-            updateWellStateWithTarget(well_state);
+            updateWellStateWithTarget();
         }
     }
 
@@ -430,15 +427,11 @@ namespace Opm
     template<typename TypeTag>
     bool
     WellInterface<TypeTag>::
-    checkRateEconLimits(const WellEconProductionLimits& econ_production_limits,
-                        const WellState& well_state) const
+    checkRateEconLimits(const WellEconProductionLimits& econ_production_limits) const
     {
-        const Opm::PhaseUsage& pu = phaseUsage();
-        const int np = number_of_phases_;
-
         if (econ_production_limits.onMinOilRate()) {
             assert(FluidSystem::phaseIsActive(FluidSystem::oilPhaseIdx));
-            const double oil_rate = well_state.wellRates()[index_of_well_ * np + pu.phase_pos[ Oil ] ];
+            const double oil_rate = wellRate(data::Rates::opt::oil);
             const double min_oil_rate = econ_production_limits.minOilRate();
             if (std::abs(oil_rate) < min_oil_rate) {
                 return true;
@@ -447,7 +440,7 @@ namespace Opm
 
         if (econ_production_limits.onMinGasRate() ) {
             assert(FluidSystem::phaseIsActive(FluidSystem::gasPhaseIdx));
-            const double gas_rate = well_state.wellRates()[index_of_well_ * np + pu.phase_pos[ Gas ] ];
+            const double gas_rate = wellRate(data::Rates::opt::gas);
             const double min_gas_rate = econ_production_limits.minGasRate();
             if (std::abs(gas_rate) < min_gas_rate) {
                 return true;
@@ -457,8 +450,8 @@ namespace Opm
         if (econ_production_limits.onMinLiquidRate() ) {
             assert(FluidSystem::phaseIsActive(FluidSystem::oilPhaseIdx));
             assert(FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx));
-            const double oil_rate = well_state.wellRates()[index_of_well_ * np + pu.phase_pos[ Oil ] ];
-            const double water_rate = well_state.wellRates()[index_of_well_ * np + pu.phase_pos[ Water ] ];
+            const double oil_rate = wellRate(data::Rates::opt::oil);
+            const double water_rate = wellRate(data::Rates::opt::wat);
             const double liquid_rate = oil_rate + water_rate;
             const double min_liquid_rate = econ_production_limits.minLiquidRate();
             if (std::abs(liquid_rate) < min_liquid_rate) {
@@ -481,23 +474,17 @@ namespace Opm
     template<typename TypeTag>
     typename WellInterface<TypeTag>::RatioCheckTuple
     WellInterface<TypeTag>::
-    checkMaxWaterCutLimit(const WellEconProductionLimits& econ_production_limits,
-                          const WellState& well_state) const
+    checkMaxWaterCutLimit(const WellEconProductionLimits& econ_production_limits) const
     {
         bool water_cut_limit_violated = false;
         int worst_offending_connection = INVALIDCONNECTION;
         bool last_connection = false;
         double violation_extent = -1.0;
 
-        const int np = number_of_phases_;
-        const Opm::PhaseUsage& pu = phaseUsage();
-        const int well_number = index_of_well_;
-
         assert(FluidSystem::phaseIsActive(FluidSystem::oilPhaseIdx));
         assert(FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx));
-
-        const double oil_rate = well_state.wellRates()[well_number * np + pu.phase_pos[ Oil ] ];
-        const double water_rate = well_state.wellRates()[well_number * np + pu.phase_pos[ Water ] ];
+        const double oil_rate = wellRate(data::Rates::opt::oil);
+        const double water_rate = wellRate(data::Rates::opt::wat);
         const double liquid_rate = oil_rate + water_rate;
         double water_cut;
         if (std::abs(liquid_rate) != 0.) {
@@ -513,14 +500,12 @@ namespace Opm
 
         if (water_cut_limit_violated) {
             // need to handle the worst_offending_connection
-            const int perf_start = first_perf_;
             const int perf_number = number_of_perforations_;
 
             std::vector<double> water_cut_perf(perf_number);
             for (int perf = 0; perf < perf_number; ++perf) {
-                const int i_perf = perf_start + perf;
-                const double oil_perf_rate = well_state.perfPhaseRates()[i_perf * np + pu.phase_pos[ Oil ] ];
-                const double water_perf_rate = well_state.perfPhaseRates()[i_perf * np + pu.phase_pos[ Water ] ];
+                const double oil_perf_rate = connectionRate(perf, data::Rates::opt::oil);
+                const double water_perf_rate = connectionRate(perf, data::Rates::opt::wat);
                 const double liquid_perf_rate = oil_perf_rate + water_perf_rate;
                 if (std::abs(liquid_perf_rate) != 0.) {
                     water_cut_perf[perf] = water_perf_rate / liquid_perf_rate;
@@ -560,8 +545,7 @@ namespace Opm
     template<typename TypeTag>
     typename WellInterface<TypeTag>::RatioCheckTuple
     WellInterface<TypeTag>::
-    checkRatioEconLimits(const WellEconProductionLimits& econ_production_limits,
-                         const WellState& well_state) const
+    checkRatioEconLimits(const WellEconProductionLimits& econ_production_limits) const
     {
         // TODO: not sure how to define the worst-offending connection when more than one
         //       ratio related limit is violated.
@@ -577,7 +561,7 @@ namespace Opm
         double violation_extent = -1.0;
 
         if (econ_production_limits.onMaxWaterCut()) {
-            const RatioCheckTuple water_cut_return = checkMaxWaterCutLimit(econ_production_limits, well_state);
+            const RatioCheckTuple water_cut_return = checkMaxWaterCutLimit(econ_production_limits);
             bool water_cut_violated = std::get<0>(water_cut_return);
             if (water_cut_violated) {
                 any_limit_violated = true;
@@ -617,8 +601,7 @@ namespace Opm
     template<typename TypeTag>
     void
     WellInterface<TypeTag>::
-    updateListEconLimited(const WellState& well_state,
-                          DynamicListEconLimited& list_econ_limited) const
+    updateListEconLimited(DynamicListEconLimited& list_econ_limited) const
     {
         // economic limits only apply for production wells.
         if (wellType() != PRODUCER) {
@@ -646,7 +629,7 @@ namespace Opm
         }
 
         if (econ_production_limits.onAnyRateLimit()) {
-            rate_limit_violated = checkRateEconLimits(econ_production_limits, well_state);
+            rate_limit_violated = checkRateEconLimits(econ_production_limits);
         }
 
         if (rate_limit_violated) {
@@ -678,7 +661,7 @@ namespace Opm
         RatioCheckTuple ratio_check_return;
 
         if (econ_production_limits.onAnyRatioLimit()) {
-            ratio_check_return = checkRatioEconLimits(econ_production_limits, well_state);
+            ratio_check_return = checkRatioEconLimits(econ_production_limits);
             ratio_limits_violated = std::get<0>(ratio_check_return);
         }
 
@@ -847,23 +830,169 @@ namespace Opm
 
     template<typename TypeTag>
     void
-    WellInterface<TypeTag>::calculateReservoirRates(WellState& well_state) const
+    WellInterface<TypeTag>::calculateReservoirRates()
     {
         const int fipreg = 0; // not considering the region for now
         const int np = number_of_phases_;
 
         std::vector<double> surface_rates(np, 0.0);
-        const int well_rate_index = np * index_of_well_;
         for (int p = 0; p < np; ++p) {
-            surface_rates[p] = well_state.wellRates()[well_rate_index + p];
+            surface_rates[p] = wellRate(phaseIdxToEnum(p));
         }
 
         std::vector<double> voidage_rates(np, 0.0);
         rateConverter_.calcReservoirVoidageRates(fipreg, pvtRegionIdx_, surface_rates, voidage_rates);
 
         for (int p = 0; p < np; ++p) {
-            well_state.wellReservoirRates()[well_rate_index + p] = voidage_rates[p];
+            setWellRate(phaseIdxToEnum(p, /*reservoir_rate*/ true), voidage_rates[p]);
         }
     }
+
+
+    //state
+    template<typename TypeTag>
+    const double
+    WellInterface<TypeTag>:: bhp() const
+    {
+        return well_data_.bhp;
+
+    }
+
+    template<typename TypeTag>
+    void
+    WellInterface<TypeTag>:: setBhp(const double& value)
+    {
+        well_data_.bhp = value;
+
+    }
+
+    template<typename TypeTag>
+    const double
+    WellInterface<TypeTag>:: thp() const
+    {
+        return well_data_.thp;
+    }
+
+    template<typename TypeTag>
+    void
+    WellInterface<TypeTag>:: setThp(const double& value)
+    {
+        well_data_.thp = value;
+    }
+
+    template<typename TypeTag>
+    const double
+    WellInterface<TypeTag>:: temperature() const
+    {
+        return well_data_.temperature;
+    }
+
+    template<typename TypeTag>
+    void
+    WellInterface<TypeTag>:: setTemperature(const double& value)
+    {
+        well_data_.temperature = value;
+    }
+
+    template<typename TypeTag>
+    const int
+    WellInterface<TypeTag>:: currentControl() const
+    {
+        return well_data_.control;
+    }
+
+    template<typename TypeTag>
+    void
+    WellInterface<TypeTag>:: setCurrentControl(int control)
+    {
+        well_data_.control = control;
+    }
+
+    template<typename TypeTag>
+    const double
+    WellInterface<TypeTag>:: wellRate(const data::Rates::opt opt) const
+    {
+        return well_data_.rates.get(opt);
+    }
+
+    template<typename TypeTag>
+    void
+    WellInterface<TypeTag>:: setWellRate(const data::Rates::opt opt, const double& value)
+    {
+        well_data_.rates.set(opt, value);
+    }
+
+    template<typename TypeTag>
+    const double
+    WellInterface<TypeTag>:: connectionPressure(const int connectionIdx) const
+    {
+#warning rename to connection()
+        return well_data_.completions[connectionIdx].pressure;
+    }
+
+    template<typename TypeTag>
+    void
+    WellInterface<TypeTag>:: setConnectionPressure(const int connectionIdx, const double& value)
+    {
+#warning rename to connection()
+        well_data_.completions[connectionIdx].pressure = value;
+    }
+
+    template<typename TypeTag>
+    const double
+    WellInterface<TypeTag>:: connectionRate(const int connectionIdx, const data::Rates::opt opt) const
+    {
+        return well_data_.completions[connectionIdx].rates.get(opt);
+    }
+
+    template<typename TypeTag>
+    void
+    WellInterface<TypeTag>:: setConnectionRate(const int connectionIdx, const data::Rates::opt opt, const double& value)
+    {
+        well_data_.completions[connectionIdx].rates.set(opt, value);
+    }
+
+
+
+    template<typename TypeTag>
+    data::Rates::opt
+    WellInterface<TypeTag>:: phaseIdxToEnum(const int phaseIdx, bool reservoir) const
+    {
+        using rt = data::Rates::opt;
+
+        if( FluidSystem::waterPhaseIdx == phaseIdx ) {
+            return reservoir? rt::reservoir_water : rt::wat ;
+        }
+
+        if( FluidSystem::oilPhaseIdx == phaseIdx ) {
+            return reservoir? rt::reservoir_oil : rt::oil;
+        }
+
+        if( FluidSystem::gasPhaseIdx == phaseIdx ) {
+            return reservoir? rt::reservoir_gas : rt::gas;
+        }
+
+    }
+
+    template<typename TypeTag>
+    data::Rates::opt
+    WellInterface<TypeTag>:: compIdxToEnum(const int compIdx, bool reservoir) const
+    {
+        using rt = data::Rates::opt;
+
+        if( FluidSystem::waterCompIdx == compIdx ) {
+            return reservoir? rt::reservoir_water : rt::wat ;
+        }
+
+        if( FluidSystem::oilCompIdx == compIdx ) {
+            return reservoir? rt::reservoir_oil : rt::oil;
+        }
+
+        if( FluidSystem::gasCompIdx == compIdx ) {
+            return reservoir? rt::reservoir_gas : rt::gas;
+        }
+
+    }
+
 
 }

@@ -111,6 +111,28 @@ namespace Opm {
         // create the well container
         well_container_ = createWellContainer(timeStepIdx);
 
+        well_container_.erase(std::remove_if(std::begin(well_container_), std::end(well_container_),
+                                          [](const WellInterfacePtr& well) { return well->name() == "PROD01"; } ), std::end(well_container_));
+        // remove a well
+
+//        for (auto& well : well_container_) {
+//            if(well->name() == "PROD01");
+//                well_container_.remove(*well);
+//        }
+
+//        for (size_t i = 0; i < well_container_.size(); ++i) {
+//            if (well_container_[i]->name() == "PROD01")
+//                well_container_.remove();
+//        }
+//        for (auto it = well_container_.begin(); it != well_container_.end(); ) {
+//            if (it->name() == "PROD01") {
+//                it = well_container_.erase(it);
+//            } else {
+//                ++it;
+//            }
+//        }
+
+
         // do the initialization for all the wells
         // TODO: to see whether we can postpone of the intialization of the well containers to
         // optimize the usage of the following several member variables
@@ -188,7 +210,7 @@ namespace Opm {
         // TODO: when necessary
         rateConverter_->template defineState<ElementContext>(ebosSimulator_);
         for (const auto& well : well_container_) {
-            well->calculateReservoirRates(well_state_);
+            well->calculateReservoirRates();
         }
 
         previous_well_state_ = well_state_;
@@ -242,9 +264,6 @@ namespace Opm {
         }
         return well_container;
     }
-
-
-
 
 
     template<typename TypeTag>
@@ -302,7 +321,7 @@ namespace Opm {
                    bool only_wells)
     {
         for (int w = 0; w < numWells(); ++w) {
-            well_container_[w]->assembleWellEq(ebosSimulator_, dt, well_state_, only_wells);
+            well_container_[w]->assembleWellEq(ebosSimulator_, dt, only_wells);
         }
     }
 
@@ -380,7 +399,7 @@ namespace Opm {
             return;
 
         for (auto& well : well_container_) {
-            well->recoverWellSolutionAndUpdateWellState(x, well_state_);
+            well->recoverWellSolutionAndUpdateWellState(x);
         }
     }
 
@@ -390,15 +409,12 @@ namespace Opm {
     template<typename TypeTag>
     void
     BlackoilWellModel<TypeTag>::
-    resetWellControlFromState() const
+    resetWellControlFromState()
     {
-        const int        nw   = numWells();
-
-        assert(nw == int(well_container_.size()) );
-
-        for (int w = 0; w < nw; ++w) {
-            WellControls* wc = well_container_[w]->wellControls();
-            well_controls_set_current( wc, well_state_.currentControls()[w]);
+       for (auto& well : well_container_) {
+            WellControls* wc = well->wellControls();
+            const int control = 0; // well->currentControl();
+            well_controls_set_current( wc, control);
         }
     }
 
@@ -490,7 +506,7 @@ namespace Opm {
             if( localWellsActive() )
             {
                 for (auto& well : well_container_) {
-                    well->solveEqAndUpdateWellState(well_state_);
+                    well->solveEqAndUpdateWellState();
                 }
             }
             // updateWellControls uses communication
@@ -595,7 +611,7 @@ namespace Opm {
     calculateExplicitQuantities() const
     {
          for (auto& well : well_container_) {
-             well->calculateExplicitQuantities(ebosSimulator_, well_state_);
+             well->calculateExplicitQuantities(ebosSimulator_);
          }
     }
 
@@ -619,7 +635,7 @@ namespace Opm {
         wellhelpers::WellSwitchingLogger logger;
 
         for (const auto& well : well_container_) {
-            well->updateWellControl(well_state_, logger);
+            well->updateWellControl(logger);
         }
 
         updateGroupControls();
@@ -635,7 +651,7 @@ namespace Opm {
     updateListEconLimited(DynamicListEconLimited& list_econ_limited) const
     {
         for (const auto& well : well_container_) {
-            well->updateListEconLimited(well_state_, list_econ_limited);
+            well->updateListEconLimited(list_econ_limited);
         }
     }
 
@@ -653,7 +669,7 @@ namespace Opm {
 
         for (int w = 0; w < nw; ++w) {
             std::vector<double> potentials;
-            well_container_[w]->computeWellPotentials(ebosSimulator_, well_state_, potentials);
+            well_container_[w]->computeWellPotentials(ebosSimulator_, potentials);
 
             // putting the sucessfully calculated potentials to the well_potentials
             for (int p = 0; p < np; ++p) {
@@ -693,7 +709,7 @@ namespace Opm {
             well_state_.currentControls()[w] = control;
             // TODO: for VFP control, the perf_densities are still zero here, investigate better
             // way to handle it later.
-            well_container_[w]->updateWellStateWithTarget(well_state_);
+            well_container_[w]->updateWellStateWithTarget();
 
             // The wells are not considered to be newly added
             // for next time step
@@ -939,7 +955,7 @@ namespace Opm {
             wellCollection().updateWellTargets(well_state_.wellRates());
 
             for (int w = 0; w < numWells(); ++w) {
-                well_container_[w]->updateWellStateWithTarget(well_state_);
+                well_container_[w]->updateWellStateWithTarget();
             }
         }
     }
@@ -1042,7 +1058,7 @@ namespace Opm {
     updatePrimaryVariables()
     {
         for (const auto& well : well_container_) {
-            well->updatePrimaryVariables(well_state_);
+            well->updatePrimaryVariables();
         }
     }
 

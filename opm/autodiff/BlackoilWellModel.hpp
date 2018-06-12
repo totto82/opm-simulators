@@ -318,7 +318,7 @@ namespace Opm {
 
             int numPhases() const;
 
-            void resetWellControlFromState() const;
+            void resetWellControlFromState();
 
             void assembleWellEq(const double dt,
                                 bool only_wells);

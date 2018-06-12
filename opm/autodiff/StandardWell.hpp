@@ -41,7 +41,7 @@ namespace Opm
         // dealing with derivatives. It can be beneficial to make functions can work with either AD or scalar value.
         // And also, it can also be beneficial to make these functions hanle different types of AD variables.
         using typename Base::Simulator;
-        using typename Base::WellState;
+        //using typename Base::WellState;
         using typename Base::IntensiveQuantities;
         using typename Base::FluidSystem;
         using typename Base::MaterialLaw;
@@ -83,7 +83,7 @@ namespace Opm
         // the index for Bhp in primary variables and also the index of well control equation
         // they both will be the last one in their respective system.
         // TODO: we should have indices for the well equations and well primary variables separately
-        static const int Bhp = numWellEq - numWellControlEq;
+        static const int BhpIdx = numWellEq - numWellControlEq;
 
         using typename Base::Scalar;
         using typename Base::ConvergenceReport;
@@ -137,12 +137,11 @@ namespace Opm
 
         virtual void assembleWellEq(Simulator& ebosSimulator,
                                     const double dt,
-                                    WellState& well_state,
                                     bool only_wells);
 
         /// updating the well state based the control mode specified with current
         // TODO: later will check wheter we need current
-        virtual void updateWellStateWithTarget(WellState& well_state) const;
+        virtual void updateWellStateWithTarget();
 
         /// check whether the well equations get converged for this well
         virtual ConvergenceReport getWellConvergence(const std::vector<double>& B_avg) const;
@@ -154,20 +153,17 @@ namespace Opm
 
         /// using the solution x to recover the solution xw for wells and applying
         /// xw to update Well State
-        virtual void recoverWellSolutionAndUpdateWellState(const BVector& x,
-                                                           WellState& well_state) const;
+        virtual void recoverWellSolutionAndUpdateWellState(const BVector& x);
 
         /// computing the well potentials for group control
         virtual void computeWellPotentials(const Simulator& ebosSimulator,
-                                           const WellState& well_state,
                                            std::vector<double>& well_potentials) /* const */;
 
-        virtual void updatePrimaryVariables(const WellState& well_state) const;
+        virtual void updatePrimaryVariables() const;
 
-        virtual void solveEqAndUpdateWellState(WellState& well_state);
+        virtual void solveEqAndUpdateWellState();
 
-        virtual void calculateExplicitQuantities(const Simulator& ebosSimulator,
-                                                 const WellState& well_state); // should be const?
+        virtual void calculateExplicitQuantities(const Simulator& ebosSimulator); // should be const?
 
         virtual void  addWellContributions(Mat& mat) const;
 
@@ -188,6 +184,24 @@ namespace Opm
         using Base::wellHasTHPConstraints;
         using Base::mostStrictBhpFromBhpLimits;
         using Base::scalingFactor;
+
+        using Base::bhp;
+        using Base::setBhp;
+        using Base::thp;
+        using Base::setThp;
+        using Base::temperature;
+        using Base::setTemperature;
+        using Base::currentControl;
+        using Base::setCurrentControl;
+        using Base::wellRate;
+        using Base::setWellRate;
+        using Base::connectionPressure;
+        using Base::setConnectionPressure;
+        using Base::connectionRate;
+        using Base::setConnectionRate;
+        using Base::phaseIdxToEnum;
+        using Base::compIdxToEnum;
+
 
         // protected member variables from the Base class
         using Base::current_step_;
@@ -213,6 +227,8 @@ namespace Opm
         using Base::perf_rep_radius_;
         using Base::perf_length_;
         using Base::bore_diameters_;
+
+        using Base::well_data_;
 
         // densities of the fluid in each perforation
         std::vector<double> perf_densities_;
@@ -262,17 +278,15 @@ namespace Opm
         void recoverSolutionWell(const BVector& x, BVectorWell& xw) const;
 
         // updating the well_state based on well solution dwells
-        void updateWellState(const BVectorWell& dwells,
-                             WellState& well_state) const;
+        void updateWellState(const BVectorWell& dwells);
 
         // calculate the properties for the well connections
         // to calulate the pressure difference between well connections.
         void computePropertiesForWellConnectionPressures(const Simulator& ebosSimulator,
-                                                         const WellState& well_state,
                                                          std::vector<double>& b_perf,
                                                          std::vector<double>& rsmax_perf,
                                                          std::vector<double>& rvmax_perf,
-                                                         std::vector<double>& surf_dens_perf) const;
+                                                         std::vector<double>& surf_dens_perf);
 
         // TODO: not total sure whether it is a good idea to put this function here
         // the major reason to put here is to avoid the usage of Wells struct
@@ -284,8 +298,7 @@ namespace Opm
 
         void computeConnectionPressureDelta();
 
-        void computeWellConnectionDensitesPressures(const WellState& well_state,
-                                                    const std::vector<double>& b_perf,
+        void computeWellConnectionDensitesPressures(const std::vector<double>& b_perf,
                                                     const std::vector<double>& rsmax_perf,
                                                     const std::vector<double>& rvmax_perf,
                                                     const std::vector<double>& surf_dens_perf);
@@ -293,8 +306,7 @@ namespace Opm
         // computing the accumulation term for later use in well mass equations
         void computeAccumWell();
 
-        void computeWellConnectionPressures(const Simulator& ebosSimulator,
-                                                    const WellState& well_state);
+        void computeWellConnectionPressures(const Simulator& ebosSimulator);
 
         // TODO: to check whether all the paramters are required
         void computePerfRate(const IntensiveQuantities& intQuants,
@@ -327,12 +339,11 @@ namespace Opm
                                             const int perf,
                                             std::vector<EvalWell>& mob_water) const;
 
-        void updatePrimaryVariablesNewton(const BVectorWell& dwells,
-                                          const WellState& well_state) const;
+        void updatePrimaryVariablesNewton(const BVectorWell& dwells) const;
 
-        void updateWellStateFromPrimaryVariables(WellState& well_state) const;
+        void updateWellStateFromPrimaryVariables();
 
-        void updateThp(WellState& well_state) const;
+        void updateThp() const;
 
         void assembleControlEq();
 

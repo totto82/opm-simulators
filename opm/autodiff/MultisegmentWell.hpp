@@ -115,12 +115,11 @@ namespace Opm
 
         virtual void assembleWellEq(Simulator& ebosSimulator,
                                     const double dt,
-                                    WellState& well_state,
                                     bool only_wells);
 
         /// updating the well state based the control mode specified with current
         // TODO: later will check wheter we need current
-        virtual void updateWellStateWithTarget(WellState& well_state) const;
+        virtual void updateWellStateWithTarget();
 
         /// check whether the well equations get converged for this well
         virtual ConvergenceReport getWellConvergence(const std::vector<double>& B_avg) const;
@@ -132,20 +131,17 @@ namespace Opm
 
         /// using the solution x to recover the solution xw for wells and applying
         /// xw to update Well State
-        virtual void recoverWellSolutionAndUpdateWellState(const BVector& x,
-                                                           WellState& well_state) const;
+        virtual void recoverWellSolutionAndUpdateWellState(const BVector& x) const;
 
         /// computing the well potentials for group control
         virtual void computeWellPotentials(const Simulator& ebosSimulator,
-                                           const WellState& well_state,
                                            std::vector<double>& well_potentials);
 
-        virtual void updatePrimaryVariables(const WellState& well_state) const;
+        virtual void updatePrimaryVariables() const;
 
-        virtual void solveEqAndUpdateWellState(WellState& well_state); // const?
+        virtual void solveEqAndUpdateWellState(); // const?
 
-        virtual void calculateExplicitQuantities(const Simulator& ebosSimulator,
-                                                 const WellState& well_state); // should be const?
+        virtual void calculateExplicitQuantities(const Simulator& ebosSimulator); // should be const?
 
         /// number of segments for this well
         /// int number_of_segments_;
@@ -192,6 +188,23 @@ namespace Opm
         using Base::ebosCompIdxToFlowCompIdx;
         using Base::getAllowCrossFlow;
         using Base::scalingFactor;
+
+        using Base::bhp;
+        using Base::setBhp;
+        using Base::thp;
+        using Base::setThp;
+        using Base::temperature;
+        using Base::setTemperature;
+        using Base::currentControl;
+        using Base::setCurrentControl;
+        using Base::wellRate;
+        using Base::setWellRate;
+        using Base::connectionPressure;
+        using Base::setConnectionPressure;
+        using Base::connectionRate;
+        using Base::setConnectionRate;
+        using Base::phaseIdxToEnum;
+        using Base::compIdxToEnum;
 
         // TODO: trying to use the information from the Well opm-parser as much
         // as possible, it will possibly be re-implemented later for efficiency reason.
@@ -266,13 +279,12 @@ namespace Opm
 
         // updating the well_state based on well solution dwells
         void updateWellState(const BVectorWell& dwells,
-                             const bool inner_iteration,
-                             WellState& well_state) const;
+                             const bool inner_iteration);
 
         // initialize the segment rates with well rates
         // when there is no more accurate way to initialize the segment rates, we initialize
         // the segment rates based on well rates with a simple strategy
-        void initSegmentRatesWithWellRates(WellState& well_state) const;
+        void initSegmentRatesWithWellRates() const;
 
         // computing the accumulation term for later use in well mass equations
         void computeInitialComposition();
@@ -331,7 +343,7 @@ namespace Opm
         // handling the overshooting and undershooting of the fractions
         void processFractions(const int seg) const;
 
-        void updateWellStateFromPrimaryVariables(WellState& well_state) const;
+        void updateWellStateFromPrimaryVariables();
 
         bool frictionalPressureLossConsidered() const;
 
@@ -339,12 +351,10 @@ namespace Opm
 
         // TODO: try to make ebosSimulator const, as it should be
         void iterateWellEquations(Simulator& ebosSimulator,
-                                  const double dt,
-                                  WellState& well_state);
+                                  const double dt);
 
         void assembleWellEqWithoutIteration(Simulator& ebosSimulator,
                                             const double dt,
-                                            WellState& well_state,
                                             bool only_wells);
     };
 

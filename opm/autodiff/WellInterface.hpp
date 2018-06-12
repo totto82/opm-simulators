@@ -65,6 +65,31 @@ namespace Opm
     public:
 
         using WellState = WellStateFullyImplicitBlackoil;
+//        class WellState {
+//        public:
+
+//            double& bhp(){ return bhp_;}
+//            double& thp(){ return thp_;}
+//            double& temperature(){ return temperature_;}
+//            int& control(){ return control_;}
+//            double& wellRate(int phaseIdx) { return wellRates_[phaseIdx]; }
+//            double& solventRate() { return solventRate_; }
+
+//            const double& bhp() const { return bhp_;}
+//            const double& thp() const { return thp_;}
+//            const double& temperature() const { return temperature_;}
+//            const int& control() const { return control_;}
+//            const double& wellRate(int phaseIdx) const { return wellRates_[phaseIdx]; }
+//            const double& solventRate() const { return solventRate_; }
+
+//            private:
+//            double bhp_;
+//            double thp_;
+//            double temperature_;
+//            int control_;
+//            std::vector<double> wellRates_;
+//            double solventRate_;
+//        };
 
         typedef BlackoilModelParameters ModelParameters;
 
@@ -164,15 +189,13 @@ namespace Opm
 
         virtual ConvergenceReport getWellConvergence(const std::vector<double>& B_avg) const = 0;
 
-        virtual void solveEqAndUpdateWellState(WellState& well_state) = 0;
+        virtual void solveEqAndUpdateWellState() = 0;
 
         virtual void assembleWellEq(Simulator& ebosSimulator,
                                     const double dt,
-                                    WellState& well_state,
                                     bool only_wells) = 0;
 
-        void updateListEconLimited(const WellState& well_state,
-                                   DynamicListEconLimited& list_econ_limited) const;
+        void updateListEconLimited(DynamicListEconLimited& list_econ_limited) const;
 
         void setWellEfficiencyFactor(const double efficiency_factor);
 
@@ -180,8 +203,7 @@ namespace Opm
 
         /// using the solution x to recover the solution xw for wells and applying
         /// xw to update Well State
-        virtual void recoverWellSolutionAndUpdateWellState(const BVector& x,
-                                                           WellState& well_state) const = 0;
+        virtual void recoverWellSolutionAndUpdateWellState(const BVector& x) = 0;
 
         /// Ax = Ax - C D^-1 B x
         virtual void apply(const BVector& x, BVector& Ax) const = 0;
@@ -191,18 +213,15 @@ namespace Opm
 
         // TODO: before we decide to put more information under mutable, this function is not const
         virtual void computeWellPotentials(const Simulator& ebosSimulator,
-                                           const WellState& well_state,
                                            std::vector<double>& well_potentials) = 0;
 
-        virtual void updateWellStateWithTarget(WellState& well_state) const = 0;
+        virtual void updateWellStateWithTarget() = 0;
 
-        void updateWellControl(WellState& well_state,
-                               wellhelpers::WellSwitchingLogger& logger) const;
+        void updateWellControl(wellhelpers::WellSwitchingLogger& logger);
 
-        virtual void updatePrimaryVariables(const WellState& well_state) const = 0;
+        virtual void updatePrimaryVariables() const = 0;
 
-        virtual void calculateExplicitQuantities(const Simulator& ebosSimulator,
-                                                 const WellState& well_state) = 0; // should be const?
+        virtual void calculateExplicitQuantities(const Simulator& ebosSimulator) = 0; // should be const?
 
         /// \brief Wether the Jacobian will also have well contributions in it.
         virtual bool jacobianContainsWellContributions() const
@@ -211,7 +230,7 @@ namespace Opm
         }
 
         // updating the voidage rates in well_state when requested
-        void calculateReservoirRates(WellState& well_state) const;
+        void calculateReservoirRates();
 
         // Add well contributions to matrix
         virtual void addWellContributions(Mat&) const
@@ -295,6 +314,29 @@ namespace Opm
 
         const int num_components_;
 
+
+        // only update every timestep
+        data::Well well_data_;
+
+        //state
+        const double bhp() const;
+        void setBhp(const double& value);
+        const double thp() const;
+        void setThp(const double& value);
+        const double temperature() const;
+        void setTemperature(const double& value);
+        const int currentControl() const;
+        void setCurrentControl(const int control);
+        const double wellRate(const data::Rates::opt opt) const;
+        void setWellRate(const data::Rates::opt opt, const double& value);
+        const double connectionPressure(const int connectionIdx) const;
+        void setConnectionPressure(const int connectionIdx, const double& value);
+        const double connectionRate(const int connectionIdx, const data::Rates::opt opt) const;
+        void setConnectionRate(const int connectionIdx, const data::Rates::opt opt, const double& value);
+
+        data::Rates::opt phaseIdxToEnum(const int phaseIdx, bool reservoir=false) const;
+        data::Rates::opt compIdxToEnum(const int compIdx, bool reservoir=false) const;
+
         const PhaseUsage& phaseUsage() const;
 
         int flowPhaseToEbosCompIdx( const int phaseIdx ) const;
@@ -305,8 +347,7 @@ namespace Opm
 
         double wpolymer() const;
 
-        bool checkRateEconLimits(const WellEconProductionLimits& econ_production_limits,
-                                 const WellState& well_state) const;
+        bool checkRateEconLimits(const WellEconProductionLimits& econ_production_limits) const;
 
         bool wellHasTHPConstraints() const;
 
@@ -324,13 +365,12 @@ namespace Opm
         // the ratio of the actual value to the value of the violated limit.
         using RatioCheckTuple = std::tuple<bool, bool, int, double>;
 
-        RatioCheckTuple checkMaxWaterCutLimit(const WellEconProductionLimits& econ_production_limits,
-                                              const WellState& well_state) const;
+        RatioCheckTuple checkMaxWaterCutLimit(const WellEconProductionLimits& econ_production_limits) const;
 
-        RatioCheckTuple checkRatioEconLimits(const WellEconProductionLimits& econ_production_limits,
-                                             const WellState& well_state) const;
+        RatioCheckTuple checkRatioEconLimits(const WellEconProductionLimits& econ_production_limits) const;
 
         double scalingFactor(const int comp_idx) const;
+
 
     };
 
