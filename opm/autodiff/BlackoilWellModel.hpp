@@ -50,7 +50,6 @@
 #include <opm/autodiff/StandardWell.hpp>
 #include <opm/autodiff/MultisegmentWell.hpp>
 #include <opm/autodiff/Compat.hpp>
-#include<opm/autodiff/SimFIBODetails.hpp>
 #include<dune/common/fmatrix.hh>
 #include<dune/istl/bcrsmatrix.hh>
 #include<dune/istl/matrixmatrix.hh>
@@ -318,8 +317,6 @@ namespace Opm {
 
             int numPhases() const;
 
-            void resetWellControlFromState() const;
-
             void assembleWellEq(const double dt,
                                 bool only_wells);
 
@@ -328,8 +325,6 @@ namespace Opm {
             void prepareTimeStep();
 
             void prepareGroupControl();
-
-            void computeRESV(const std::size_t step);
 
             void extractLegacyCellPvtRegionIndex_();
 

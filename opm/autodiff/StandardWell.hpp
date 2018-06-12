@@ -206,9 +206,12 @@ namespace Opm
         using Base::comp_frac_;
         using Base::well_index_;
         using Base::index_of_well_;
-        using Base::well_controls_;
         using Base::well_type_;
         using Base::num_components_;
+        using Base::rateConverter_;
+        using Base::pvtRegionIdx_;
+
+        using Base::current_control_;
 
         using Base::perf_rep_radius_;
         using Base::perf_length_;
@@ -314,9 +317,9 @@ namespace Opm
                                                         const std::vector<double>& initial_potential) const;
 
         template <class ValueType>
-        ValueType calculateBhpFromThp(const std::vector<ValueType>& rates, const int control_index) const;
+        ValueType calculateBhpFromThp(const std::vector<ValueType>& rates) const;
 
-        double calculateThpFromBhp(const std::vector<double>& rates, const int control_index, const double bhp) const;
+        double calculateThpFromBhp(const std::vector<double>& rates, const double bhp) const;
 
         // get the mobility for specific perforation
         void getMobility(const Simulator& ebosSimulator,

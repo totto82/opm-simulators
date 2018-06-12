@@ -28,6 +28,8 @@
 #include <opm/common/Exceptions.hpp>
 
 #include <opm/parser/eclipse/EclipseState/Schedule/Well.hpp>
+#include <opm/parser/eclipse/EclipseState/Schedule/ScheduleEnums.hpp>
+
 #include <opm/core/wells.h>
 #include <opm/core/well_controls.h>
 #include <opm/core/props/BlackoilPhases.hpp>
@@ -197,7 +199,7 @@ namespace Opm
         virtual void updateWellStateWithTarget(WellState& well_state) const = 0;
 
         void updateWellControl(WellState& well_state,
-                               wellhelpers::WellSwitchingLogger& logger) const;
+                               wellhelpers::WellSwitchingLogger& logger);
 
         virtual void updatePrimaryVariables(const WellState& well_state) const = 0;
 
@@ -294,6 +296,9 @@ namespace Opm
         const int pvtRegionIdx_;
 
         const int num_components_;
+
+#warning store ControlModeEnum instead how to deal with different type for injector and producer?
+        std::string current_control_;
 
         const PhaseUsage& phaseUsage() const;
 

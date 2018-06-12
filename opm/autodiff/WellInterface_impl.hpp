@@ -76,6 +76,14 @@ namespace Opm
         }
 
         well_controls_ = wells->ctrls[index_well];
+        if (well_ecl_->isInjector(current_step_))
+        {
+            const WellInjectionProperties& injectionProperties = well_ecl_->getInjectionProperties(current_step_);
+            current_control_ = WellInjector::ControlMode2String(injectionProperties.controlMode);
+        } else {
+            const WellProductionProperties& productionProperties = well_ecl_->getProductionProperties(current_step_);
+            current_control_ = WellProducer::ControlMode2String(productionProperties.controlMode);
+        }
 
         ref_depth_ = wells->depth_ref[index_well];
 
@@ -300,47 +308,14 @@ namespace Opm
     WellInterface<TypeTag>::
     mostStrictBhpFromBhpLimits() const
     {
-        double bhp;
-
-        // initial bhp value, making the value not usable
-        switch( well_type_ ) {
-        case INJECTOR:
-            bhp = std::numeric_limits<double>::max();
-            break;
-        case PRODUCER:
-            bhp = -std::numeric_limits<double>::max();
-            break;
-        default:
-            OPM_THROW(std::logic_error, "Expected PRODUCER or INJECTOR type for well " << name());
+        if (well_ecl_->isInjector(current_step_))
+        {
+            const WellInjectionProperties& injectionProperties = well_ecl_->getInjectionProperties(current_step_);
+            return std::min(std::numeric_limits<double>::max(),injectionProperties.BHPLimit);
         }
-
-        // The number of the well controls/constraints
-        const int nwc = well_controls_get_num(well_controls_);
-
-        for (int ctrl_index = 0; ctrl_index < nwc; ++ctrl_index) {
-            // finding a BHP constraint
-            if (well_controls_iget_type(well_controls_, ctrl_index) == BHP) {
-                // get the bhp constraint value, it should always be postive assummingly
-                const double bhp_target = well_controls_iget_target(well_controls_, ctrl_index);
-
-                switch(well_type_) {
-                case INJECTOR: // using the lower bhp contraint from Injectors
-                    if (bhp_target < bhp) {
-                        bhp = bhp_target;
-                    }
-                    break;
-                case PRODUCER:
-                    if (bhp_target > bhp) {
-                        bhp = bhp_target;
-                    }
-                    break;
-                default:
-                    OPM_THROW(std::logic_error, "Expected PRODUCER or INJECTOR type for well " << name());
-                } // end of switch
-            }
-        }
-
-        return bhp;
+        // else producer
+        const WellProductionProperties& productionProperties = well_ecl_->getProductionProperties(current_step_);
+        return std::max(-std::numeric_limits<double>::max(),productionProperties.BHPLimit);
     }
 
 
@@ -351,16 +326,15 @@ namespace Opm
     WellInterface<TypeTag>::
     wellHasTHPConstraints() const
     {
-        const int nwc = well_controls_get_num(well_controls_);
-        for (int ctrl_index = 0; ctrl_index < nwc; ++ctrl_index) {
-            if (well_controls_iget_type(well_controls_, ctrl_index) == THP) {
-                return true;
-            }
+        if (well_ecl_->isInjector(current_step_))
+        {
+            const WellInjectionProperties& injectionProperties = well_ecl_->getInjectionProperties(current_step_);
+            return injectionProperties.hasInjectionControl(WellInjector::THP);
         }
-        return false;
+        // else producer
+        const WellProductionProperties& productionProperties = well_ecl_->getProductionProperties(current_step_);
+        return productionProperties.hasProductionControl(WellProducer::THP);
     }
-
-
 
 
 
@@ -368,59 +342,240 @@ namespace Opm
     void
     WellInterface<TypeTag>::
     updateWellControl(WellState& well_state,
-                      wellhelpers::WellSwitchingLogger& logger) const
+                      wellhelpers::WellSwitchingLogger& logger)
     {
-        const int np = number_of_phases_;
-        const int w = index_of_well_;
 
-        const int old_control_index = well_state.currentControls()[w];
+        const PhaseUsage& pu = phaseUsage();
+        if (well_ecl_->isInjector(current_step_))
+        {
+            const WellInjectionProperties& injectionProperties = well_ecl_->getInjectionProperties(current_step_);
+            WellInjector::ControlModeEnum current = WellInjector::ControlModeFromString(current_control_);
 
-        // Find, for each well, if any constraints are broken. If so,
-        // switch control to first broken constraint.
-        WellControls* wc = well_controls_;
+            if (injectionProperties.hasInjectionControl(WellInjector::RATE) && current != WellInjector::RATE)
+            {
+                // this can be simplified when well_state is refactored
+                double rate = 0.;
+                switch(injectionProperties.injectorType) {
+                case(WellInjector::WATER): {
+                    assert(FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx));
+                    rate = well_state.wellRates()[index_of_well_*number_of_phases_ + pu.phase_pos[ Water ] ];
+                    break;
+                }
+                case(WellInjector::OIL): {
+                    assert(FluidSystem::phaseIsActive(FluidSystem::oilPhaseIdx));
+                    rate = well_state.wellRates()[index_of_well_*number_of_phases_ + pu.phase_pos[ Oil ] ];
+                    break;
+                }
+                case(WellInjector::GAS): {
+                    assert(FluidSystem::phaseIsActive(FluidSystem::gasPhaseIdx));
+                    rate = well_state.wellRates()[index_of_well_*number_of_phases_ + pu.phase_pos[ Gas ] ];
+                    break;
+                }
+                case(WellInjector::MULTI): {
+                    OPM_THROW(std::runtime_error, "MULTI control for injector not supported " << name());
+                }
 
-        // Loop over all controls except the current one, and also
-        // skip any RESERVOIR_RATE controls, since we cannot
-        // handle those.
-        const int nwc = well_controls_get_num(wc);
-        // the current control index
-        int current = well_state.currentControls()[w];
-        int ctrl_index = 0;
-        for (; ctrl_index < nwc; ++ctrl_index) {
-            if (ctrl_index == current) {
-                // This is the currently used control, so it is
-                // used as an equation. So this is not used as an
-                // inequality constraint, and therefore skipped.
-                continue;
+                }
+
+                if (rate > injectionProperties.surfaceInjectionRate) {
+#warning TODO make a logger to avoid copy
+                    std::ostringstream ss;
+                    ss << "    Switching control mode for well " << name()
+                       << " from " << WellInjector::ControlMode2String(current)
+                       << " to " << WellInjector::ControlMode2String(WellInjector::RATE);
+                    OpmLog::info(ss.str());
+                    current = WellInjector::RATE;
+                }
             }
-            if (wellhelpers::constraintBroken(
-                    well_state.bhp(), well_state.thp(), well_state.wellRates(),
-                    w, np, well_type_, wc, ctrl_index)) {
-                // ctrl_index will be the index of the broken constraint after the loop.
-                break;
+            if (injectionProperties.hasInjectionControl(WellInjector::RESV) && current != WellInjector::RESV)
+            {
+                std::vector<double> rates(number_of_phases_, 0.);
+                if (FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx)) {
+                    rates[ Water ] = well_state.wellRates()[index_of_well_*number_of_phases_ + pu.phase_pos[ Water ] ];
+                }
+                if (FluidSystem::phaseIsActive(FluidSystem::oilPhaseIdx)) {
+                    rates[ Oil ] =  well_state.wellRates()[index_of_well_*number_of_phases_ + pu.phase_pos[ Oil ] ];
+                }
+                if (FluidSystem::phaseIsActive(FluidSystem::gasPhaseIdx)) {
+                    rates[ Gas ] =  well_state.wellRates()[index_of_well_*number_of_phases_ + pu.phase_pos[ Gas ] ];
+                }
+
+                std::vector<double> rates_resv(number_of_phases_);
+                rateConverter_.calcReservoirVoidageRates(/*fipreg*/ 0, pvtRegionIdx_, rates, rates_resv);
+                double rate = std::accumulate(rates_resv.begin(), rates_resv.end(), 0.0);
+
+
+                if (rate > injectionProperties.reservoirInjectionRate) {
+                    std::ostringstream ss;
+                    ss << "    Switching control mode for well " << name()
+                       << " from " << WellInjector::ControlMode2String(current)
+                       << " to " << WellInjector::ControlMode2String(WellInjector::RESV);
+                    OpmLog::info(ss.str());
+                    current = WellInjector::RESV;
+                }
             }
+
+            if (injectionProperties.hasInjectionControl(WellInjector::THP) && current != WellInjector::THP)
+            {
+                if (well_state.thp()[index_of_well_] > injectionProperties.THPLimit) {
+                    std::ostringstream ss;
+                    ss << "    Switching control mode for well " << name()
+                       << " from " << WellInjector::ControlMode2String(current)
+                       << " to " << WellInjector::ControlMode2String(WellInjector::THP);
+                    OpmLog::info(ss.str());
+                    current = WellInjector::THP;
+                }
+            }
+            if (injectionProperties.hasInjectionControl(WellInjector::BHP) && current != WellInjector::BHP)
+            {
+                if (well_state.bhp()[index_of_well_] > injectionProperties.BHPLimit) {
+                    std::ostringstream ss;
+                    ss << "    Switching control mode for well " << name()
+                       << " from " << WellInjector::ControlMode2String(current)
+                       << " to " << WellInjector::ControlMode2String(WellInjector::BHP);
+                    OpmLog::info(ss.str());
+                    current = WellInjector::BHP;
+                }
+            }
+            if (injectionProperties.hasInjectionControl(WellInjector::GRUP) && current != WellInjector::GRUP)
+            {
+#warning need to think about this
+            }
+            // update the current control
+            current_control_ = WellInjector::ControlMode2String(current);
+        }
+        //Producer
+        else
+        {
+            const WellProductionProperties& productionProperties = well_ecl_->getProductionProperties(current_step_);
+            WellProducer::ControlModeEnum current = WellProducer::ControlModeFromString(current_control_);
+
+            if (productionProperties.hasProductionControl(WellProducer::ORAT) && current != WellProducer::ORAT)
+            {
+                assert(FluidSystem::phaseIsActive(FluidSystem::oilPhaseIdx));
+                double rate = - well_state.wellRates()[index_of_well_*number_of_phases_ + pu.phase_pos[ Oil ] ];
+                if (rate > productionProperties.OilRate) {
+                    std::ostringstream ss;
+                    ss << "    Switching control mode for well " << name()
+                       << " from " << WellProducer::ControlMode2String(current)
+                       << " to " << WellProducer::ControlMode2String(WellProducer::ORAT);
+                    OpmLog::info(ss.str());
+                    current = WellProducer::ORAT;
+                }
+            }
+            if (productionProperties.hasProductionControl(WellProducer::WRAT) && current != WellProducer::WRAT)
+            {
+                assert(FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx));
+                double rate = - well_state.wellRates()[index_of_well_*number_of_phases_ + pu.phase_pos[Water] ];
+                if (rate > productionProperties.WaterRate) {
+                    std::ostringstream ss;
+                    ss << "    Switching control mode for well " << name()
+                       << " from " << WellProducer::ControlMode2String(current)
+                       << " to " << WellProducer::ControlMode2String(WellProducer::WRAT);
+                    OpmLog::info(ss.str());
+                    current = WellProducer::WRAT;
+                }
+            }
+            if (productionProperties.hasProductionControl(WellProducer::GRAT) && current != WellProducer::GRAT)
+            {
+                assert(FluidSystem::phaseIsActive(FluidSystem::gasPhaseIdx));
+                double rate =  - well_state.wellRates()[index_of_well_*number_of_phases_ + pu.phase_pos[Gas] ];
+
+                if (rate > productionProperties.GasRate) {
+                    std::ostringstream ss;
+                    ss << "    Switching control mode for well " << name()
+                       << " from " << WellProducer::ControlMode2String(current)
+                       << " to " << WellProducer::ControlMode2String(WellProducer::GRAT);
+                    OpmLog::info(ss.str());
+                    current = WellProducer::GRAT;
+                }
+            }
+            if (productionProperties.hasProductionControl(WellProducer::LRAT) && current != WellProducer::LRAT)
+            {
+                assert(FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx));
+                assert(FluidSystem::phaseIsActive(FluidSystem::oilPhaseIdx));
+                double rate = - (well_state.wellRates()[index_of_well_*number_of_phases_ + pu.phase_pos[Water] ] + well_state.wellRates()[index_of_well_*number_of_phases_ + pu.phase_pos[Oil] ]);
+                if (rate > productionProperties.LiquidRate) {
+                    std::ostringstream ss;
+                    ss << "    Switching control mode for well " << name()
+                       << " from " << WellProducer::ControlMode2String(current)
+                       << " to " << WellProducer::ControlMode2String(WellProducer::LRAT);
+                    OpmLog::info(ss.str());
+                    current = WellProducer::LRAT;
+                }
+            }
+            if (productionProperties.hasProductionControl(WellProducer::CRAT) && current != WellProducer::CRAT)
+            {
+                OPM_THROW(std::runtime_error, "CRAT control not supported " << name());
+            }
+            if (productionProperties.hasProductionControl(WellProducer::RESV) && current != WellProducer::RESV)
+            {
+                std::vector<double> rates(number_of_phases_, 0.);
+                if (FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx)) {
+                    rates[ Water ] = - well_state.wellRates()[index_of_well_*number_of_phases_ + pu.phase_pos[ Water ] ];
+                }
+                if (FluidSystem::phaseIsActive(FluidSystem::oilPhaseIdx)) {
+                    rates[ Oil ] =  - well_state.wellRates()[index_of_well_*number_of_phases_ + pu.phase_pos[ Oil ] ];
+                }
+                if (FluidSystem::phaseIsActive(FluidSystem::gasPhaseIdx)) {
+                    rates[ Gas ] =  - well_state.wellRates()[index_of_well_*number_of_phases_ + pu.phase_pos[ Gas ] ];
+                }
+                std::vector<double> rates_resv(number_of_phases_, 0.);
+                rateConverter_.calcReservoirVoidageRates(/*fipreg*/ 0, pvtRegionIdx_, rates, rates_resv);
+                double rate = std::accumulate(rates_resv.begin(), rates_resv.end(), 0.0);
+
+                if (rate > productionProperties.ResVRate) {
+                    std::ostringstream ss;
+                    ss << "    Switching control mode for well " << name()
+                       << " from " << WellProducer::ControlMode2String(current)
+                       << " to " << WellProducer::ControlMode2String(WellProducer::RESV);
+                    OpmLog::info(ss.str());
+                    current = WellProducer::RESV;
+                }
+            }
+            if (productionProperties.hasProductionControl(WellProducer::BHP) && current != WellProducer::BHP)
+            {
+                if (well_state.bhp()[index_of_well_] < productionProperties.BHPLimit) {
+                    std::ostringstream ss;
+                    ss << "    Switching control mode for well " << name()
+                       << " from " << WellProducer::ControlMode2String(current)
+                       << " to " << WellProducer::ControlMode2String(WellProducer::BHP);
+                    OpmLog::info(ss.str());
+                    current = WellProducer::BHP;
+                }
+            }
+            if (productionProperties.hasProductionControl(WellProducer::THP) && current != WellProducer::THP)
+            {
+                if (well_state.thp()[index_of_well_] < productionProperties.THPLimit) {
+                    std::ostringstream ss;
+                    ss << "    Switching control mode for well " << name()
+                       << " from " << WellProducer::ControlMode2String(current)
+                       << " to " << WellProducer::ControlMode2String(WellProducer::THP);
+                    OpmLog::info(ss.str());
+                    current = WellProducer::THP;
+                }
+            }
+            if (productionProperties.hasProductionControl(WellProducer::GRUP) && current != WellProducer::GRUP)
+            {
+#warning need to think about this
+            }
+
+            current_control_ = WellProducer::ControlMode2String(current);
         }
 
-        if (ctrl_index != nwc) {
-            // Constraint number ctrl_index was broken, switch to it.
-            well_state.currentControls()[w] = ctrl_index;
-            current = well_state.currentControls()[w];
-            well_controls_set_current( wc, current);
-        }
+//        // the new well control indices after all the related updates,
+//        const int updated_control_index = well_state.currentControls()[w];
 
-        // the new well control indices after all the related updates,
-        const int updated_control_index = well_state.currentControls()[w];
+//        // checking whether control changed
+//        if (updated_control_index != old_control_index) {
+//            logger.wellSwitched(name(),
+//                                well_controls_iget_type(wc, old_control_index),
+//                                well_controls_iget_type(wc, updated_control_index));
+//        }
 
-        // checking whether control changed
-        if (updated_control_index != old_control_index) {
-            logger.wellSwitched(name(),
-                                well_controls_iget_type(wc, old_control_index),
-                                well_controls_iget_type(wc, updated_control_index));
-        }
-
-        if (updated_control_index != old_control_index) { //  || well_collection_->groupControlActive()) {
-            updateWellStateWithTarget(well_state);
-        }
+//        if (updated_control_index != old_control_index) { //  || well_collection_->groupControlActive()) {
+//            //updateWellStateWithTarget(well_state);
+//        }
     }
 
 
@@ -814,18 +969,17 @@ namespace Opm
     double
     WellInterface<TypeTag>::scalingFactor(const int phaseIdx) const
     {
-        const WellControls* wc = well_controls_;
-        const double* distr = well_controls_get_current_distr(wc);
-
-        if (well_controls_get_current_type(wc) == RESERVOIR_RATE) {
+        if (current_control_ == "RESV") {
             if (has_solvent && phaseIdx == contiSolventEqIdx ) {
                 typedef Ewoms::BlackOilSolventModule<TypeTag> SolventModule;
                 double coeff = 0;
-                rateConverter_.template calcCoeffSolvent<SolventModule>(0, pvtRegionIdx_, coeff);
+                rateConverter_.template calcCoeffSolvent<SolventModule>(/*fipreg*/ 0, pvtRegionIdx_, coeff);
                 return coeff;
+            } else {
+                std::vector<double> coeff (number_of_phases_);
+                rateConverter_.template calcCoeff(/*fipreg*/ 0, pvtRegionIdx_, coeff);
+                return coeff[phaseIdx];
             }
-            // TODO: use the rateConverter here as well.
-            return distr[phaseIdx];
         }
         const auto& pu = phaseUsage();
         if (FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx) && pu.phase_pos[Water] == phaseIdx)

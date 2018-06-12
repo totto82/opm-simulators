@@ -106,7 +106,8 @@ namespace Opm {
         // Compute reservoir volumes for RESV controls.
         rateConverter_.reset(new RateConverterType (phase_usage_,
                                          std::vector<int>(number_of_cells_, 0)));
-        computeRESV(timeStepIdx);
+
+        rateConverter_->template defineState<ElementContext>(ebosSimulator_);
 
         // create the well container
         well_container_ = createWellContainer(timeStepIdx);
@@ -386,26 +387,6 @@ namespace Opm {
 
 
 
-
-    template<typename TypeTag>
-    void
-    BlackoilWellModel<TypeTag>::
-    resetWellControlFromState() const
-    {
-        const int        nw   = numWells();
-
-        assert(nw == int(well_container_.size()) );
-
-        for (int w = 0; w < nw; ++w) {
-            WellControls* wc = well_container_[w]->wellControls();
-            well_controls_set_current( wc, well_state_.currentControls()[w]);
-        }
-    }
-
-
-
-
-
     template<typename TypeTag>
     bool
     BlackoilWellModel<TypeTag>::
@@ -461,7 +442,6 @@ namespace Opm {
     BlackoilWellModel<TypeTag>::
     solveWellEq(const double dt)
     {
-        const int nw = numWells();
         WellState well_state0 = well_state_;
 
         const int numComp = numComponents();
@@ -514,11 +494,6 @@ namespace Opm {
 
             well_state_ = well_state0;
             updatePrimaryVariables();
-            // also recover the old well controls
-            for (int w = 0; w < nw; ++w) {
-                WellControls* wc = well_container_[w]->wellControls();
-                well_controls_set_current(wc, well_state_.currentControls()[w]);
-            }
         }
 
         SimulatorReport report;
@@ -681,16 +656,12 @@ namespace Opm {
         // we need to synchronize these two.
         // keep in mind that we set the control index of well_state to be the same with
         // with the wellControls from the deck when we create well_state at the beginning of the report step
-        resetWellControlFromState();
 
         // process group control related
         prepareGroupControl();
 
         // since the controls are all updated, we should update well_state accordingly
         for (int w = 0; w < numWells(); ++w) {
-            WellControls* wc = well_container_[w]->wellControls();
-            const int control = well_controls_get_current(wc);
-            well_state_.currentControls()[w] = control;
             // TODO: for VFP control, the perf_densities are still zero here, investigate better
             // way to handle it later.
             well_container_[w]->updateWellStateWithTarget(well_state_);
@@ -1121,148 +1092,5 @@ namespace Opm {
         }
     }
 
-
-    template<typename TypeTag>
-    void
-    BlackoilWellModel<TypeTag>::
-    computeRESV(const std::size_t step)
-    {
-        typedef SimFIBODetails::WellMap WellMap;
-
-        const WellMap& wmap = SimFIBODetails::mapWells(wells_ecl_);
-
-        const std::vector<int>& resv_wells = SimFIBODetails::resvWells(wells(), step, wmap);
-
-        int global_number_resv_wells = resv_wells.size();
-        global_number_resv_wells = ebosSimulator_.gridView().comm().sum(global_number_resv_wells);
-        if ( global_number_resv_wells > 0 )
-        {
-            rateConverter_->template defineState<ElementContext>(ebosSimulator_);
-        }
-
-        if (! resv_wells.empty()) {
-            const PhaseUsage&                    pu = phase_usage_;
-            const std::vector<double>::size_type np = pu.num_phases;
-
-            std::vector<double> distr (np);
-            std::vector<double> hrates(np);
-
-            for (std::vector<int>::const_iterator
-                     rp = resv_wells.begin(), e = resv_wells.end();
-                 rp != e; ++rp)
-            {
-                WellControls* ctrl = wells()->ctrls[*rp];
-                const bool is_producer = wells()->type[*rp] == PRODUCER;
-                const int well_cell_top = wells()->well_cells[wells()->well_connpos[*rp]];
-                const int pvtreg = pvt_region_idx_[well_cell_top];
-
-                // RESV control mode, all wells
-                {
-                    const int rctrl = SimFIBODetails::resv_control(ctrl);
-
-                    if (0 <= rctrl) {
-                        const int fipreg = 0; // Hack.  Ignore FIP regions.
-                        rateConverter_->calcCoeff(fipreg, pvtreg, distr);
-
-                        if (!is_producer) { // injectors
-                            well_controls_assert_number_of_phases(ctrl, np);
-
-                            // original distr contains 0 and 1 to indicate phases under control
-                            const double* old_distr = well_controls_get_current_distr(ctrl);
-
-                            for (size_t p = 0; p < np; ++p) {
-                                distr[p] *= old_distr[p];
-                            }
-                        }
-
-                        well_controls_iset_distr(ctrl, rctrl, & distr[0]);
-                    }
-                }
-
-                // RESV control, WCONHIST wells.  A bit of duplicate
-                // work, regrettably.
-                if (is_producer && wells()->name[*rp] != 0) {
-                    WellMap::const_iterator i = wmap.find(wells()->name[*rp]);
-
-                    if (i != wmap.end()) {
-                        const auto* wp = i->second;
-
-                        const WellProductionProperties& p =
-                            wp->getProductionProperties(step);
-
-                        if (! p.predictionMode) {
-                            // History matching (WCONHIST/RESV)
-                            SimFIBODetails::historyRates(pu, p, hrates);
-
-                            const int fipreg = 0; // Hack.  Ignore FIP regions.
-                            rateConverter_->calcCoeff(fipreg, pvtreg, distr);
-
-                            // WCONHIST/RESV target is sum of all
-                            // observed phase rates translated to
-                            // reservoir conditions.  Recall sign
-                            // convention: Negative for producers.
-                            std::vector<double> hrates_resv(np);
-                            rateConverter_->calcReservoirVoidageRates(fipreg, pvtreg, hrates, hrates_resv);
-                            const double target = -std::accumulate(hrates_resv.begin(), hrates_resv.end(), 0.0);
-
-                            well_controls_clear(ctrl);
-                            well_controls_assert_number_of_phases(ctrl, int(np));
-
-                            static const double invalid_alq = -std::numeric_limits<double>::max();
-                            static const int invalid_vfp = -std::numeric_limits<int>::max();
-
-                            const int ok_resv =
-                                well_controls_add_new(RESERVOIR_RATE, target,
-                                                      invalid_alq, invalid_vfp,
-                                                      & distr[0], ctrl);
-
-                            // For WCONHIST the BHP limit is set to 1 atm.
-                            // or a value specified using WELTARG
-                            double bhp_limit = (p.BHPLimit > 0) ? p.BHPLimit : unit::convert::from(1.0, unit::atm);
-                            const int ok_bhp =
-                                well_controls_add_new(BHP, bhp_limit,
-                                                      invalid_alq, invalid_vfp,
-                                                      NULL, ctrl);
-
-                            if (ok_resv != 0 && ok_bhp != 0) {
-                                well_state_.currentControls()[*rp] = 0;
-                                well_controls_set_current(ctrl, 0);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        if( wells() )
-        {
-            for (int w = 0, nw = numWells(); w < nw; ++w) {
-                WellControls* ctrl = wells()->ctrls[w];
-                const bool is_producer = wells()->type[w] == PRODUCER;
-                if (!is_producer && wells()->name[w] != 0) {
-                    WellMap::const_iterator i = wmap.find(wells()->name[w]);
-                    if (i != wmap.end()) {
-                        const auto* wp = i->second;
-                        const WellInjectionProperties& injector = wp->getInjectionProperties(step);
-                        if (!injector.predictionMode) {
-                            //History matching WCONINJEH
-                            static const double invalid_alq = -std::numeric_limits<double>::max();
-                            static const int invalid_vfp = -std::numeric_limits<int>::max();
-                            // For WCONINJEH the BHP limit is set to a large number
-                            // or a value specified using WELTARG
-                            double bhp_limit = (injector.BHPLimit > 0) ? injector.BHPLimit : std::numeric_limits<double>::max();
-                            const int ok_bhp =
-                                well_controls_add_new(BHP, bhp_limit,
-                                                      invalid_alq, invalid_vfp,
-                                                      NULL, ctrl);
-                            if (!ok_bhp) {
-                                OPM_THROW(std::runtime_error, "Failed to add well control.");
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
 
 } // namespace Opm
