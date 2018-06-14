@@ -25,12 +25,12 @@ namespace Opm
 
     template<typename TypeTag>
     StandardWell<TypeTag>::
-    StandardWell(const Well* well, const int time_step, const Wells* wells,
+    StandardWell(const Well* well, const Group& group, const int time_step, const Wells* wells,
                  const ModelParameters& param,
                  const RateConverterType& rate_converter,
                  const int pvtRegionIdx,
                  const int num_components)
-    : Base(well, time_step, wells, param, rate_converter, pvtRegionIdx, num_components)
+    : Base(well, group, time_step, wells, param, rate_converter, pvtRegionIdx, num_components)
     , perf_densities_(number_of_perforations_)
     , perf_pressure_diffs_(number_of_perforations_)
     , primary_variables_(numWellEq, 0.0)
@@ -674,6 +674,42 @@ namespace Opm
              case WellInjector::GRUP:
              {
 #warning need to think about group control
+                 //control_eq = getQs(groupComponentIdx()) - guideRate()*groupTarget()
+
+
+             case GroupInjection::NONE:
+                 {
+                     //nothing
+                     break;
+                 }
+                 case GroupInjection::RATE:
+                 { GroupInjection::ControlEnum gcontrol = GroupInjection::RATE;
+                     switch(gcontrol) {
+                     // control_eq = getQs(groupComponentIdx()) - guideRate()*group_.
+                     break;
+                     }
+                 case GroupInjection::RESV:
+                     {
+                         // control_eq = getQs(groupComponentIdx()) - guideRate()*groupTarget()
+                         break;
+                     }
+                     case GroupInjection::REIN:
+                     {
+                         // control_eq = getQs(groupComponentIdx()) - guideRate()*groupTarget()
+                         break;
+                     }
+                     case GroupInjection::VREP:
+                     {
+                         // control_eq = getQs(groupComponentIdx()) - guideRate()*groupTarget()
+                         break;
+                     }
+                     case GroupInjection::FIELD:
+                     {
+                         // ????
+                         break;
+                     }
+
+                     }
                  break;
              }
              case WellInjector::CMODE_UNDEFINED:
@@ -771,6 +807,14 @@ namespace Opm
              case WellProducer::GRUP:
              {
 #warning need to think about group control
+                 // ORAT, WRAT, GRAT
+                 //control_eq = -getQs(groupComponentIdx()) - guideRate()*groupTarget()
+
+                 //LRAT
+                 //control_eq = -(getQs(Oil) + getQs(Water)) - guideRate()*groupTarget()
+
+                 //RESV
+                 //control_eq = -getWQTotal() - guideRate()*groupTarget()
                  break;
              }
              case WellProducer::CMODE_UNDEFINED:

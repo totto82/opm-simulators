@@ -25,7 +25,7 @@ namespace Opm
 
     template<typename TypeTag>
     WellInterface<TypeTag>::
-    WellInterface(const Well* well, const int time_step, const Wells* wells,
+    WellInterface(const Well* well, const Group& group, const int time_step, const Wells* wells,
                   const ModelParameters& param,
                   const RateConverterType& rate_converter,
                   const int pvtRegionIdx,
@@ -111,6 +111,36 @@ namespace Opm
         }
 
         well_efficiency_factor_ = 1.0;
+
+
+        // Implement group control
+
+        guideRate_ = well_ecl_->getGuideRate(time_step);
+        //update guideRate based on well_potensial
+
+        //control_eq inj
+        if (well_type_ == INJECTOR)
+        {
+            switch (group.getInjectionPhase(time_step)) {
+            case Phase::OIL:
+                groupCompIdx_ = Indices::canonicalToActiveComponentIndex(FluidSystem::gasCompIdx);
+                break;
+            case Phase::GAS:
+                groupCompIdx_ = Indices::canonicalToActiveComponentIndex(FluidSystem::gasCompIdx);
+                break;
+            case Phase::WATER:
+                groupCompIdx_ = Indices::canonicalToActiveComponentIndex(FluidSystem::gasCompIdx);
+                break;
+            default:
+                OPM_THROW(std::runtime_error, "Only OIL, GAS and WATER phase is supported for group injection. Issue in well "  + name() );
+                break;
+            }
+            groupTarget_ = group.getInjectionRate(time_step) * group.getGroupEfficiencyFactor(time_step);
+        } else {
+
+        }
+
+
     }
 
 
@@ -1019,5 +1049,30 @@ namespace Opm
             well_state.wellReservoirRates()[well_rate_index + p] = voidage_rates[p];
         }
     }
+
+    template<typename TypeTag>
+    int
+    WellInterface<TypeTag>::groupComponentIdx() const
+    {
+
+        return groupCompIdx_;
+
+    }
+
+    template<typename TypeTag>
+    double
+    WellInterface<TypeTag>::guideRate() const
+    {
+        return guideRate_;
+    }
+
+    template<typename TypeTag>
+    double
+    WellInterface<TypeTag>::groupTarget() const
+    {
+        return groupTarget_;
+    }
+
+
 
 }

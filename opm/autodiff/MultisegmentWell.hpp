@@ -99,7 +99,7 @@ namespace Opm
         // TODO: for now, we only use one type to save some implementation efforts, while improve later.
         typedef DenseAd::Evaluation<double, /*size=*/numEq + numWellEq> EvalWell;
 
-        MultisegmentWell(const Well* well, const int time_step, const Wells* wells,
+        MultisegmentWell(const Well* well, const Group& group, const int time_step, const Wells* wells,
                          const ModelParameters& param,
                          const RateConverterType& rate_converter,
                          const int pvtRegionIdx,

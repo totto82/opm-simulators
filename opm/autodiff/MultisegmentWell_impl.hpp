@@ -27,12 +27,12 @@ namespace Opm
 
     template <typename TypeTag>
     MultisegmentWell<TypeTag>::
-    MultisegmentWell(const Well* well, const int time_step, const Wells* wells,
+    MultisegmentWell(const Well* well, const Group& group, const int time_step, const Wells* wells,
                      const ModelParameters& param,
                      const RateConverterType& rate_converter,
                      const int pvtRegionIdx,
                      const int num_components)
-    : Base(well, time_step, wells, param, rate_converter, pvtRegionIdx, num_components)
+    : Base(well, group, time_step, wells, param, rate_converter, pvtRegionIdx, num_components)
     , segment_perforations_(numberOfSegments())
     , segment_inlets_(numberOfSegments())
     , cell_perforation_depth_diffs_(number_of_perforations_, 0.0)

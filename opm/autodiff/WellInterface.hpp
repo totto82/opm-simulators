@@ -103,7 +103,7 @@ namespace Opm
         SurfaceToReservoirVoidage<FluidSystem, std::vector<int> >;
 
         /// Constructor
-        WellInterface(const Well* well, const int time_step, const Wells* wells,
+        WellInterface(const Well* well, const Group& group, const int time_step, const Wells* wells,
                       const ModelParameters& param,
                       const RateConverterType& rate_converter,
                       const int pvtRegionIdx,
@@ -300,6 +300,12 @@ namespace Opm
 #warning store ControlModeEnum instead how to deal with different type for injector and producer?
         std::string current_control_;
 
+        int groupCompIdx_;
+
+        double guideRate_;
+
+        double groupTarget_;
+
         const PhaseUsage& phaseUsage() const;
 
         int flowPhaseToEbosCompIdx( const int phaseIdx ) const;
@@ -336,6 +342,15 @@ namespace Opm
                                              const WellState& well_state) const;
 
         double scalingFactor(const int comp_idx) const;
+
+        int groupComponentIdx() const;
+
+        double guideRate() const;
+
+        double groupTarget() const;
+
+
+
 
     };
 
