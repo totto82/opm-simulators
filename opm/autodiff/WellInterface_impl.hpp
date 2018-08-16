@@ -782,7 +782,7 @@ namespace Opm
     void
     WellInterface<TypeTag>::
     computeRepRadiusPerfLength(const Grid& grid,
-                               const std::map<int, int>& cartesian_to_compressed)
+                               const std::vector<int>& cartesian_to_compressed)
     {
         const int* cart_dims = Opm::UgGridHelpers::cartDims(grid);
         auto cell_to_faces = Opm::UgGridHelpers::cell2Faces(grid);
@@ -809,12 +809,12 @@ namespace Opm
 
                 const int* cpgdim = cart_dims;
                 const int cart_grid_indx = i + cpgdim[0]*(j + cpgdim[1]*k);
-                const std::map<int, int>::const_iterator cgit = cartesian_to_compressed.find(cart_grid_indx);
-                if (cgit == cartesian_to_compressed.end()) {
+                const int cell = cartesian_to_compressed[cart_grid_indx];
+
+                if (cell < 0) {
                     OPM_THROW(std::runtime_error, "Cell with i,j,k indices " << i << ' ' << j << ' '
                               << k << " not found in grid (well = " << name() << ')');
                 }
-                const int cell = cgit->second;
 
                 {
                     double radius = connection.rw();
@@ -930,7 +930,7 @@ namespace Opm
         bool converged;
         WellState well_state0 = well_state;
         do {
-            assembleWellEq(ebosSimulator, dt, well_state, true);
+            assembleWellEq(ebosSimulator, dt, well_state);
 
             ConvergenceReport report;
             report = getWellConvergence(B_avg);
@@ -956,6 +956,7 @@ namespace Opm
             if ( terminal_output ) {
                 OpmLog::debug("WellTest: Well equation for well" +name() + " solution failed in getting converged with " + std::to_string(it) + " iterations");
             }
+            well_state = well_state0;
         }
     }
 }
