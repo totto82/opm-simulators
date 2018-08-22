@@ -192,6 +192,10 @@ public:
             wellModel_().initFromRestartFile(*restartValues);
         }
 
+        // beginReportStep(...) wants to know when we are at the
+        // beginning of a restart
+        bool firstRestartStep = isRestart();
+
         AquiferModel aquifer_model(ebosSimulator_);
 
         // Main simulation loop.
@@ -203,23 +207,25 @@ public:
                 OpmLog::debug(ss.str());
             }
 
-            // Run a multiple steps of the solver depending on the time step control.
-            solverTimer.start();
-
-            auto solver = createSolver(wellModel_(), aquifer_model);
-            solver->model().beginReportStep();
 
             // write the inital state at the report stage
             if (timer.initialStep()) {
                 Dune::Timer perfTimer;
                 perfTimer.start();
 
-                // No per cell data is written for initial step, but will be
-                // for subsequent steps, when we have started simulating
+                wellModel_().beginReportStep(timer.currentStepNum());
                 ebosSimulator_.problem().writeOutput(false);
 
                 report.output_write_time += perfTimer.stop();
             }
+
+            // Run a multiple steps of the solver depending on the time step control.
+            solverTimer.start();
+
+            auto solver = createSolver(wellModel_(), aquifer_model);
+
+            solver->model().beginReportStep(firstRestartStep);
+            firstRestartStep = false;
 
             if (terminalOutput_) {
                 std::ostringstream stepMsg;

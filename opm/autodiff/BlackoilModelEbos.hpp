@@ -952,9 +952,9 @@ namespace Opm {
         BlackoilAquiferModel<TypeTag>&
         aquiferModel() { return aquifer_model_; }
 
-        void beginReportStep()
+        void beginReportStep(bool isRestart)
         {
-            ebosSimulator_.problem().beginEpisode();
+            ebosSimulator_.problem().beginEpisode(isRestart);
         }
 
         void endReportStep()

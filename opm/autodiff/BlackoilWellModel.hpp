@@ -160,7 +160,14 @@ namespace Opm {
                               const Opm::Schedule& schedule,
                               bool isRestart)
             {
-                beginReportStep(ebosSimulator_.episodeIndex());
+                size_t episodeIdx = ebosSimulator_.episodeIndex();
+                // beginEpisode in eclProblem advances the episode index
+                // we don't want this when we are at the beginning of an
+                // restart.
+                if (isRestart)
+                    episodeIdx -= 1;
+
+                beginReportStep(episodeIdx);
             }
 
             void beginTimeStep();
@@ -217,6 +224,9 @@ namespace Opm {
             const WellState& wellState() const;
 
             const SimulatorReport& lastReport() const;
+
+            // called at the beginning of a report step
+            void beginReportStep(const int time_step);
 
         protected:
 
@@ -309,9 +319,6 @@ namespace Opm {
 
             // called at the end of a time step
             void timeStepSucceeded(const double& simulationTime);
-
-            // called at the beginning of a report step
-            void beginReportStep(const int time_step);
 
             // called at the end of a report step
             void endReportStep();
