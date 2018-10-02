@@ -564,7 +564,7 @@ namespace Opm
             typedef typename BlackoilModelEbos<TypeTag>::ISTLSolverType ISTLSolverType;
 
             extractParallelGridInformationToISTL(grid(), parallel_information_);
-            auto *tmp = new ISTLSolverType(parallel_information_);
+            auto *tmp = new ISTLSolverType(*ebosSimulator_);
             linearSolver_.reset(tmp);
 
             // Deactivate selection of CPR via eclipse keyword
@@ -614,7 +614,7 @@ namespace Opm
         FileOutputMode output_ = OUTPUT_ALL;
         bool output_to_files_ = false;
         boost::any parallel_information_;
-        std::unique_ptr<NewtonIterationBlackoilInterface> linearSolver_;
+        std::unique_ptr<ISTLSolverEbos<TypeTag>> linearSolver_;
         std::unique_ptr<Simulator> simulator_;
         std::string logFile_;
     };

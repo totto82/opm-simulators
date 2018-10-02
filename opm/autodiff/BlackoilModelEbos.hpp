@@ -147,11 +147,11 @@ namespace Opm {
                           const ModelParameters& param,
                           BlackoilWellModel<TypeTag>& well_model,
                           BlackoilAquiferModel<TypeTag>& aquifer_model,
-                          const NewtonIterationBlackoilInterface& linsolver,
+                          ISTLSolverEbos<TypeTag>& linsolver,
                           const bool terminal_output)
         : ebosSimulator_(ebosSimulator)
         , grid_(ebosSimulator_.vanguard().grid())
-        , istlSolver_( dynamic_cast< const ISTLSolverType* > (&linsolver) )
+        , istlSolver_( linsolver )
         , phaseUsage_(phaseUsageFromDeck(eclState()))
         , has_disgas_(FluidSystem::enableDissolvedGas())
         , has_vapoil_(FluidSystem::enableVaporizedOil())
@@ -167,10 +167,6 @@ namespace Opm {
         {
             // compute global sum of number of cells
             global_nc_ = detail::countGlobalCells(grid_);
-            if (!istlSolver_)
-            {
-                OPM_THROW(std::logic_error,"solver down cast to ISTLSolver failed");
-            }
         }
 
         bool isParallel() const
@@ -475,21 +471,25 @@ namespace Opm {
             x = 0.0;
 
             const Mat& actual_mat_for_prec = matrix_for_preconditioner_ ? *matrix_for_preconditioner_.get() : ebosJac;
+
+            istlSolver_.prepareRhs(actual_mat_for_prec, ebosResid);
+            istlSolver_.solve(x);
+
             // Solve system.
-            if( isParallel() )
-            {
-                typedef WellModelMatrixAdapter< Mat, BVector, BVector, BlackoilWellModel<TypeTag>, true > Operator;
-                Operator opA(ebosJac, actual_mat_for_prec, wellModel(),
-                             istlSolver().parallelInformation() );
-                assert( opA.comm() );
-                istlSolver().solve( opA, x, ebosResid, *(opA.comm()) );
-            }
-            else
-            {
-                typedef WellModelMatrixAdapter< Mat, BVector, BVector, BlackoilWellModel<TypeTag>, false > Operator;
-                Operator opA(ebosJac, actual_mat_for_prec, wellModel());
-                istlSolver().solve( opA, x, ebosResid );
-            }
+//            if( isParallel() )
+//            {
+//                typedef WellModelMatrixAdapter< Mat, BVector, BVector, BlackoilWellModel<TypeTag>, true > Operator;
+//                Operator opA(ebosJac, actual_mat_for_prec, wellModel(),
+//                             istlSolver().parallelInformation() );
+//                assert( opA.comm() );
+//                istlSolver().solve( opA, x, ebosResid, *(opA.comm()) );
+//            }
+//            else
+//            {
+//                typedef WellModelMatrixAdapter< Mat, BVector, BVector, BlackoilWellModel<TypeTag>, false > Operator;
+//                Operator opA(ebosJac, actual_mat_for_prec, wellModel());
+//                istlSolver().solve( opA, x, ebosResid );
+//            }
         }
 
         //=====================================================================
@@ -905,15 +905,14 @@ namespace Opm {
     protected:
         const ISTLSolverType& istlSolver() const
         {
-            assert( istlSolver_ );
-            return *istlSolver_;
+            return istlSolver_;
         }
 
         // ---------  Data members  ---------
 
         Simulator& ebosSimulator_;
         const Grid&            grid_;
-        const ISTLSolverType*  istlSolver_;
+        ISTLSolverType&  istlSolver_;
         const PhaseUsage phaseUsage_;
         const bool has_disgas_;
         const bool has_vapoil_;

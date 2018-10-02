@@ -52,7 +52,8 @@ NEW_PROP_TAG(Scalar);
 NEW_PROP_TAG(GlobalEqVector);
 NEW_PROP_TAG(JacobianMatrix);
 NEW_PROP_TAG(Indices);
-
+NEW_PROP_TAG(Simulator);
+NEW_PROP_TAG(EclWellModel);
 END_PROPERTIES
 
 namespace Dune
@@ -327,6 +328,108 @@ public:
 
 namespace Opm
 {
+//=====================================================================
+// Implementation for ISTL-matrix based operator
+//=====================================================================
+
+/*!
+   \brief Adapter to turn a matrix into a linear operator.
+
+   Adapts a matrix to the assembled linear operator interface
+ */
+template<class M, class X, class Y, class WellModel, bool overlapping >
+class WellModelMatrixAdapter : public Dune::AssembledLinearOperator<M,X,Y>
+{
+  typedef Dune::AssembledLinearOperator<M,X,Y> BaseType;
+
+public:
+  typedef M matrix_type;
+  typedef X domain_type;
+  typedef Y range_type;
+  typedef typename X::field_type field_type;
+
+#if HAVE_MPI
+  typedef Dune::OwnerOverlapCopyCommunication<int,int> communication_type;
+#else
+  typedef Dune::CollectiveCommunication< Grid > communication_type;
+#endif
+
+#if DUNE_VERSION_NEWER(DUNE_ISTL, 2, 6)
+  Dune::SolverCategory::Category category() const override
+  {
+    return overlapping ?
+           Dune::SolverCategory::overlapping : Dune::SolverCategory::sequential;
+  }
+#else
+  enum {
+    //! \brief The solver category.
+    category = overlapping ?
+        Dune::SolverCategory::overlapping :
+        Dune::SolverCategory::sequential
+  };
+#endif
+
+  //! constructor: just store a reference to a matrix
+  WellModelMatrixAdapter (const M& A,
+                          const M& A_for_precond,
+                          const WellModel& wellMod,
+                          const boost::any& parallelInformation = boost::any() )
+      : A_( A ), A_for_precond_(A_for_precond), wellMod_( wellMod ), comm_()
+  {
+#if HAVE_MPI
+    if( parallelInformation.type() == typeid(ParallelISTLInformation) )
+    {
+      const ParallelISTLInformation& info =
+          boost::any_cast<const ParallelISTLInformation&>( parallelInformation);
+      comm_.reset( new communication_type( info.communicator() ) );
+    }
+#endif
+  }
+
+  virtual void apply( const X& x, Y& y ) const
+  {
+    A_.mv( x, y );
+
+    // add well model modification to y
+    wellMod_.apply(x, y );
+
+#if HAVE_MPI
+    if( comm_ )
+      comm_->project( y );
+#endif
+  }
+
+  // y += \alpha * A * x
+  virtual void applyscaleadd (field_type alpha, const X& x, Y& y) const
+  {
+    A_.usmv(alpha,x,y);
+
+    // add scaled well model modification to y
+    wellMod_.applyScaleAdd( alpha, x, y );
+
+#if HAVE_MPI
+    if( comm_ )
+      comm_->project( y );
+#endif
+  }
+
+  virtual const matrix_type& getmat() const { return A_for_precond_; }
+
+  communication_type* comm()
+  {
+      return comm_.operator->();
+  }
+
+protected:
+  const matrix_type& A_ ;
+  const matrix_type& A_for_precond_ ;
+  const WellModel& wellMod_;
+  std::unique_ptr< communication_type > comm_;
+};
+}
+
+namespace Opm
+{
 namespace Detail
 {
     //! calculates ret = A^T * B
@@ -358,8 +461,9 @@ namespace Detail
     ///                       vector block. It is used to guide the AMG coarsening.
     ///                       Default is zero.
     template <class TypeTag>
-    class ISTLSolverEbos : public NewtonIterationBlackoilInterface
+    class ISTLSolverEbos
     {
+        typedef typename GET_PROP_TYPE(TypeTag, Simulator) Simulator;
         typedef typename GET_PROP_TYPE(TypeTag, Scalar) Scalar;
         typedef typename GET_PROP_TYPE(TypeTag, JacobianMatrix) Matrix;
         typedef typename GET_PROP_TYPE(TypeTag, GlobalEqVector) Vector;
@@ -370,12 +474,74 @@ namespace Detail
     public:
         typedef Dune::AssembledLinearOperator< Matrix, Vector, Vector > AssembledLinearOperatorType;
 
-        typedef NewtonIterationBlackoilInterface :: SolutionVector  SolutionVector;
+
+        /// Construct a system solver.
+        /// \param[in] parallelInformation In the case of a parallel run
+        ///                                with dune-istl the information about the parallelization.
+        ISTLSolverEbos(const Simulator& simulator)
+            : simulator_(simulator)
+            , iterations_( 0 )
+        {
+            parameters_.template init<TypeTag>();
+            //extractParallelGridInformationToISTL(simulator_.vanguard().grid(), parallelInformation_);
+        }
+
 
         static void registerParameters()
         {
             NewtonIterationBlackoilInterleavedParameters::registerParameters<TypeTag>();
         }
+
+        void eraseMatrix() {}
+
+        void prepareMatrix(const Matrix& M) {
+        }
+
+        void prepareRhs(const Matrix& M, Vector& b) {
+            matrix_ = &M;
+            rhs_ = &b;
+        }
+
+        bool solve(Vector& x) {
+
+            Dune::InverseOperatorResult result;
+            const ParallelISTLInformation& info =
+                boost::any_cast<const ParallelISTLInformation&>( parallelInformation_);
+
+            typedef typename GET_PROP_TYPE(TypeTag, EclWellModel) WellModel;
+            typedef WellModelMatrixAdapter< Matrix, Vector, Vector, WellModel, true > Operator;
+            Operator opA(*matrix_, *matrix_, simulator_.problem().wellModel(),
+                         info );
+
+            // Parallel version is deactivated until we figure out how to do it properly.
+//#if HAVE_MPI
+//            if (parallelInformation_.type() == typeid(ParallelISTLInformation))
+            {
+                const size_t size = matrix_->N();
+
+
+                // As we use a dune-istl with block size np the number of components
+                // per parallel is only one.
+                Comm istlComm(info.communicator());
+                info.copyValuesTo(istlComm.indexSet(), istlComm.remoteIndices(),
+                                  size, 1);
+                // Construct operator, scalar product and vectors needed.
+                constructPreconditionerAndSolve<Dune::SolverCategory::overlapping>(opA, x, *rhs_, info, result);
+            }
+//            else
+//#endif
+//            {
+//                OPM_THROW(std::logic_error,"this method if for parallel solve only");
+//            }
+
+            checkConvergence( result );
+            return result.converged;
+
+        }
+
+
+
+
 
         /// Construct a system solver.
         /// \param[in] parallelInformation In the case of a parallel run
@@ -391,12 +557,6 @@ namespace Detail
         const NewtonIterationBlackoilInterleavedParameters& parameters() const
         { return parameters_; }
 
-        // dummy method that is not implemented for this class
-        SolutionVector computeNewtonIncrement(const LinearisedBlackoilResidual&) const
-        {
-            OPM_THROW(std::logic_error,"This method is not implemented");
-            return SolutionVector();
-        }
 
         /// Solve the system of linear equations Ax = b, with A being the
         /// combined derivative matrix of the residual and b
@@ -486,7 +646,7 @@ namespace Detail
 #endif
             {
                 // Construct preconditioner.
-                auto precond = constructPrecond(linearOperator, parallelInformation_arg);
+                auto precond = constructPrecond(linearOperator);
 
                 // Solve.
                 solve(linearOperator, x, istlb, *sp, *precond, result);
@@ -504,7 +664,7 @@ namespace Detail
 
 
         template <class Operator>
-        std::unique_ptr<SeqPreconditioner> constructPrecond(Operator& opA, const Dune::Amg::SequentialInformation&) const
+        std::unique_ptr<SeqPreconditioner> constructPrecond(Operator& opA) const
         {
             const double relax   = parameters_.ilu_relaxation_;
             const int ilu_fillin = parameters_.ilu_fillin_level_;
@@ -680,9 +840,12 @@ namespace Detail
             }
         }
     protected:
+        const Simulator& simulator_;
         mutable int iterations_;
         boost::any parallelInformation_;
         bool isIORank_;
+        const Matrix *matrix_;
+        const Vector *rhs_;
 
         NewtonIterationBlackoilInterleavedParameters parameters_;
     }; // end ISTLSolver

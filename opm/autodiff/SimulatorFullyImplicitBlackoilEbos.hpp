@@ -101,7 +101,7 @@ public:
     /// \param[in] output_writer
     /// \param[in] threshold_pressures_by_face   if nonempty, threshold pressures that inhibit flow
     SimulatorFullyImplicitBlackoilEbos(Simulator& ebosSimulator,
-                                       NewtonIterationBlackoilInterface& linearSolver)
+                                       ISTLSolverEbos<TypeTag>& linearSolver)
         : ebosSimulator_(ebosSimulator)
         , linearSolver_(linearSolver)
     {
@@ -380,7 +380,7 @@ protected:
     SolverParameters solverParam_;
 
     // Observed objects.
-    NewtonIterationBlackoilInterface& linearSolver_;
+    ISTLSolverEbos<TypeTag>& linearSolver_;
     PhaseUsage phaseUsage_;
     // Misc. data
     bool terminalOutput_;
