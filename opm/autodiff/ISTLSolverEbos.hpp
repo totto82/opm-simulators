@@ -474,8 +474,6 @@ namespace Detail
         enum { pressureIndex = Indices::pressureSwitchIdx };
 
     public:
-        typedef Dune::AssembledLinearOperator< Matrix, Vector, Vector > AssembledLinearOperatorType;
-
 
         /// Construct a system solver.
         /// \param[in] parallelInformation In the case of a parallel run
@@ -543,38 +541,13 @@ namespace Detail
 
         }
 
-
-
-
-
-        /// Construct a system solver.
-        /// \param[in] parallelInformation In the case of a parallel run
-        ///                                with dune-istl the information about the parallelization.
-        ISTLSolverEbos(const boost::any& parallelInformation_arg=boost::any())
-            : iterations_( 0 )
-            , parallelInformation_(parallelInformation_arg)
-            , isIORank_(isIORank(parallelInformation_arg))
-        {
-            parameters_.template init<TypeTag>();
-        }
-
         const NewtonIterationBlackoilInterleavedParameters& parameters() const
         { return parameters_; }
-
-
-        /// Solve the system of linear equations Ax = b, with A being the
-        /// combined derivative matrix of the residual and b
-        /// being the residual itself.
-        /// \param[in] residual   residual object containing A and b.
-        /// \return               the solution x
 
         /// \copydoc NewtonIterationBlackoilInterface::iterations
         int iterations () const { return iterations_; }
 
-        /// \copydoc NewtonIterationBlackoilInterface::parallelInformation
-        ///const boost::any& parallelInformation() const { return parallelInformation_; }
-
-    public:
+    private:
         /// \brief construct the CPR preconditioner and the solver.
         /// \tparam P The type of the parallel information.
         /// \param parallelInformation the information about the parallelization.
