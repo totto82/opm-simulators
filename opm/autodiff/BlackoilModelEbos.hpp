@@ -70,7 +70,7 @@
 
 BEGIN_PROPERTIES
 
-NEW_TYPE_TAG(EclFlowProblem, INHERITS_FROM(BlackOilModel, EclBaseProblem, FlowNonLinearSolver, FlowIstlSolver, FlowModelParameters, FlowTimeSteppingParameters));
+NEW_TYPE_TAG(EclFlowProblem, INHERITS_FROM(BlackOilModel, EclBaseProblem, FlowNonLinearSolver, FlowModelParameters, FlowTimeSteppingParameters));
 SET_STRING_PROP(EclFlowProblem, OutputDir, "");
 SET_BOOL_PROP(EclFlowProblem, EnableDebuggingChecks, false);
 // default in flow is to formulate the equations in surface volumes
@@ -85,6 +85,8 @@ SET_BOOL_PROP(EclFlowProblem, EnableTemperature, true);
 SET_BOOL_PROP(EclFlowProblem, EnableEnergy, false);
 
 SET_TYPE_PROP(EclFlowProblem, EclWellModel, Opm::BlackoilWellModel<TypeTag>);
+SET_TAG_PROP(EclFlowProblem, LinearSolverSplice, FlowIstlSolver);
+
 
 END_PROPERTIES
 
@@ -472,8 +474,13 @@ namespace Opm {
 
             const Mat& actual_mat_for_prec = matrix_for_preconditioner_ ? *matrix_for_preconditioner_.get() : ebosJac;
 
-            istlSolver_.prepareRhs(actual_mat_for_prec, ebosResid);
-            istlSolver_.solve(x);
+            //istlSolver_.prepareRhs(actual_mat_for_prec, ebosResid);
+            //istlSolver_.solve(x);
+
+            auto& ebosSolver = ebosSimulator_.model().newtonMethod().linearSolver();
+            ebosSolver.prepareRhs(actual_mat_for_prec, ebosResid);
+            ebosSolver.solve(x);
+
 
             // Solve system.
 //            if( isParallel() )

@@ -142,12 +142,14 @@ namespace Opm
             EWOMS_HIDE_PARAM(TypeTag, PredeterminedTimeStepsFile);
 
             // flow currently uses its own linear solver
+#if (0)
             EWOMS_HIDE_PARAM(TypeTag, LinearSolverMaxError);
             EWOMS_HIDE_PARAM(TypeTag, LinearSolverMaxIterations);
             EWOMS_HIDE_PARAM(TypeTag, LinearSolverOverlapSize);
             EWOMS_HIDE_PARAM(TypeTag, LinearSolverTolerance);
             EWOMS_HIDE_PARAM(TypeTag, LinearSolverVerbosity);
             EWOMS_HIDE_PARAM(TypeTag, PreconditionerRelaxation);
+#endif
 
             // flow also does not use the eWoms Newton method
             EWOMS_HIDE_PARAM(TypeTag, NewtonMaxError);

@@ -505,34 +505,36 @@ namespace Detail
         bool solve(Vector& x) {
 
             Dune::InverseOperatorResult result;
-            const ParallelISTLInformation& info =
-                boost::any_cast<const ParallelISTLInformation&>( parallelInformation_);
-
             typedef typename GET_PROP_TYPE(TypeTag, EclWellModel) WellModel;
-            typedef WellModelMatrixAdapter< Matrix, Vector, Vector, WellModel, true > Operator;
-            Operator opA(*matrix_, *matrix_, simulator_.problem().wellModel(),
-                         info );
 
             // Parallel version is deactivated until we figure out how to do it properly.
 //#if HAVE_MPI
-//            if (parallelInformation_.type() == typeid(ParallelISTLInformation))
+            if (parallelInformation_.type() == typeid(ParallelISTLInformation))
             {
-                const size_t size = matrix_->N();
+                const ParallelISTLInformation& info =
+                    boost::any_cast<const ParallelISTLInformation&>( parallelInformation_);
 
+                const size_t size = matrix_->N();
+                typedef WellModelMatrixAdapter< Matrix, Vector, Vector, WellModel, true > Operator;
+                Operator opA(*matrix_, *matrix_, simulator_.problem().wellModel(),
+                             info );
 
                 // As we use a dune-istl with block size np the number of components
                 // per parallel is only one.
                 Comm istlComm(info.communicator());
-                info.copyValuesTo(istlComm.indexSet(), istlComm.remoteIndices(),
-                                  size, 1);
+                info.copyValuesTo(istlComm.indexSet(), istlComm.remoteIndices(),size, 1);
                 // Construct operator, scalar product and vectors needed.
-                constructPreconditionerAndSolve<Dune::SolverCategory::overlapping>(opA, x, *rhs_, info, result);
+                //constructPreconditionerAndSolve<Dune::SolverCategory::overlapping>(opA, x, *rhs_, *opA.comm(), result);
             }
-//            else
+            else
 //#endif
-//            {
-//                OPM_THROW(std::logic_error,"this method if for parallel solve only");
-//            }
+            {
+                Dune::Amg::SequentialInformation info;
+                typedef WellModelMatrixAdapter< Matrix, Vector, Vector, WellModel, false > Operator;
+                Operator opA(*matrix_, *matrix_, simulator_.problem().wellModel());
+                constructPreconditionerAndSolve(opA, x, *rhs_, info, result);
+            }
+
 
             checkConvergence( result );
             return result.converged;
@@ -597,7 +599,7 @@ namespace Detail
             // Communicate if parallel.
             parallelInformation_arg.copyOwnerToAll(istlb, istlb);
 
-#if FLOW_SUPPORT_AMG // activate AMG if either flow_ebos is used or UMFPack is not available
+#if 0 //FLOW_SUPPORT_AMG // activate AMG if either flow_ebos is used or UMFPack is not available
             if( parameters_.linear_solver_use_amg_ || parameters_.use_cpr_)
             {
                 typedef ISTLUtility::CPRSelector< Matrix, Vector, Vector, POrComm>  CPRSelectorType;
@@ -649,6 +651,7 @@ namespace Detail
                 auto precond = constructPrecond(linearOperator);
 
                 // Solve.
+                //static_assert(decltype(*precond)::category == decltype(*sp)::category, "Bla");
                 solve(linearOperator, x, istlb, *sp, *precond, result);
             }
         }
@@ -845,7 +848,7 @@ namespace Detail
         boost::any parallelInformation_;
         bool isIORank_;
         const Matrix *matrix_;
-        const Vector *rhs_;
+        Vector *rhs_;
 
         NewtonIterationBlackoilInterleavedParameters parameters_;
     }; // end ISTLSolver
