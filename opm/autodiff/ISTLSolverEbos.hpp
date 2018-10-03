@@ -27,6 +27,8 @@
 #include <opm/autodiff/ParallelRestrictedAdditiveSchwarz.hpp>
 #include <opm/autodiff/ParallelOverlappingILU0.hpp>
 #include <opm/autodiff/AutoDiffHelpers.hpp>
+#include <opm/autodiff/ExtractParallelGridInformationToISTL.hpp>
+
 
 #include <opm/common/Exceptions.hpp>
 #include <opm/core/linalg/ParallelIstlInformation.hpp>
@@ -483,7 +485,7 @@ namespace Detail
             , iterations_( 0 )
         {
             parameters_.template init<TypeTag>();
-            //extractParallelGridInformationToISTL(simulator_.vanguard().grid(), parallelInformation_);
+            extractParallelGridInformationToISTL(simulator_.vanguard().grid(), parallelInformation_);
         }
 
 
@@ -508,7 +510,7 @@ namespace Detail
             typedef typename GET_PROP_TYPE(TypeTag, EclWellModel) WellModel;
 
             // Parallel version is deactivated until we figure out how to do it properly.
-//#if HAVE_MPI
+#if HAVE_MPI
             if (parallelInformation_.type() == typeid(ParallelISTLInformation))
             {
                 const ParallelISTLInformation& info =
@@ -524,10 +526,10 @@ namespace Detail
                 Comm istlComm(info.communicator());
                 info.copyValuesTo(istlComm.indexSet(), istlComm.remoteIndices(),size, 1);
                 // Construct operator, scalar product and vectors needed.
-                //constructPreconditionerAndSolve<Dune::SolverCategory::overlapping>(opA, x, *rhs_, *opA.comm(), result);
+                constructPreconditionerAndSolve<Dune::SolverCategory::overlapping>(opA, x, *rhs_, istlComm, result);
             }
             else
-//#endif
+#endif
             {
                 Dune::Amg::SequentialInformation info;
                 typedef WellModelMatrixAdapter< Matrix, Vector, Vector, WellModel, false > Operator;
@@ -570,7 +572,7 @@ namespace Detail
         int iterations () const { return iterations_; }
 
         /// \copydoc NewtonIterationBlackoilInterface::parallelInformation
-        const boost::any& parallelInformation() const { return parallelInformation_; }
+        ///const boost::any& parallelInformation() const { return parallelInformation_; }
 
     public:
         /// \brief construct the CPR preconditioner and the solver.
@@ -647,11 +649,7 @@ namespace Detail
             else
 #endif
             {
-                // Construct preconditioner.
-                auto precond = constructPrecond(linearOperator);
-
-                // Solve.
-                //static_assert(decltype(*precond)::category == decltype(*sp)::category, "Bla");
+                auto precond = constructPrecond(linearOperator, parallelInformation_arg);
                 solve(linearOperator, x, istlb, *sp, *precond, result);
             }
         }
@@ -667,7 +665,7 @@ namespace Detail
 
 
         template <class Operator>
-        std::unique_ptr<SeqPreconditioner> constructPrecond(Operator& opA) const
+        std::unique_ptr<SeqPreconditioner> constructPrecond(Operator& opA, const Dune::Amg::SequentialInformation&) const
         {
             const double relax   = parameters_.ilu_relaxation_;
             const int ilu_fillin = parameters_.ilu_fillin_level_;
