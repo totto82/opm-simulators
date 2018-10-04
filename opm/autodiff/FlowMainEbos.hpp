@@ -149,7 +149,7 @@ namespace Opm
             EWOMS_HIDE_PARAM(TypeTag, LinearSolverTolerance);
             EWOMS_HIDE_PARAM(TypeTag, LinearSolverVerbosity);
             EWOMS_HIDE_PARAM(TypeTag, PreconditionerRelaxation);
-#endif
+
 
             // flow also does not use the eWoms Newton method
             EWOMS_HIDE_PARAM(TypeTag, NewtonMaxError);
@@ -158,6 +158,7 @@ namespace Opm
             EWOMS_HIDE_PARAM(TypeTag, NewtonTargetIterations);
             EWOMS_HIDE_PARAM(TypeTag, NewtonVerbose);
             EWOMS_HIDE_PARAM(TypeTag, NewtonWriteConvergence);
+#endif
 
             // the default eWoms checkpoint/restart mechanism does not work with flow
             EWOMS_HIDE_PARAM(TypeTag, RestartTime);
@@ -218,7 +219,8 @@ namespace Opm
                 createSimulator();
 
                 // do the actual work
-                runSimulator();
+                //runSimulator();
+                ebosSimulator_->run();
 
                 // clean up
                 mergeParallelLogFiles();
@@ -444,9 +446,9 @@ namespace Opm
 
         void setupEbosSimulator()
         {
-            ebosSimulator_.reset(new EbosSimulator(/*verbose=*/false));
-            ebosSimulator_->executionTimer().start();
-            ebosSimulator_->model().applyInitialSolution();
+            ebosSimulator_.reset(new EbosSimulator(/*verbose=*/true));
+            //ebosSimulator_->executionTimer().start();
+            //ebosSimulator_->model().applyInitialSolution();
 
             try {
                 if (output_cout_) {
