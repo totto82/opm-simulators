@@ -70,7 +70,7 @@
 
 BEGIN_PROPERTIES
 
-NEW_TYPE_TAG(EclFlowProblem, INHERITS_FROM(BlackOilModel, EclBaseProblem, FlowNonLinearSolver, FlowIstlSolver, FlowModelParameters, FlowTimeSteppingParameters));
+NEW_TYPE_TAG(EclFlowProblem, INHERITS_FROM(BlackOilModel, EclBaseProblem, FlowNonLinearSolver, FlowIstlSolver, FlowIstlSolver, FlowModelParameters, FlowTimeSteppingParameters));
 SET_STRING_PROP(EclFlowProblem, OutputDir, "");
 SET_BOOL_PROP(EclFlowProblem, EnableDebuggingChecks, false);
 // default in flow is to formulate the equations in surface volumes
@@ -87,6 +87,8 @@ SET_BOOL_PROP(EclFlowProblem, EnableTemperature, true);
 SET_BOOL_PROP(EclFlowProblem, EnableEnergy, false);
 
 SET_TYPE_PROP(EclFlowProblem, EclWellModel, Opm::BlackoilWellModel<TypeTag>);
+SET_TAG_PROP(EclFlowProblem, LinearSolverSplice, FlowIstlSolver);
+
 
 END_PROPERTIES
 
@@ -148,11 +150,9 @@ namespace Opm {
         BlackoilModelEbos(Simulator& ebosSimulator,
                           const ModelParameters& param,
                           BlackoilWellModel<TypeTag>& well_model,
-                          const NewtonIterationBlackoilInterface& linsolver,
                           const bool terminal_output)
         : ebosSimulator_(ebosSimulator)
         , grid_(ebosSimulator_.vanguard().grid())
-        , istlSolver_( dynamic_cast< const ISTLSolverType* > (&linsolver) )
         , phaseUsage_(phaseUsageFromDeck(eclState()))
         , has_disgas_(FluidSystem::enableDissolvedGas())
         , has_vapoil_(FluidSystem::enableVaporizedOil())
@@ -169,10 +169,6 @@ namespace Opm {
             global_nc_ = detail::countGlobalCells(grid_);
             //find rows of matrix corresponding to overlap
             detail::findOverlapRowsAndColumns(grid_,overlapRowAndColumns_);
-            if (!istlSolver_)
-            {
-                OPM_THROW(std::logic_error,"solver down cast to ISTLSolver failed");
-            }
         }
 
         bool isParallel() const
@@ -452,34 +448,10 @@ namespace Opm {
         /// Number of linear iterations used in last call to solveJacobianSystem().
         int linearIterationsLastSolve() const
         {
-            return istlSolver().iterations();
+            return ebosSimulator_.model().newtonMethod().linearSolver().iterations ();
         }
 
-        /// Zero out off-diagonal blocks on rows corresponding to overlap cells
-        /// Diagonal blocks on ovelap rows are set to diag(1e100).
-        void makeOverlapRowsInvalid(Mat& ebosJacIgnoreOverlap) const
-        {	  	  
-            //value to set on diagonal
-            MatrixBlockType diag_block(0.0);
-            for (int eq = 0; eq < numEq; ++eq)	    
-                diag_block[eq][eq] = 1.0e100;
-	  	  
-            //loop over precalculated overlap rows and columns
-            for (auto row = overlapRowAndColumns_.begin(); row != overlapRowAndColumns_.end(); row++ )
-            {
-                int lcell = row->first; 
-                //diagonal block set to large value diagonal
-                ebosJacIgnoreOverlap[lcell][lcell] = diag_block;
 
-                //loop over off diagonal blocks in overlap row	      
-                for (auto col = row->second.begin(); col != row->second.end(); ++col)
-                {
-                    int ncell = *col;
-                    //zero out block
-                    ebosJacIgnoreOverlap[lcell][ncell] = 0.0;
-                }
-            }    	  
-        }
 
         /// Solve the Jacobian system Jx = r where J is the Jacobian and
         /// r is the residual.
@@ -503,128 +475,12 @@ namespace Opm {
             x = 0.0;
 
             const Mat& actual_mat_for_prec = matrix_for_preconditioner_ ? *matrix_for_preconditioner_.get() : ebosJac;
-            // Solve system.
-            if( isParallel() )
-            {	      
-                typedef WellModelMatrixAdapter< Mat, BVector, BVector, BlackoilWellModel<TypeTag>, true > Operator;
+            auto& ebosSolver = ebosSimulator_.model().newtonMethod().linearSolver();
+            ebosSolver.prepareRhs(actual_mat_for_prec, ebosResid);
+            ebosSolver.solve(x);
+       }
 
-                auto ebosJacIgnoreOverlap = Mat(ebosJac);
-                //remove ghost rows in local matrix
-                makeOverlapRowsInvalid(ebosJacIgnoreOverlap);
 
-                //Not sure what actual_mat_for_prec is, so put ebosJacIgnoreOverlap as both variables
-                //to be certain that correct matrix is used for preconditioning.
-                Operator opA(ebosJacIgnoreOverlap, ebosJacIgnoreOverlap, wellModel(),
-                             istlSolver().parallelInformation() );
-                assert( opA.comm() );
-                istlSolver().solve( opA, x, ebosResid, *(opA.comm()) );
-            }
-            else
-            {
-                typedef WellModelMatrixAdapter< Mat, BVector, BVector, BlackoilWellModel<TypeTag>, false > Operator;
-                Operator opA(ebosJac, actual_mat_for_prec, wellModel());
-                istlSolver().solve( opA, x, ebosResid );
-            }
-        }
-
-        //=====================================================================
-        // Implementation for ISTL-matrix based operator
-        //=====================================================================
-
-        /*!
-           \brief Adapter to turn a matrix into a linear operator.
-
-           Adapts a matrix to the assembled linear operator interface
-         */
-        template<class M, class X, class Y, class WellModel, bool overlapping >
-        class WellModelMatrixAdapter : public Dune::AssembledLinearOperator<M,X,Y>
-        {
-          typedef Dune::AssembledLinearOperator<M,X,Y> BaseType;
-
-        public:
-          typedef M matrix_type;
-          typedef X domain_type;
-          typedef Y range_type;
-          typedef typename X::field_type field_type;
-
-#if HAVE_MPI
-          typedef Dune::OwnerOverlapCopyCommunication<int,int> communication_type;
-#else
-          typedef Dune::CollectiveCommunication< Grid > communication_type;
-#endif
-
-#if DUNE_VERSION_NEWER(DUNE_ISTL, 2, 6)
-          Dune::SolverCategory::Category category() const override
-          {
-            return overlapping ?
-                   Dune::SolverCategory::overlapping : Dune::SolverCategory::sequential;
-          }
-#else
-          enum {
-            //! \brief The solver category.
-            category = overlapping ?
-                Dune::SolverCategory::overlapping :
-                Dune::SolverCategory::sequential
-          };
-#endif
-
-          //! constructor: just store a reference to a matrix
-          WellModelMatrixAdapter (const M& A,
-                                  const M& A_for_precond,
-                                  const WellModel& wellMod,
-                                  const boost::any& parallelInformation = boost::any() )
-              : A_( A ), A_for_precond_(A_for_precond), wellMod_( wellMod ), comm_()
-          {
-#if HAVE_MPI
-            if( parallelInformation.type() == typeid(ParallelISTLInformation) )
-            {
-              const ParallelISTLInformation& info =
-                  boost::any_cast<const ParallelISTLInformation&>( parallelInformation);
-              comm_.reset( new communication_type( info.communicator() ) );
-            }
-#endif
-          }
-
-          virtual void apply( const X& x, Y& y ) const
-          {
-            A_.mv( x, y );
-
-            // add well model modification to y
-            wellMod_.apply(x, y );
-
-#if HAVE_MPI
-            if( comm_ )
-              comm_->project( y );
-#endif
-          }
-
-          // y += \alpha * A * x
-          virtual void applyscaleadd (field_type alpha, const X& x, Y& y) const
-          {
-            A_.usmv(alpha,x,y);
-
-            // add scaled well model modification to y
-            wellMod_.applyScaleAdd( alpha, x, y );
-
-#if HAVE_MPI
-            if( comm_ )
-              comm_->project( y );
-#endif
-          }
-
-          virtual const matrix_type& getmat() const { return A_for_precond_; }
-
-          communication_type* comm()
-          {
-              return comm_.operator->();
-          }
-
-        protected:
-          const matrix_type& A_ ;
-          const matrix_type& A_for_precond_ ;
-          const WellModel& wellMod_;
-          std::unique_ptr< communication_type > comm_;
-        };
 
         /// Apply an update to the primary variables.
         void updateSolution(const BVector& dx)
@@ -938,17 +794,10 @@ namespace Opm {
         { return failureReport_; }
 
     protected:
-        const ISTLSolverType& istlSolver() const
-        {
-            assert( istlSolver_ );
-            return *istlSolver_;
-        }
-
         // ---------  Data members  ---------
 
         Simulator& ebosSimulator_;
         const Grid&            grid_;
-        const ISTLSolverType*  istlSolver_;
         const PhaseUsage phaseUsage_;
         const bool has_disgas_;
         const bool has_vapoil_;

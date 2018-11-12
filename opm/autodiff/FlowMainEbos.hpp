@@ -140,14 +140,6 @@ namespace Opm
             EWOMS_HIDE_PARAM(TypeTag, MinTimeStepSize);
             EWOMS_HIDE_PARAM(TypeTag, PredeterminedTimeStepsFile);
 
-            // flow currently uses its own linear solver
-            EWOMS_HIDE_PARAM(TypeTag, LinearSolverMaxError);
-            EWOMS_HIDE_PARAM(TypeTag, LinearSolverMaxIterations);
-            EWOMS_HIDE_PARAM(TypeTag, LinearSolverOverlapSize);
-            EWOMS_HIDE_PARAM(TypeTag, LinearSolverTolerance);
-            EWOMS_HIDE_PARAM(TypeTag, LinearSolverVerbosity);
-            EWOMS_HIDE_PARAM(TypeTag, PreconditionerRelaxation);
-
             // flow also does not use the eWoms Newton method
             EWOMS_HIDE_PARAM(TypeTag, NewtonMaxError);
             EWOMS_HIDE_PARAM(TypeTag, NewtonMaxIterations);
@@ -228,7 +220,6 @@ namespace Opm
                 setupLogging();
                 printPRTHeader();
                 runDiagnostics();
-                setupLinearSolver();
                 createSimulator();
 
                 // do the actual work
@@ -550,35 +541,6 @@ namespace Opm
             }
         }
 
-        // Setup linear solver.
-        // Writes to:
-        //   linearSolver_
-        void setupLinearSolver()
-        {
-            typedef typename BlackoilModelEbos<TypeTag>::ISTLSolverType ISTLSolverType;
-
-            extractParallelGridInformationToISTL(grid(), parallel_information_);
-            auto *tmp = new ISTLSolverType(parallel_information_);
-            linearSolver_.reset(tmp);
-
-            // Deactivate selection of CPR via eclipse keyword
-            // as this preconditioner is still considered experimental
-            // and fails miserably for some models.
-            if (output_cout_
-                && eclState().getSimulationConfig().useCPR()
-                && !tmp->parameters().use_cpr_)
-            {
-                std::ostringstream message;
-                message << "Ignoring request for CPRPreconditioner "
-                        << "via Eclipse keyword as it is considered "
-                        <<" experimental. To activate use "
-                        <<"\"--flow-use-cpr=true\" command "
-                        <<"line parameter.";
-                OpmLog::info(message.str());
-            }
-
-        }
-
         /// This is the main function of Flow.
         // Create simulator instance.
         // Writes to:
@@ -586,7 +548,7 @@ namespace Opm
         void createSimulator()
         {
             // Create the simulator instance.
-            simulator_.reset(new Simulator(*ebosSimulator_, *linearSolver_));
+            simulator_.reset(new Simulator(*ebosSimulator_));
         }
 
         unsigned long long getTotalSystemMemory()
@@ -608,7 +570,6 @@ namespace Opm
         FileOutputMode output_ = OUTPUT_ALL;
         bool output_to_files_ = false;
         boost::any parallel_information_;
-        std::unique_ptr<NewtonIterationBlackoilInterface> linearSolver_;
         std::unique_ptr<Simulator> simulator_;
         std::string logFile_;
     };

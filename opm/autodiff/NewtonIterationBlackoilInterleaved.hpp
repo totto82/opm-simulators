@@ -35,6 +35,12 @@
 #include <array>
 #include <memory>
 
+namespace Opm {
+template <class TypeTag>
+class ISTLSolverEbos;
+}
+
+
 BEGIN_PROPERTIES
 
 NEW_TYPE_TAG(FlowIstlSolverParams);
@@ -54,6 +60,7 @@ NEW_PROP_TAG(LinearSolverRequireFullSparsityPattern);
 NEW_PROP_TAG(LinearSolverIgnoreConvergenceFailure);
 NEW_PROP_TAG(UseAmg);
 NEW_PROP_TAG(UseCpr);
+NEW_PROP_TAG(LinearSolverBackend);
 
 SET_SCALAR_PROP(FlowIstlSolverParams, LinearSolverReduction, 1e-2);
 SET_SCALAR_PROP(FlowIstlSolverParams, IluRelaxation, 0.9);
@@ -69,6 +76,8 @@ SET_BOOL_PROP(FlowIstlSolverParams, LinearSolverRequireFullSparsityPattern, fals
 SET_BOOL_PROP(FlowIstlSolverParams, LinearSolverIgnoreConvergenceFailure, false);
 SET_BOOL_PROP(FlowIstlSolverParams, UseAmg, false);
 SET_BOOL_PROP(FlowIstlSolverParams, UseCpr, false);
+SET_TYPE_PROP(FlowIstlSolverParams, LinearSolverBackend, Opm::ISTLSolverEbos<TypeTag>);
+
 
 END_PROPERTIES
 
