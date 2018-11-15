@@ -490,7 +490,8 @@ namespace Detail
         ///                                with dune-istl the information about the parallelization.
         ISTLSolverEbos(const Simulator& simulator)
             : simulator_(simulator),
-              iterations_( 0 )
+              iterations_( 0 ),
+              converged_(false)
         {
             parameters_.template init<TypeTag>();
             extractParallelGridInformationToISTL(simulator_.vanguard().grid(), parallelInformation_);
@@ -507,7 +508,7 @@ namespace Detail
             rhs_ = &b;
         }
 
-        void solve(Vector& x) {
+        bool solve(Vector& x) {
             // Solve system.
 
             const WellModel& wellModel = simulator_.problem().wellModel();
@@ -533,6 +534,9 @@ namespace Detail
                 Operator opA(*matrix_, *matrix_, wellModel);
                 solve( opA, x, *rhs_ );
             }
+
+            return converged_;
+
         }
 
 
@@ -810,6 +814,7 @@ namespace Detail
         {
             // store number of iterations
             iterations_ = result.iterations;
+            converged_ = result.converged;
 
             // Check for failure of linear solver.
             if (!parameters_.ignoreConvergenceFailure_ && !result.converged) {
@@ -852,6 +857,7 @@ namespace Detail
 
         const Simulator& simulator_;
         mutable int iterations_;
+        mutable bool converged_;
         boost::any parallelInformation_;
         bool isIORank_;
         const Matrix *matrix_;
