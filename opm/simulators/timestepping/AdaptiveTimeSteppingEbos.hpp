@@ -228,6 +228,10 @@ namespace Opm {
                 std::string causeOfFailure = "";
                 try {
                     substepReport = solver.step(substepTimer);
+                    prepareEbos_(ebosSimulator, substepTimer);
+                    substepReport.converged = ebosSimulator.model().newtonMethod().apply();
+                    ebosSimulator.problem().endTimeStep();
+
                     report += substepReport;
 
                     if (solverVerbose_) {
@@ -421,6 +425,36 @@ namespace Opm {
             }
             return report;
         }
+
+
+        template <class Simulator>
+        void prepareEbos_(Simulator& ebosSimulator, const SimulatorTimerInterface& timer) {
+            // update the solution variables in ebos
+            if ( timer.lastStepFailed() ) {
+                ebosSimulator.model().updateFailed();
+            } else {
+                ebosSimulator.model().advanceTimeLevel();
+            }
+
+            // set the timestep size and episode index for ebos explicitly. ebos needs to
+            // know the report step/episode index because of timing dependend data
+            // despide the fact that flow uses its own time stepper. (The length of the
+            // episode does not matter, though.)
+            auto t = timer.simulationTimeElapsed();
+            ebosSimulator.startNextEpisode(/*episodeStartTime=*/t, /*episodeLength=*/1e30);
+            ebosSimulator.setEpisodeIndex(timer.reportStepNum());
+            ebosSimulator.setTime(t);
+            ebosSimulator.setTimeStepSize(timer.currentStepLength());
+            ebosSimulator.setTimeStepIndex(ebosSimulator.timeStepIndex() + 1);
+            ebosSimulator.problem().beginTimeStep();
+        }
+
+        SimulatorReport prepareSubStepReport_() {
+
+        }
+
+
+
 
         /** \brief Returns the simulator report for the failed substeps of the last
          *         report step.
