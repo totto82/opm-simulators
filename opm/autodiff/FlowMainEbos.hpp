@@ -135,12 +135,12 @@ namespace Opm
             EWOMS_HIDE_PARAM(TypeTag, PredeterminedTimeStepsFile);
 
             // flow also does not use the eWoms Newton method
-            EWOMS_HIDE_PARAM(TypeTag, NewtonMaxError);
-            EWOMS_HIDE_PARAM(TypeTag, NewtonMaxIterations);
-            EWOMS_HIDE_PARAM(TypeTag, NewtonRawTolerance);
-            EWOMS_HIDE_PARAM(TypeTag, NewtonTargetIterations);
-            EWOMS_HIDE_PARAM(TypeTag, NewtonVerbose);
-            EWOMS_HIDE_PARAM(TypeTag, NewtonWriteConvergence);
+//            EWOMS_HIDE_PARAM(TypeTag, NewtonMaxError);
+//            EWOMS_HIDE_PARAM(TypeTag, NewtonMaxIterations);
+//            EWOMS_HIDE_PARAM(TypeTag, NewtonRawTolerance);
+//            EWOMS_HIDE_PARAM(TypeTag, NewtonTargetIterations);
+//            EWOMS_HIDE_PARAM(TypeTag, NewtonVerbose);
+//            EWOMS_HIDE_PARAM(TypeTag, NewtonWriteConvergence);
 
             // the default eWoms checkpoint/restart mechanism does not work with flow
             EWOMS_HIDE_PARAM(TypeTag, RestartTime);

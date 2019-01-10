@@ -227,7 +227,7 @@ namespace Opm {
                 SimulatorReport substepReport;
                 std::string causeOfFailure = "";
                 try {
-                    substepReport = solver.step(substepTimer);
+                    //substepReport = solver.step(substepTimer);
                     prepareEbos_(ebosSimulator, substepTimer);
                     substepReport.converged = ebosSimulator.model().newtonMethod().apply();
                     ebosSimulator.problem().endTimeStep();

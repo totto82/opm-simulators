@@ -208,8 +208,8 @@ protected:
             matrix_for_preconditioner_.reset();
         }
 
-        void prepare(const Matrix& M, Vector& b) {
-            matrix_ = &M;
+        void prepare(const SparseMatrixAdapter& M, Vector& b) {
+            matrix_ = &M.istlMatrix();
             rhs_ = &b;
         }
 

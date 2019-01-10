@@ -481,7 +481,7 @@ namespace Opm {
             x = 0.0;
 
             auto& ebosSolver = ebosSimulator_.model().newtonMethod().linearSolver();
-            ebosSolver.prepare(ebosJac.istlMatrix(), ebosResid);
+            ebosSolver.prepare(ebosJac, ebosResid);
             ebosSolver.solve(x);
        }
 
