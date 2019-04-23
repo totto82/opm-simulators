@@ -240,8 +240,10 @@ public:
         if (FluidSystem::enableVaporizedOil())
             rv_.resize(bufferSize, 0.0);
 
-        if (GET_PROP_VALUE(TypeTag, EnableSolvent))
+        if (GET_PROP_VALUE(TypeTag, EnableSolvent)) {
             sSol_.resize(bufferSize, 0.0);
+            sRs_.resize(bufferSize, 0.0);
+        }
         if (GET_PROP_VALUE(TypeTag, EnablePolymer))
             cPolymer_.resize(bufferSize, 0.0);
 
@@ -469,6 +471,10 @@ public:
 
             if (sSol_.size() > 0) {
                 sSol_[globalDofIdx] = intQuants.solventSaturation().value();
+            }
+
+            if (sRs_.size() > 0) {
+                sRs_[globalDofIdx] = intQuants.solventRs().value();
             }
 
             if (cPolymer_.size() > 0) {
@@ -823,6 +829,9 @@ public:
 
         if (sSol_.size() > 0)
             sol.insert ("SSOLVENT", Opm::UnitSystem::measure::identity, std::move(sSol_), Opm::data::TargetType::RESTART_SOLUTION);
+
+        if (sRs_.size() > 0)
+            sol.insert ("SRS", Opm::UnitSystem::measure::identity, std::move(sRs_), Opm::data::TargetType::RESTART_AUXILIARY);
 
         if (cPolymer_.size() > 0)
             sol.insert ("POLYMER", Opm::UnitSystem::measure::identity, std::move(cPolymer_), Opm::data::TargetType::RESTART_SOLUTION);
@@ -1391,6 +1400,7 @@ private:
     ScalarBuffer viscosity_[numPhases];
     ScalarBuffer relativePermeability_[numPhases];
     ScalarBuffer sSol_;
+    ScalarBuffer sRs_;
     ScalarBuffer cPolymer_;
     ScalarBuffer soMax_;
     ScalarBuffer pcSwMdcOw_;

@@ -335,6 +335,8 @@ namespace Opm
                 cq_s[gasCompIdx] += dis_gas;
                 cq_s[oilCompIdx] += vap_oil;
 
+#warning add dissolved co2 and vapporized co2
+
                 // recording the perforation solution gas rate and solution oil rates
                 if (well_type_ == PRODUCER) {
                     perf_dis_gas_rate = dis_gas.value();
