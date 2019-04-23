@@ -327,6 +327,12 @@ namespace Opm
                          const int perf,
                          std::vector<EvalWell>& mob) const;
 
+
+        virtual void computeWellRatesWithBhp(const Simulator& ebosSimulator,
+                                             const double& bhp,
+                                             std::vector<double>& well_flux,
+                                             Opm::DeferredLogger& deferred_logger) const override;
+
         void assembleControlEq(Opm::DeferredLogger& deferred_logger) const;
 
         void assemblePressureEq(const int seg) const;

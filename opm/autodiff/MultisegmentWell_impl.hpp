@@ -566,24 +566,90 @@ namespace Opm
     template <typename TypeTag>
     void
     MultisegmentWell<TypeTag>::
-    computeWellPotentials(const Simulator& /* ebosSimulator */,
-                          const WellState& /* well_state */,
+    computeWellPotentials(const Simulator& ebosSimulator,
+                          const WellState& well_state,
                           std::vector<double>& well_potentials,
                           Opm::DeferredLogger& deferred_logger)
     {
-        const std::string msg = std::string("Well potential calculation is not supported for multisegment wells \n")
-                + "A well potential of zero is returned for output purposes. \n"
-                + "If you need well potential to set the guide rate for group controled wells \n"
-                + "you will have to change the " + name() + " well to a standard well \n";
-
-        deferred_logger.warning("WELL_POTENTIAL_NOT_IMPLEMENTED_FOR_MULTISEG_WELLS", msg);
-
         const int np = number_of_phases_;
         well_potentials.resize(np, 0.0);
+
+        updatePrimaryVariables(well_state, deferred_logger);
+
+        // initialize the primary variables in Evaluation, which is used in computePerfRate for computeWellPotentials
+        // TODO: for computeWellPotentials, no derivative is required actually
+        initPrimaryVariablesEvaluation();
+
+        // get the bhp value based on the bhp constraints
+        const double bhp = Base::mostStrictBhpFromBhpLimits(deferred_logger);
+
+        // does the well have a THP related constraint?
+        if ( !Base::wellHasTHPConstraints() ) {
+            assert(std::abs(bhp) != std::numeric_limits<double>::max());
+            computeWellRatesWithBhp(ebosSimulator, bhp, well_potentials, deferred_logger);
+        } else {
+            // the well has a THP related constraint
+            // checking whether a well is newly added, it only happens at the beginning of the report step
+            if ( !well_state.effectiveEventsOccurred(index_of_well_) ) {
+                for (int p = 0; p < np; ++p) {
+                    // This is dangerous for new added well
+                    // since we are not handling the initialization correctly for now
+                    well_potentials[p] = well_state.wellRates()[index_of_well_ * np + p];
+                }
+            } else {
+                // We need to generate a reasonable rates to start the iteration process
+                computeWellRatesWithBhp(ebosSimulator, bhp, well_potentials, deferred_logger);
+                for (double& value : well_potentials) {
+                    // make the value a little safer in case the BHP limits are default ones
+                    // TODO: a better way should be a better rescaling based on the investigation of the VFP table.
+                    const double rate_safety_scaling_factor = 0.00001;
+                    value *= rate_safety_scaling_factor;
+                }
+            }
+
+            well_potentials = Base::computeWellPotentialWithTHP(ebosSimulator, bhp, well_potentials, deferred_logger);
+        }
 
     }
 
 
+    template<typename TypeTag>
+    void
+    MultisegmentWell<TypeTag>::
+    computeWellRatesWithBhp(const Simulator& ebosSimulator,
+                            const double& bhp,
+                            std::vector<double>& well_flux,
+                            Opm::DeferredLogger& deferred_logger) const
+    {
+        const int np = number_of_phases_;
+        well_flux.resize(np, 0.0);
+
+        const bool allow_cf = getAllowCrossFlow();
+
+        const int nseg = numberOfSegments();
+
+        for (int seg = 0; seg < nseg; ++seg) {
+            // calculating the perforation rate for each perforation that belongs to this segment
+            const EvalWell seg_pressure = getSegmentPressure(seg);
+            for (const int perf : segment_perforations_[seg]) {
+                const int cell_idx = well_cells_[perf];
+                const auto& int_quants = *(ebosSimulator.model().cachedIntensiveQuantities(cell_idx, /*timeIdx=*/ 0));
+                // flux for each perforation
+                std::vector<EvalWell> mob(num_components_, 0.0);
+                getMobility(ebosSimulator, perf, mob);
+
+                std::vector<EvalWell> cq_s(num_components_, 0.0);
+                EvalWell perf_press;
+                computePerfRatePressure(int_quants, mob, seg, perf, seg_pressure, allow_cf, cq_s, perf_press, deferred_logger);
+
+
+                for(int p = 0; p < np; ++p) {
+                    well_flux[ebosCompIdxToFlowCompIdx(p)] += cq_s[p].value();
+                }
+            }
+
+        }
+    }
 
 
 
@@ -738,6 +804,8 @@ namespace Opm
             average_density /= sum_kr;
 
             cell_perforation_pressure_diffs_[perf] = gravity_ * average_density * cell_perforation_depth_diffs_[perf];
+
+            Base::perf_densities_[perf] = average_density;
         }
     }
 

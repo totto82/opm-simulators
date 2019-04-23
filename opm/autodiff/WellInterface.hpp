@@ -257,6 +257,9 @@ namespace Opm
         // update perforation water throughput based on solved water rate
         virtual void updateWaterThroughput(const double dt, WellState& well_state) const = 0;
 
+
+
+
     protected:
 
         // to indicate a invalid completion
@@ -338,6 +341,9 @@ namespace Opm
 
         std::vector<RateVector> connectionRates_;
 
+        // average densities of the fluid in each perforation
+        std::vector<double> perf_densities_;
+
         const PhaseUsage& phaseUsage() const;
 
         int flowPhaseToEbosCompIdx( const int phaseIdx ) const;
@@ -361,6 +367,11 @@ namespace Opm
 
         double mostStrictBhpFromBhpLimits(Opm::DeferredLogger& deferred_logger) const;
 
+        std::vector<double> computeWellPotentialWithTHP(const Simulator& ebosSimulator,
+                                                        const double initial_bhp, // bhp from BHP constraints
+                                                        const std::vector<double>& initial_potential,
+                                                        Opm::DeferredLogger& deferred_logger) const;
+
         // a tuple type for ratio limit check.
         // first value indicates whether ratio limit is violated, when the ratio limit is not violated, the following two
         // values should not be used.
@@ -377,6 +388,9 @@ namespace Opm
                                              Opm::DeferredLogger& deferred_logger) const;
 
         double scalingFactor(const int comp_idx) const;
+
+        template <class ValueType>
+        ValueType calculateBhpFromThp(const std::vector<ValueType>& rates, const int control_index, Opm::DeferredLogger& deferred_logger) const;
 
         // whether a well is specified with a non-zero and valid VFP table number
         bool isVFPActive(Opm::DeferredLogger& deferred_logger) const;
@@ -415,6 +429,11 @@ namespace Opm
                                        Opm::DeferredLogger& deferred_logger);
 
         void scaleProductivityIndex(const int perfIdx, double& productivity_index, const bool new_well, Opm::DeferredLogger& deferred_logger);
+
+        virtual void computeWellRatesWithBhp(const Simulator& ebosSimulator,
+                                             const double& bhp,
+                                             std::vector<double>& well_flux,
+                                             Opm::DeferredLogger& deferred_logger) const = 0;
 
         // count the number of times an output log message is created in the productivity
         // index calculations

@@ -228,8 +228,11 @@ namespace Opm
         using Base::perf_length_;
         using Base::bore_diameters_;
 
+        using Base::perf_densities_;
+
+
         // densities of the fluid in each perforation
-        std::vector<double> perf_densities_;
+        //std::vector<double> perf_densities_;
         // pressure drop between different perforations
         std::vector<double> perf_pressure_diffs_;
 
@@ -326,20 +329,10 @@ namespace Opm
                              double& perf_vap_oil_rate,
                              Opm::DeferredLogger& deferred_logger) const;
 
-        // TODO: maybe we should provide a light version of computePerfRate, which does not include the
-        // calculation of the derivatives
-        void computeWellRatesWithBhp(const Simulator& ebosSimulator,
-                                     const EvalWell& bhp,
-                                     std::vector<double>& well_flux,
-                                     Opm::DeferredLogger& deferred_logger) const;
-
-        std::vector<double> computeWellPotentialWithTHP(const Simulator& ebosSimulator,
-                                                        const double initial_bhp, // bhp from BHP constraints
-                                                        const std::vector<double>& initial_potential,
-                                                        Opm::DeferredLogger& deferred_logger) const;
-
-        template <class ValueType>
-        ValueType calculateBhpFromThp(const std::vector<ValueType>& rates, const int control_index, Opm::DeferredLogger& deferred_logger) const;
+        virtual void computeWellRatesWithBhp(const Simulator& ebosSimulator,
+                                             const double& bhp,
+                                             std::vector<double>& well_flux,
+                                             Opm::DeferredLogger& deferred_logger) const override;
 
         double calculateThpFromBhp(const std::vector<double>& rates, const double bhp, Opm::DeferredLogger& deferred_logger) const;
 
