@@ -305,6 +305,8 @@ namespace Opm
                                      const bool& allow_cf,
                                      std::vector<EvalWell>& cq_s,
                                      EvalWell& perf_press,
+                                     double& perf_dis_gas_rate,
+                                     double& perf_vap_oil_rate,
                                      Opm::DeferredLogger& deferred_logger) const;
 
         // convert a Eval from reservoir to contain the derivative related to wells

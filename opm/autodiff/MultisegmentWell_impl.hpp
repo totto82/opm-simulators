@@ -640,8 +640,9 @@ namespace Opm
 
                 std::vector<EvalWell> cq_s(num_components_, 0.0);
                 EvalWell perf_press;
-                computePerfRatePressure(int_quants, mob, seg, perf, seg_pressure, allow_cf, cq_s, perf_press, deferred_logger);
-
+                double perf_dis_gas_rate = 0.;
+                double perf_vap_oil_rate = 0.;
+                computePerfRatePressure(int_quants, mob, seg, perf, seg_pressure, allow_cf, cq_s, perf_press, perf_dis_gas_rate, perf_vap_oil_rate, deferred_logger);
 
                 for(int p = 0; p < np; ++p) {
                     well_flux[ebosCompIdxToFlowCompIdx(p)] += cq_s[p].value();
@@ -1054,6 +1055,8 @@ namespace Opm
                             const bool& allow_cf,
                             std::vector<EvalWell>& cq_s,
                             EvalWell& perf_press,
+                            double& perf_dis_gas_rate,
+                            double& perf_vap_oil_rate,
                             Opm::DeferredLogger& deferred_logger) const
 
     {
@@ -1170,6 +1173,29 @@ namespace Opm
                 cq_s[comp_idx] = cmix_s[comp_idx] * cqt_is;
             }
         } // end for injection perforations
+
+        // calculating the perforation solution gas rate and solution oil rates
+        if (well_type_ == PRODUCER) {
+            if (FluidSystem::phaseIsActive(FluidSystem::oilPhaseIdx) && FluidSystem::phaseIsActive(FluidSystem::gasPhaseIdx)) {
+                const unsigned oilCompIdx = Indices::canonicalToActiveComponentIndex(FluidSystem::oilCompIdx);
+                const unsigned gasCompIdx = Indices::canonicalToActiveComponentIndex(FluidSystem::gasCompIdx);
+                // TODO: the formulations here remain to be tested with cases with strong crossflow through production wells
+                // s means standard condition, r means reservoir condition
+                // q_os = q_or * b_o + rv * q_gr * b_g
+                // q_gs = q_gr * g_g + rs * q_or * b_o
+                // d = 1.0 - rs * rv
+                // q_or = 1 / (b_o * d) * (q_os - rv * q_gs)
+                // q_gr = 1 / (b_g * d) * (q_gs - rs * q_os)
+
+                const double d = 1.0 - rv.value() * rs.value();
+                // vaporized oil into gas
+                // rv * q_gr * b_g = rv * (q_gs - rs * q_os) / d
+                perf_vap_oil_rate = rv.value() * (cq_s[gasCompIdx].value() - rs.value() * cq_s[oilCompIdx].value()) / d;
+                // dissolved of gas in oil
+                // rs * q_or * b_o = rs * (q_os - rv * q_gs) / d
+                perf_dis_gas_rate = rs.value() * (cq_s[oilCompIdx].value() - rv.value() * cq_s[gasCompIdx].value()) / d;
+            }
+        }
     }
 
 
@@ -1967,6 +1993,9 @@ namespace Opm
         duneD_ = 0.0;
         resWell_ = 0.0;
 
+        well_state.wellVaporizedOilRates()[index_of_well_] = 0.;
+        well_state.wellDissolvedGasRates()[index_of_well_] = 0.;
+
         // for the black oil cases, there will be four equations,
         // the first three of them are the mass balance equations, the last one is the pressure equations.
         //
@@ -1974,7 +2003,7 @@ namespace Opm
 
         const bool allow_cf = getAllowCrossFlow();
 
-        const int nseg = numberOfSegments();
+        const int nseg = numberOfSegments();             
 
         for (int seg = 0; seg < nseg; ++seg) {
             // calculating the accumulation term
@@ -2034,7 +2063,16 @@ namespace Opm
                 getMobility(ebosSimulator, perf, mob);
                 std::vector<EvalWell> cq_s(num_components_, 0.0);
                 EvalWell perf_press;
-                computePerfRatePressure(int_quants, mob, seg, perf, seg_pressure, allow_cf, cq_s, perf_press, deferred_logger);
+                double perf_dis_gas_rate = 0.;
+                double perf_vap_oil_rate = 0.;
+
+                computePerfRatePressure(int_quants, mob, seg, perf, seg_pressure, allow_cf, cq_s, perf_press, perf_dis_gas_rate, perf_vap_oil_rate, deferred_logger);
+
+                // updating the solution gas rate and solution oil rate
+                if (well_type_ == PRODUCER) {
+                    well_state.wellDissolvedGasRates()[index_of_well_] += perf_dis_gas_rate;
+                    well_state.wellVaporizedOilRates()[index_of_well_] += perf_vap_oil_rate;
+                }
 
                 // store the perf pressure and rates
                 const int rate_start_offset = (first_perf_ + perf) * number_of_phases_;
