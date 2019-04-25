@@ -384,7 +384,7 @@ namespace Opm
     computeWellPotentialWithTHP(const Simulator& ebosSimulator,
                                 const double initial_bhp, // bhp from BHP constraints
                                 const std::vector<double>& initial_potential,
-                                Opm::DeferredLogger& deferred_logger) const
+                                Opm::DeferredLogger& deferred_logger)
     {
         // TODO: pay attention to the situation that finally the potential is calculated based on the bhp control
         // TODO: should we consider the bhp constraints during the iterative process?

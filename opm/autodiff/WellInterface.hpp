@@ -188,7 +188,7 @@ namespace Opm
 
         virtual void updateWellStateWithTarget(const Simulator& ebos_simulator,
                                                WellState& well_state,
-                                               Opm::DeferredLogger& deferred_logger) const = 0;
+                                               Opm::DeferredLogger& deferred_logger) = 0;
 
         void updateWellControl(/* const */ Simulator& ebos_simulator,
                                WellState& well_state,
@@ -370,7 +370,7 @@ namespace Opm
         std::vector<double> computeWellPotentialWithTHP(const Simulator& ebosSimulator,
                                                         const double initial_bhp, // bhp from BHP constraints
                                                         const std::vector<double>& initial_potential,
-                                                        Opm::DeferredLogger& deferred_logger) const;
+                                                        Opm::DeferredLogger& deferred_logger);
 
         // a tuple type for ratio limit check.
         // first value indicates whether ratio limit is violated, when the ratio limit is not violated, the following two
@@ -433,7 +433,7 @@ namespace Opm
         virtual void computeWellRatesWithBhp(const Simulator& ebosSimulator,
                                              const double& bhp,
                                              std::vector<double>& well_flux,
-                                             Opm::DeferredLogger& deferred_logger) const = 0;
+                                             Opm::DeferredLogger& deferred_logger) = 0;
 
         // count the number of times an output log message is created in the productivity
         // index calculations

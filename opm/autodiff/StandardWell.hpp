@@ -149,7 +149,7 @@ namespace Opm
 
         virtual void updateWellStateWithTarget(const Simulator& ebos_simulator,
                                                WellState& well_state,
-                                               Opm::DeferredLogger& deferred_logger) const override;
+                                               Opm::DeferredLogger& deferred_logger) override;
 
         /// check whether the well equations get converged for this well
         virtual ConvergenceReport getWellConvergence(const std::vector<double>& B_avg,
@@ -332,7 +332,7 @@ namespace Opm
         virtual void computeWellRatesWithBhp(const Simulator& ebosSimulator,
                                              const double& bhp,
                                              std::vector<double>& well_flux,
-                                             Opm::DeferredLogger& deferred_logger) const override;
+                                             Opm::DeferredLogger& deferred_logger) override;
 
         double calculateThpFromBhp(const std::vector<double>& rates, const double bhp, Opm::DeferredLogger& deferred_logger) const;
 
@@ -385,11 +385,11 @@ namespace Opm
         // update WellState based on IPR and associated VFP table
         void updateWellStateWithTHPTargetIPR(const Simulator& ebos_simulator,
                                              WellState& well_state,
-                                             Opm::DeferredLogger& deferred_logger) const;
+                                             Opm::DeferredLogger& deferred_logger);
 
         void updateWellStateWithTHPTargetIPRProducer(const Simulator& ebos_simulator,
                                                      WellState& well_state,
-                                                     Opm::DeferredLogger& deferred_logger) const;
+                                                     Opm::DeferredLogger& deferred_logger);
 
         // for a well, when all drawdown are in the wrong direction, then this well will not
         // be able to produce/inject .

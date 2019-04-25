@@ -246,10 +246,10 @@ namespace Opm
         const bool use_inner_iterations = param_.use_inner_iterations_ms_wells_;
         if (use_inner_iterations) {
 
-            iterateWellEquations(ebosSimulator, B_avg, dt, well_state, deferred_logger);
+            iterateWellEquations(ebosSimulator, B_avg, dt, well_state, deferred_logger, 0);
         }
 
-        assembleWellEqWithoutIteration(ebosSimulator, dt, well_state, deferred_logger);
+        assembleWellEqWithoutIteration(ebosSimulator, dt, well_state, deferred_logger, 0);
     }
 
 
@@ -261,7 +261,7 @@ namespace Opm
     MultisegmentWell<TypeTag>::
     updateWellStateWithTarget(const Simulator& /* ebos_simulator */,
                               WellState& well_state,
-                              Opm::DeferredLogger& /* deferred_logger */) const
+                              Opm::DeferredLogger& /* deferred_logger */)
     {
         // Updating well state bas on well control
         // Target values are used as initial conditions for BHP, THP, and SURFACE_RATE
@@ -586,6 +586,7 @@ namespace Opm
         // does the well have a THP related constraint?
         if ( !Base::wellHasTHPConstraints() ) {
             assert(std::abs(bhp) != std::numeric_limits<double>::max());
+
             computeWellRatesWithBhp(ebosSimulator, bhp, well_potentials, deferred_logger);
         } else {
             // the well has a THP related constraint
@@ -619,8 +620,31 @@ namespace Opm
     computeWellRatesWithBhp(const Simulator& ebosSimulator,
                             const double& bhp,
                             std::vector<double>& well_flux,
-                            Opm::DeferredLogger& deferred_logger) const
+                            Opm::DeferredLogger& deferred_logger)
     {
+        // store a copy of the well state, we don't want to update the real well state
+        WellState copy = ebosSimulator.problem().wellModel().wellState();
+
+        // try improve the initial condition.
+        // we adjust the initial seg pressure with half the difference
+        // between the real bhp and the potential bhp.
+        // This is ad-hoc, but seems to work reasonbly well.
+        const double adjustBhp = (bhp - primary_variables_[0][SPres]);
+        for (int seg = 0; seg < numberOfSegments(); ++seg) {
+            // the segment pressure
+            primary_variables_[seg][SPres] += adjustBhp*0.5;
+            primary_variables_[seg][SPres] = Opm::max(primary_variables_[seg][SPres], 1e5);
+        }
+
+        // we need some intput the convergence calculations.
+        // we don't need the exact values so we just use something ad-hoc
+        const std::vector<Scalar> B_avg = {800,1000,1};
+        const double dt = 100;
+
+        // iterate to get a solution that satisfies the bhp potential.
+        iterateWellEquations(ebosSimulator, B_avg, dt, copy, deferred_logger, bhp);
+
+        // compute the potential and store in the flux vector.
         const int np = number_of_phases_;
         well_flux.resize(np, 0.0);
 
@@ -837,7 +861,7 @@ namespace Opm
     MultisegmentWell<TypeTag>::
     updateWellState(const BVectorWell& dwells,
                     WellState& well_state,
-                    Opm::DeferredLogger& /* deferred_logger */,
+                    Opm::DeferredLogger& deferred_logger,
                     const double relaxation_factor) const
     {
         const double dFLimit = param_.dwell_fraction_max_;
@@ -1598,6 +1622,26 @@ namespace Opm
 
 
 
+    template <typename TypeTag>
+    void
+    MultisegmentWell<TypeTag>::
+    assembleControlEqPot(Opm::DeferredLogger& deferred_logger, const double bhp) const
+    {
+        EvalWell control_eq(0.0);
+
+        control_eq = getSegmentPressure(0) - bhp;
+
+        // using control_eq to update the matrix and residuals
+
+        resWell_[0][SPres] = control_eq.value();
+        for (int pv_idx = 0; pv_idx < numWellEq; ++pv_idx) {
+            duneD_[0][0][SPres][pv_idx] = control_eq.derivative(pv_idx + numEq);
+        }
+    }
+
+
+
+
 
     template <typename TypeTag>
     void
@@ -1895,7 +1939,8 @@ namespace Opm
                          const std::vector<Scalar>& B_avg,
                          const double dt,
                          WellState& well_state,
-                         Opm::DeferredLogger& deferred_logger)
+                         Opm::DeferredLogger& deferred_logger,
+                         const double bhp)
     {
         const int max_iter_number = param_.max_inner_iter_ms_wells_;
         const WellState well_state0 = well_state;
@@ -1908,7 +1953,7 @@ namespace Opm
         const double min_relaxation_factor = 0.2;
         for (; it < max_iter_number; ++it) {
 
-            assembleWellEqWithoutIteration(ebosSimulator, dt, well_state, deferred_logger);
+            assembleWellEqWithoutIteration(ebosSimulator, dt, well_state, deferred_logger,bhp);
 
             const BVectorWell dx_well = mswellhelpers::invDXDirect(duneD_, resWell_);
 
@@ -1981,7 +2026,8 @@ namespace Opm
     assembleWellEqWithoutIteration(const Simulator& ebosSimulator,
                                    const double dt,
                                    WellState& well_state,
-                                   Opm::DeferredLogger& deferred_logger)
+                                   Opm::DeferredLogger& deferred_logger,
+                                   const double bhp)
     {
         // calculate the fluid properties needed.
         computeSegmentFluidProperties(ebosSimulator);
@@ -2109,7 +2155,10 @@ namespace Opm
 
             // the fourth dequation, the pressure drop equation
             if (seg == 0) { // top segment, pressure equation is the control equation
-                assembleControlEq(deferred_logger);
+                if (bhp > 0)
+                    assembleControlEqPot(deferred_logger, bhp);
+                else
+                    assembleControlEq(deferred_logger);
             } else {
                 assemblePressureEq(seg);
             }

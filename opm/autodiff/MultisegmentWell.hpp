@@ -121,7 +121,7 @@ namespace Opm
         /// updating the well state based the current control mode
         virtual void updateWellStateWithTarget(const Simulator& ebos_simulator,
                                                WellState& well_state,
-                                               Opm::DeferredLogger& deferred_logger) const override;
+                                               Opm::DeferredLogger& deferred_logger) override;
 
         /// check whether the well equations get converged for this well
         virtual ConvergenceReport getWellConvergence(const std::vector<double>& B_avg, Opm::DeferredLogger& deferred_logger) const override;
@@ -333,9 +333,12 @@ namespace Opm
         virtual void computeWellRatesWithBhp(const Simulator& ebosSimulator,
                                              const double& bhp,
                                              std::vector<double>& well_flux,
-                                             Opm::DeferredLogger& deferred_logger) const override;
+                                             Opm::DeferredLogger& deferred_logger) override;
 
         void assembleControlEq(Opm::DeferredLogger& deferred_logger) const;
+
+        void assembleControlEqPot(Opm::DeferredLogger& deferred_logger, const double bhp) const;
+
 
         void assemblePressureEq(const int seg) const;
 
@@ -367,12 +370,14 @@ namespace Opm
                                   const std::vector<Scalar>& B_avg,
                                   const double dt,
                                   WellState& well_state,
-                                  Opm::DeferredLogger& deferred_logger);
+                                  Opm::DeferredLogger& deferred_logger,
+                                  const double bhp);
 
         void assembleWellEqWithoutIteration(const Simulator& ebosSimulator,
                                             const double dt,
                                             WellState& well_state,
-                                            Opm::DeferredLogger& deferred_logger);
+                                            Opm::DeferredLogger& deferred_logger,
+                                            const double bhp);
 
         virtual void wellTestingPhysical(Simulator& simulator, const std::vector<double>& B_avg,
                                          const double simulation_time, const int report_step,

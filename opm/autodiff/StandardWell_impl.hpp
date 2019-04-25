@@ -1118,7 +1118,7 @@ namespace Opm
     StandardWell<TypeTag>::
     updateWellStateWithTarget(const Simulator& ebos_simulator,
                               WellState& well_state,
-                              Opm::DeferredLogger& deferred_logger) const
+                              Opm::DeferredLogger& deferred_logger)
     {
         
         // number of phases
@@ -1554,7 +1554,7 @@ namespace Opm
     StandardWell<TypeTag>::
     updateWellStateWithTHPTargetIPR(const Simulator& ebos_simulator,
                                     WellState& well_state,
-                                    Opm::DeferredLogger& deferred_logger) const
+                                    Opm::DeferredLogger& deferred_logger)
     {
         if (well_type_ == PRODUCER) {
             updateWellStateWithTHPTargetIPRProducer(ebos_simulator,
@@ -1578,7 +1578,7 @@ namespace Opm
     StandardWell<TypeTag>::
     updateWellStateWithTHPTargetIPRProducer(const Simulator& ebos_simulator,
                                             WellState& well_state,
-                                            Opm::DeferredLogger& deferred_logger) const
+                                            Opm::DeferredLogger& deferred_logger)
     {
 
         well_state.thp()[index_of_well_] = this->getTHPConstraint(deferred_logger);
@@ -2189,7 +2189,7 @@ namespace Opm
     computeWellRatesWithBhp(const Simulator& ebosSimulator,
                             const double& bhp,
                             std::vector<double>& well_flux,
-                            Opm::DeferredLogger& deferred_logger) const
+                            Opm::DeferredLogger& deferred_logger)
     {
         const int np = number_of_phases_;
         well_flux.resize(np, 0.0);
