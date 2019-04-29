@@ -481,6 +481,7 @@ namespace Opm
     assembleWellEq(const Simulator& ebosSimulator,
                    const std::vector<Scalar>& /* B_avg */,
                    const double dt,
+                   const double strictBHP,
                    WellState& well_state,
                    Opm::DeferredLogger& deferred_logger
                    )
@@ -2772,7 +2773,7 @@ namespace Opm
         updatePrimaryVariables(well_state_copy, deferred_logger);
         initPrimaryVariablesEvaluation();
 
-        const bool converged = this->solveWellEqUntilConverged(ebos_simulator, B_avg, well_state_copy, deferred_logger);
+        const bool converged = this->solveWellEqUntilConverged(ebos_simulator, B_avg, 0.0, well_state_copy, deferred_logger);
 
         if (!converged) {
             const std::string msg = " well " + name() + " did not get converged during well testing for physical reason";

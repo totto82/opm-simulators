@@ -154,6 +154,7 @@ namespace Opm
         virtual void assembleWellEq(const Simulator& ebosSimulator,
                                     const std::vector<Scalar>& B_avg,
                                     const double dt,
+                                    const double strictBHP,
                                     WellState& well_state,
                                     Opm::DeferredLogger& deferred_logger
                                     ) = 0;
@@ -190,7 +191,7 @@ namespace Opm
                                                WellState& well_state,
                                                Opm::DeferredLogger& deferred_logger) = 0;
 
-        void updateWellControl(/* const */ Simulator& ebos_simulator,
+        void updateWellControl(const Simulator& ebos_simulator,
                                WellState& well_state,
                                Opm::DeferredLogger& deferred_logger) /* const */;
 
@@ -423,8 +424,9 @@ namespace Opm
                                   const std::vector<double>& B_avg,
                                   Opm::DeferredLogger& deferred_logger);
 
-        bool solveWellEqUntilConverged(Simulator& ebosSimulator,
+        bool solveWellEqUntilConverged(const Simulator& ebosSimulator,
                                        const std::vector<double>& B_avg,
+                                       const double strictBHP,
                                        WellState& well_state,
                                        Opm::DeferredLogger& deferred_logger);
 

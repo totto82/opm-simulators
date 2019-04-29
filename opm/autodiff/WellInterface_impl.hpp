@@ -586,7 +586,7 @@ namespace Opm
     template<typename TypeTag>
     void
     WellInterface<TypeTag>::
-    updateWellControl(/* const */ Simulator& ebos_simulator,
+    updateWellControl(const Simulator& ebos_simulator,
                       WellState& well_state,
                       Opm::DeferredLogger& deferred_logger) /* const */
     {
@@ -1327,8 +1327,9 @@ namespace Opm
     template<typename TypeTag>
     bool
     WellInterface<TypeTag>::
-    solveWellEqUntilConverged(Simulator& ebosSimulator,
+    solveWellEqUntilConverged(const Simulator& ebosSimulator,
                               const std::vector<double>& B_avg,
+                              const double strictBHP,
                               WellState& well_state,
                               Opm::DeferredLogger& deferred_logger)
     {
@@ -1338,7 +1339,7 @@ namespace Opm
         bool converged;
         WellState well_state0 = well_state;
         do {
-            assembleWellEq(ebosSimulator, B_avg, dt, well_state, deferred_logger);
+            assembleWellEq(ebosSimulator, B_avg, dt, strictBHP, well_state, deferred_logger);
 
             auto report = getWellConvergence(B_avg, deferred_logger);
 
@@ -1349,6 +1350,9 @@ namespace Opm
 
             ++it;
             solveEqAndUpdateWellState(well_state, deferred_logger);
+
+            //if (strictBHP > 0)
+            //    this->computeWellConnectionPressures(ebosSimulator, well_state);
 
             updateWellControl(ebosSimulator, well_state, deferred_logger);
             initPrimaryVariablesEvaluation();
@@ -1399,13 +1403,14 @@ namespace Opm
     template<typename TypeTag>
     void
     WellInterface<TypeTag>::
-    solveWellForTesting(Simulator& ebosSimulator, WellState& well_state,
+    solveWellForTesting(Simulator& ebosSimulator,
+                        WellState& well_state,
                         const std::vector<double>& B_avg,
                         Opm::DeferredLogger& deferred_logger)
     {
         // keep a copy of the original well state
         const WellState well_state0 = well_state;
-        const bool converged = solveWellEqUntilConverged(ebosSimulator, B_avg, well_state, deferred_logger);
+        const bool converged = solveWellEqUntilConverged(ebosSimulator, B_avg, 0.0, well_state, deferred_logger);
         if (converged) {
             deferred_logger.debug("WellTest: Well equation for well " + name() +  " converged");
         } else {

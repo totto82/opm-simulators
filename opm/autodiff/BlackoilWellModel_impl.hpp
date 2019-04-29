@@ -723,7 +723,7 @@ namespace Opm {
     assembleWellEq(const std::vector<Scalar>& B_avg, const double dt, Opm::DeferredLogger& deferred_logger)
     {
         for (auto& well : well_container_) {
-            well->assembleWellEq(ebosSimulator_, B_avg, dt, well_state_, deferred_logger);
+            well->assembleWellEq(ebosSimulator_, B_avg, dt, 0.0, well_state_, deferred_logger);
         }
     }
 

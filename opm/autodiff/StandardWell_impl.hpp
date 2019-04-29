@@ -446,6 +446,7 @@ namespace Opm
     assembleWellEq(const Simulator& ebosSimulator,
                    const std::vector<Scalar>& /* B_avg */,
                    const double dt,
+                   const double strictBHP,
                    WellState& well_state,
                    Opm::DeferredLogger& deferred_logger)
     {
@@ -496,14 +497,16 @@ namespace Opm
             }
 
             if (has_energy) {
-                connectionRates_[perf][contiEnergyEqIdx] = 0.0;
+                if (strictBHP < 1.0e-3)
+                    connectionRates_[perf][contiEnergyEqIdx] = 0.0;
             }
 
             for (int componentIdx = 0; componentIdx < num_components_; ++componentIdx) {
                 // the cq_s entering mass balance equations need to consider the efficiency factors.
                 const EvalWell cq_s_effective = cq_s[componentIdx] * well_efficiency_factor_;
 
-                connectionRates_[perf][componentIdx] = Base::restrictEval(cq_s_effective);
+                if (strictBHP < 1.0e-3)
+                    connectionRates_[perf][componentIdx] = Base::restrictEval(cq_s_effective);
 
                 // subtract sum of phase fluxes in the well equations.
                 resWell_[0][componentIdx] += cq_s_effective.value();
@@ -511,12 +514,15 @@ namespace Opm
                 // assemble the jacobians
                 for (int pvIdx = 0; pvIdx < numWellEq; ++pvIdx) {
                     // also need to consider the efficiency factor when manipulating the jacobians.
-                    duneC_[0][cell_idx][pvIdx][componentIdx] -= cq_s_effective.derivative(pvIdx+numEq); // intput in transformed matrix
+                    if (strictBHP < 1.0e-3)
+                        duneC_[0][cell_idx][pvIdx][componentIdx] -= cq_s_effective.derivative(pvIdx+numEq); // intput in transformed matrix
+
                     invDuneD_[0][0][componentIdx][pvIdx] += cq_s_effective.derivative(pvIdx+numEq);
                 }
 
                 for (int pvIdx = 0; pvIdx < numEq; ++pvIdx) {
-                    duneB_[0][cell_idx][componentIdx][pvIdx] += cq_s_effective.derivative(pvIdx);
+                    if (strictBHP < 1.0e-3)
+                        duneB_[0][cell_idx][componentIdx][pvIdx] += cq_s_effective.derivative(pvIdx);
                 }
 
                 // Store the perforation phase flux for later usage.
@@ -580,7 +586,8 @@ namespace Opm
                     }
                     // compute the thermal flux
                     cq_r_thermal *= extendEval(fs.enthalpy(phaseIdx)) * extendEval(fs.density(phaseIdx));
-                    connectionRates_[perf][contiEnergyEqIdx] += Base::restrictEval(cq_r_thermal);
+                    if (strictBHP < 1.0e-3)
+                        connectionRates_[perf][contiEnergyEqIdx] += Base::restrictEval(cq_r_thermal);
                 }
             }
 
@@ -593,7 +600,8 @@ namespace Opm
                 } else {
                     cq_s_poly *= extendEval(intQuants.polymerConcentration() * intQuants.polymerViscosityCorrection());
                 }
-                connectionRates_[perf][contiPolymerEqIdx] = Base::restrictEval(cq_s_poly);
+                if (strictBHP < 1.0e-3)
+                    connectionRates_[perf][contiPolymerEqIdx] = Base::restrictEval(cq_s_poly);
 
                 if (this->has_polymermw) {
                     if (well_type_ == PRODUCER) {
@@ -605,7 +613,8 @@ namespace Opm
                             // re-injecting back through producer
                             cq_s_polymw *= 0.;
                         }
-                        connectionRates_[perf][this->contiPolymerMWEqIdx] = Base::restrictEval(cq_s_polymw);
+                        if (strictBHP < 1.0e-3)
+                            connectionRates_[perf][this->contiPolymerMWEqIdx] = Base::restrictEval(cq_s_polymw);
                     }
                 }
             }
@@ -646,7 +655,10 @@ namespace Opm
             resWell_[0][componentIdx] += resWell_loc.value();
         }
 
-        assembleControlEq(deferred_logger);
+        if (strictBHP > 0)
+            assembleControlEqPot(strictBHP);
+        else
+            assembleControlEq(deferred_logger);
 
         // do the local inversion of D.
         try {
@@ -770,6 +782,25 @@ namespace Opm
             invDuneD_[0][0][Bhp][pv_idx] = control_eq.derivative(pv_idx + numEq);
         }
     }
+
+
+    template <typename TypeTag>
+    void
+    StandardWell<TypeTag>::
+    assembleControlEqPot(const double bhp)
+    {
+        EvalWell control_eq(0.0);
+
+        control_eq = getBhp() - bhp;
+
+        // using control_eq to update the matrix and residuals
+
+        resWell_[0][Bhp] = control_eq.value();
+        for (int pv_idx = 0; pv_idx < numWellEq; ++pv_idx) {
+            invDuneD_[0][0][Bhp][pv_idx] = control_eq.derivative(pv_idx + numEq);
+        }
+    }
+
 
 
 
@@ -2191,6 +2222,20 @@ namespace Opm
                             std::vector<double>& well_flux,
                             Opm::DeferredLogger& deferred_logger)
     {
+
+        // create a copy of the well_state to use. If the operability checking is sucessful, we use this one
+        // to replace the original one
+        WellState well_state_copy = ebosSimulator.problem().wellModel().wellState();
+
+        // we need some intput the convergence calculations.
+        // we don't need the exact values so we just use something ad-hoc
+        const std::vector<Scalar> B_avg = {1000,800,1};
+        const bool converged = this->solveWellEqUntilConverged(ebosSimulator, B_avg, bhp, well_state_copy, deferred_logger);
+
+        updatePrimaryVariables(well_state_copy, deferred_logger);
+        computeWellConnectionPressures(ebosSimulator, well_state_copy);
+        initPrimaryVariablesEvaluation();
+
         const int np = number_of_phases_;
         well_flux.resize(np, 0.0);
 
@@ -2239,6 +2284,7 @@ namespace Opm
         // initialize the primary variables in Evaluation, which is used in computePerfRate for computeWellPotentials
         // TODO: for computeWellPotentials, no derivative is required actually
         initPrimaryVariablesEvaluation();
+
 
         const int np = number_of_phases_;
         well_potentials.resize(np, 0.0);
@@ -2661,7 +2707,7 @@ namespace Opm
         updatePrimaryVariables(well_state_copy, deferred_logger);
         initPrimaryVariablesEvaluation();
 
-        const bool converged = this->solveWellEqUntilConverged(ebos_simulator, B_avg, well_state_copy, deferred_logger);
+        const bool converged = this->solveWellEqUntilConverged(ebos_simulator, B_avg, 0.0, well_state_copy, deferred_logger);
 
         if (!converged) {
             const std::string msg = " well " + name() + " did not get converged during well testing for physical reason";

@@ -145,6 +145,7 @@ namespace Opm
         virtual void assembleWellEq(const Simulator& ebosSimulator,
                                     const std::vector<Scalar>& B_avg,
                                     const double dt,
+                                    const double strictBHP,
                                     WellState& well_state,
                                     Opm::DeferredLogger& deferred_logger) override;
 

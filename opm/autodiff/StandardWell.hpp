@@ -144,6 +144,7 @@ namespace Opm
         virtual void assembleWellEq(const Simulator& ebosSimulator,
                                     const std::vector<Scalar>& B_avg,
                                     const double dt,
+                                    const double strictBHP,
                                     WellState& well_state,
                                     Opm::DeferredLogger& deferred_logger) override;
 
@@ -355,6 +356,8 @@ namespace Opm
         void updateThp(WellState& well_state, Opm::DeferredLogger& deferred_logger) const;
 
         void assembleControlEq(Opm::DeferredLogger& deferred_logger);
+
+        void assembleControlEqPot(const double bhp);
 
         // handle the non reasonable fractions due to numerical overshoot
         void processFractions() const;

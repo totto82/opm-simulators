@@ -239,6 +239,7 @@ namespace Opm
     assembleWellEq(const Simulator& ebosSimulator,
                    const std::vector<Scalar>& B_avg,
                    const double dt,
+                   const double strictBHP,
                    WellState& well_state,
                    Opm::DeferredLogger& deferred_logger)
     {
@@ -246,10 +247,10 @@ namespace Opm
         const bool use_inner_iterations = param_.use_inner_iterations_ms_wells_;
         if (use_inner_iterations) {
 
-            iterateWellEquations(ebosSimulator, B_avg, dt, well_state, deferred_logger, 0);
+            iterateWellEquations(ebosSimulator, B_avg, dt, well_state, deferred_logger, strictBHP);
         }
 
-        assembleWellEqWithoutIteration(ebosSimulator, dt, well_state, deferred_logger, 0);
+        assembleWellEqWithoutIteration(ebosSimulator, dt, well_state, deferred_logger, strictBHP);
     }
 
 
@@ -638,7 +639,7 @@ namespace Opm
 
         // we need some intput the convergence calculations.
         // we don't need the exact values so we just use something ad-hoc
-        const std::vector<Scalar> B_avg = {800,1000,1};
+        const std::vector<Scalar> B_avg = {1000,800,1};
         const double dt = 100;
 
         // iterate to get a solution that satisfies the bhp potential.
