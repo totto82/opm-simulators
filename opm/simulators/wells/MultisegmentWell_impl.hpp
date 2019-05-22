@@ -61,7 +61,7 @@ namespace Opm
         // for other facilities needed but not available from parser, we need to process them here
 
         // initialize the segment_perforations_ and update perforation_segment_depth_diffs_
-        const WellConnections& completion_set = well_ecl_.getConnections();
+        const WellConnections& completion_set = well_ecl_->getConnections(current_step_);
         // index of the perforation within wells struct
         // there might be some perforations not active, which causes the number of the perforations in
         // well_ecl_ and wells struct different
@@ -246,7 +246,13 @@ namespace Opm
         const bool use_inner_iterations = param_.use_inner_iterations_ms_wells_;
         if (use_inner_iterations) {
 
-            iterateWellEquations(ebosSimulator, B_avg, dt, well_state, deferred_logger);
+            try {
+                iterateWellEquations(ebosSimulator, B_avg, dt, well_state, deferred_logger);
+            }
+            catch(std::exception& e) {
+                std::cout<< "no problem lets just try to solve the system coupled" << std::endl;
+            }
+
         }
 
         assembleWellEqWithoutIteration(ebosSimulator, dt, well_state, deferred_logger);
@@ -646,7 +652,7 @@ namespace Opm
                 total_seg_rate += scalingFactor(p) * segment_rates[number_of_phases_ * seg_index + p];
             }
 
-            primary_variables_[seg][GTotal] = total_seg_rate;
+            primary_variables_[seg][GTotal] = total_seg_rate + 1e-4;
             if (std::abs(total_seg_rate) > 0.) {
                 if (FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx)) {
                     const int water_pos = pu.phase_pos[Water];
@@ -829,10 +835,16 @@ namespace Opm
 
             // update the segment pressure
             {
-                const int sign = dwells[seg][SPres] > 0.? 1 : -1;
-                const double dx_limited = sign * std::min(std::abs(dwells[seg][SPres]), relaxation_factor * max_pressure_change);
-                // const double dx_limited = sign * std::min(std::abs(dwells[seg][SPres]) * relaxation_factor, max_pressure_change);
-                primary_variables_[seg][SPres] = std::max( old_primary_variables[seg][SPres] - dx_limited, 1e5);
+                if (seg > 0) {
+                    //dwells[seg][SPres]*=1e6;
+                    const int sign = dwells[seg][SPres] > 0.? 1 : -1;
+                    const double dx_limited = sign * std::min(std::abs(dwells[seg][SPres]), relaxation_factor * max_pressure_change);
+                    // const double dx_limited = sign * std::min(std::abs(dwells[seg][SPres]) * relaxation_factor, max_pressure_change);
+                    //const double dx_limited = sign * std::min(std::abs(dwells[seg][SPres]*1e6), relaxation_factor * max_pressure_change);
+                    primary_variables_[seg][SPres] = old_primary_variables[seg][SPres] - dx_limited;
+                } else {
+                    primary_variables_[seg][SPres] = old_primary_variables[seg][SPres] - relaxation_factor * dwells[seg][SPres];
+                }
             }
 
             // update the total rate // TODO: should we have a limitation of the total rate change?
@@ -1020,8 +1032,6 @@ namespace Opm
                             const bool& allow_cf,
                             std::vector<EvalWell>& cq_s,
                             EvalWell& perf_press,
-                            double& perf_dis_gas_rate,
-                            double& perf_vap_oil_rate,
                             Opm::DeferredLogger& deferred_logger) const
 
     {
@@ -1517,7 +1527,12 @@ namespace Opm
                 if (number_phases_under_control == 1) { // single phase control
                     for (int phase = 0; phase < number_of_phases_; ++phase) {
                         if (distr[phase] > 0.) { // under the control of this phase
-                            control_eq = getSegmentGTotal(0) * volumeFraction(0, flowPhaseToEbosCompIdx(phase)) - g[phase] * target_rate;
+                            //std::cout << "-----surface rate--------" << std::endl;
+                            //std::cout << getSegmentGTotal(0) << std::endl;
+                            //std::cout << volumeFraction(0, flowPhaseToEbosCompIdx(phase)) << std::endl;
+                            //std::cout << target_rate << std::endl;
+
+                            control_eq = getSegmentGTotal(0) * volumeFraction(0, flowPhaseToEbosCompIdx(phase))- g[phase] * target_rate;
                             break;
                         }
                     }
@@ -1582,6 +1597,8 @@ namespace Opm
             pressure_equation -= getFrictionPressureLoss(seg);
         }
 
+        //pressure_equation*=1e-6;
+
         resWell_[seg][SPres] = pressure_equation.value();
         for (int pv_idx = 0; pv_idx < numWellEq; ++pv_idx) {
             duneD_[seg][seg][SPres][pv_idx] = pressure_equation.derivative(pv_idx + numEq);
@@ -1589,7 +1606,7 @@ namespace Opm
 
         // contribution from the outlet segment
         const int outlet_segment_index = segmentNumberToIndex(segmentSet()[seg].outletSegment());
-        const EvalWell outlet_pressure = getSegmentPressure(outlet_segment_index);
+        const EvalWell outlet_pressure = getSegmentPressure(outlet_segment_index); //*1e-6;
 
         resWell_[seg][SPres] -= outlet_pressure.value();
         for (int pv_idx = 0; pv_idx < numWellEq; ++pv_idx) {
@@ -1599,6 +1616,11 @@ namespace Opm
         if (accelerationalPressureLossConsidered()) {
             handleAccelerationPressureLoss(seg);
         }
+
+//        resWell_[seg][SPres] *= 1e-6;
+//        for (int pv_idx = 0; pv_idx < numWellEq; ++pv_idx) {
+//            duneD_[seg][seg][SPres][pv_idx] *= 1e-6;
+//        }
     }
 
 
@@ -1651,7 +1673,7 @@ namespace Opm
         const double area = segmentSet()[seg].crossArea();
         const EvalWell mass_rate = segment_mass_rates_[seg];
         const EvalWell density = segment_densities_[seg];
-        const EvalWell out_velocity_head = mswellhelpers::velocityHead(area, mass_rate, density);
+        const EvalWell out_velocity_head = mswellhelpers::velocityHead(area, mass_rate, density); //*1e-6;
 
         resWell_[seg][SPres] -= out_velocity_head.value();
         for (int pv_idx = 0; pv_idx < numWellEq; ++pv_idx) {
@@ -1671,7 +1693,7 @@ namespace Opm
         for (const int inlet : segment_inlets_[seg]) {
             const EvalWell density = segment_densities_[inlet];
             const EvalWell mass_rate = segment_mass_rates_[inlet];
-            const EvalWell inlet_velocity_head = mswellhelpers::velocityHead(area, mass_rate, density);
+            const EvalWell inlet_velocity_head = mswellhelpers::velocityHead(area, mass_rate, density); //*1e-6;
             resWell_[seg][SPres] += inlet_velocity_head.value();
             for (int pv_idx = 0; pv_idx < numWellEq; ++pv_idx) {
                 duneD_[seg][inlet][SPres][pv_idx] += inlet_velocity_head.derivative(pv_idx + numEq);
@@ -1896,7 +1918,7 @@ namespace Opm
             if (is_oscillate || is_stagnate) {
                 // a factor value to reduce the relaxation_factor
                 const double reduction_mutliplier = 0.9;
-                relaxation_factor = std::max(relaxation_factor * reduction_mutliplier, min_relaxation_factor);
+                //relaxation_factor = std::max(relaxation_factor * reduction_mutliplier, min_relaxation_factor);
 
                 // debug output
                 std::ostringstream sstr;
@@ -2247,6 +2269,7 @@ namespace Opm
         assert(int(B_avg.size() ) == num_components_);
         std::vector<Scalar> residuals(numWellEq + 1, 0.0);
 
+        // TODO: maybe we should distinguish the bhp control or rate control equations here
         for (int seg = 0; seg < numberOfSegments(); ++seg) {
             for (int eq_idx = 0; eq_idx < numWellEq; ++eq_idx) {
                 double residual = 0.;
