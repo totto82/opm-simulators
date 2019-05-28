@@ -770,6 +770,9 @@ namespace Opm
                             number_of_segment = topSegmentIndex(new_index_well + 1) - new_top_segmnet_index;
                         }
 
+                        //if (prev_well_state->effectiveEventsOccurred(old_index_well))
+                        return;
+
                         for (int i = 0; i < number_of_segment * np; ++i) {
                             segrates_[new_top_segmnet_index * np + i] = prev_well_state->segRates()[old_top_segment_index * np + i];
                         }

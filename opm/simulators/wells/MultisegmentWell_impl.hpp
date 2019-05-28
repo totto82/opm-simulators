@@ -61,7 +61,7 @@ namespace Opm
         // for other facilities needed but not available from parser, we need to process them here
 
         // initialize the segment_perforations_ and update perforation_segment_depth_diffs_
-        const WellConnections& completion_set = well_ecl_->getConnections(current_step_);
+        const WellConnections& completion_set = well_ecl_.getConnections();
         // index of the perforation within wells struct
         // there might be some perforations not active, which causes the number of the perforations in
         // well_ecl_ and wells struct different
@@ -652,7 +652,7 @@ namespace Opm
                 total_seg_rate += scalingFactor(p) * segment_rates[number_of_phases_ * seg_index + p];
             }
 
-            primary_variables_[seg][GTotal] = total_seg_rate + 1e-4;
+            primary_variables_[seg][GTotal] = total_seg_rate + 1e-6;
             if (std::abs(total_seg_rate) > 0.) {
                 if (FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx)) {
                     const int water_pos = pu.phase_pos[Water];
@@ -1032,6 +1032,8 @@ namespace Opm
                             const bool& allow_cf,
                             std::vector<EvalWell>& cq_s,
                             EvalWell& perf_press,
+                            double& perf_dis_gas_rate,
+                            double& perf_vap_oil_rate,
                             Opm::DeferredLogger& deferred_logger) const
 
     {
@@ -1918,7 +1920,7 @@ namespace Opm
             if (is_oscillate || is_stagnate) {
                 // a factor value to reduce the relaxation_factor
                 const double reduction_mutliplier = 0.9;
-                //relaxation_factor = std::max(relaxation_factor * reduction_mutliplier, min_relaxation_factor);
+                relaxation_factor = std::max(relaxation_factor * reduction_mutliplier, min_relaxation_factor);
 
                 // debug output
                 std::ostringstream sstr;

@@ -55,6 +55,10 @@ namespace mswellhelpers
         // Checking if there is any inf or nan in y
         // it will be the solution before we find a way to catch the singularity of the matrix
         for (size_t i_block = 0; i_block < y.size(); ++i_block) {
+            //std::cout << D[i_block][i_block] << std::endl;
+            //std::cout << x[i_block] << std::endl;
+            //std::cout << y[i_block] << std::endl;
+
             for (size_t i_elem = 0; i_elem < y[i_block].size(); ++i_elem) {
 
                 if (std::isinf(y[i_block][i_elem]) || std::isnan(y[i_block][i_elem]) ) {

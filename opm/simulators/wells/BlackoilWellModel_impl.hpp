@@ -300,13 +300,102 @@ namespace Opm {
         const int reportStepIdx = ebosSimulator_.episodeIndex();
         const double simulationTime = ebosSimulator_.time();
 
+        //const bool new_well = well_state_.effectiveEventsOccurred(w);
+        if (true) {
+            // The well state initialize bhp with the cell pressure in the top cell.
+            // We must therefore provide it with updated cell pressures
+            size_t nc = number_of_cells_;
+            std::vector<double> cellPressures(nc, 0.0);
+            ElementContext elemCtx(ebosSimulator_);
+            const auto& gridView = ebosSimulator_.vanguard().gridView();
+            const auto& elemEndIt = gridView.template end</*codim=*/0>();
+            for (auto elemIt = gridView.template begin</*codim=*/0>();
+                 elemIt != elemEndIt;
+                 ++elemIt)
+            {
+                const auto& elem = *elemIt;
+                if (elem.partitionType() != Dune::InteriorEntity) {
+                    continue;
+                }
+                elemCtx.updatePrimaryStencil(elem);
+                elemCtx.updatePrimaryIntensiveQuantities(/*timeIdx=*/0);
+
+                const unsigned cellIdx = elemCtx.globalSpaceIndex(/*spaceIdx=*/0, /*timeIdx=*/0);
+                const auto& intQuants = elemCtx.intensiveQuantities(/*spaceIdx=*/0, /*timeIdx=*/0);
+                const auto& fs = intQuants.fluidState();
+
+                const double p = fs.pressure(FluidSystem::oilPhaseIdx).value();
+                cellPressures[cellIdx] = p;
+            }
+
+            well_state_.init(wells(), cellPressures, schedule(), wells_ecl_, reportStepIdx, &previous_well_state_, phase_usage_);
+
+            // handling MS well related
+            if (param_.use_multisegment_well_&& anyMSWellOpenLocal(wells(), reportStepIdx)) { // if we use MultisegmentWell model
+                well_state_.initWellStateMSWell(wells(), wells_ecl_, reportStepIdx, phase_usage_, &previous_well_state_);
+            }
+
+
+            int exception_thrown = 0;
+            try {
+                // test wells
+                wellTesting(reportStepIdx, simulationTime, local_deferredLogger);
+
+                // create the well container
+                well_container_ = createWellContainer(reportStepIdx, wells(), /*allow_closing_opening_wells=*/ true, local_deferredLogger, true);
+
+                // do the initialization for all the wells
+                // TODO: to see whether we can postpone of the intialization of the well containers to
+                // optimize the usage of the following several member variables
+                for (auto& well : well_container_) {
+                    well->init(&phase_usage_, depth_, gravity_, number_of_cells_);
+                }
+
+                // update the updated cell flag
+                std::fill(is_cell_perforated_.begin(), is_cell_perforated_.end(), false);
+                for (auto& well : well_container_) {
+                    well->updatePerforatedCell(is_cell_perforated_);
+                }
+
+                // calculate the efficiency factors for each well
+                calculateEfficiencyFactors();
+
+                if (has_polymer_)
+                {
+                    const Grid& grid = ebosSimulator_.vanguard().grid();
+                    if (PolymerModule::hasPlyshlog() || GET_PROP_VALUE(TypeTag, EnablePolymerMW) ) {
+                        computeRepRadiusPerfLength(grid, local_deferredLogger);
+                    }
+                }
+
+                calculateExplicitQuantities(local_deferredLogger);
+                prepareTimeStep(local_deferredLogger);
+
+                updateWellControls(local_deferredLogger);
+                // Set the well primary variables based on the value of well solutions
+                initPrimaryVariablesEvaluation();
+
+                std::vector< Scalar > B_avg(numComponents(), Scalar() );
+                computeAverageFormationFactor(B_avg);
+
+                // solve the well equations as a pre-processing step
+                Scalar dt = ebosSimulator_.timeStepSize();
+                last_report_ = solveWellEq(B_avg, dt, local_deferredLogger);
+
+
+            } catch (std::exception& e) {
+                exception_thrown = 1;
+            }
+        }
+
+
         int exception_thrown = 0;
         try {
             // test wells
             wellTesting(reportStepIdx, simulationTime, local_deferredLogger);
 
             // create the well container
-            well_container_ = createWellContainer(reportStepIdx, wells(), /*allow_closing_opening_wells=*/true, local_deferredLogger);
+            well_container_ = createWellContainer(reportStepIdx, wells(), /*allow_closing_opening_wells=*/true, local_deferredLogger, false);
 
             // do the initialization for all the wells
             // TODO: to see whether we can postpone of the intialization of the well containers to
@@ -414,6 +503,7 @@ namespace Opm {
         updateWellTestState(simulationTime, wellTestState_);
 
         // calculate the well potentials for output
+        // TODO: when necessary
         try {
             std::vector<double> well_potentials;
             computeWellPotentials(well_potentials, local_deferredLogger);
@@ -512,7 +602,7 @@ namespace Opm {
     template<typename TypeTag>
     std::vector<typename BlackoilWellModel<TypeTag>::WellInterfacePtr >
     BlackoilWellModel<TypeTag>::
-    createWellContainer(const int time_step, const Wells* wells, const bool allow_closing_opening_wells, Opm::DeferredLogger& deferred_logger)
+    createWellContainer(const int time_step, const Wells* wells, const bool allow_closing_opening_wells, Opm::DeferredLogger& deferred_logger, bool simpleWell)
     {
         std::vector<WellInterfacePtr> well_container;
 
@@ -587,7 +677,9 @@ namespace Opm {
                 const int well_cell_top = wells->well_cells[wells->well_connpos[w]];
                 const int pvtreg = pvt_region_idx_[well_cell_top];
 
-                if ( !well_ecl.isMultiSegment() || !param_.use_multisegment_well_) {
+                //const bool new_well = well_state_.effectiveEventsOccurred(w);
+
+                if ( !well_ecl.isMultiSegment() || !param_.use_multisegment_well_ || simpleWell) {
                     if ( GET_PROP_VALUE(TypeTag, EnablePolymerMW) && well_ecl.isInjector() ) {
                         well_container.emplace_back(new StandardWellV<TypeTag>(well_ecl, time_step, wells,
                                                     param_, *rateConverter_, pvtreg, numComponents() ) );
@@ -1079,7 +1171,7 @@ namespace Opm {
         const double invalid_vfp = -2147483647;
         auto well_state_copy = well_state_;
         const Wells* local_wells = clone_wells(wells());
-        std::vector<WellInterfacePtr> well_container_copy = createWellContainer(reportStepIdx, local_wells, /*allow_closing_opening_wells=*/ false, deferred_logger);
+        std::vector<WellInterfacePtr> well_container_copy = createWellContainer(reportStepIdx, local_wells, /*allow_closing_opening_wells=*/ false, deferred_logger, false);
 
         // average B factors are required for the convergence checking of well equations
         // Note: this must be done on all processes, even those with
