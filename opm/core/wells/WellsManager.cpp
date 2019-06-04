@@ -568,22 +568,19 @@ namespace Opm
                 {
                     switch (well.getPreferredPhase()) {
                     case Phase::WATER:
-                        if (!phaseUsage.phase_used[BlackoilPhases::Aqua]) {
-                            OPM_THROW(std::runtime_error, "Water phase not used, yet found water-preferring well.");
+                        if (phaseUsage.phase_used[BlackoilPhases::Aqua]) {
+                            cf[phaseUsage.phase_pos[BlackoilPhases::Aqua]] = 1.0;
                         }
-                        cf[phaseUsage.phase_pos[BlackoilPhases::Aqua]] = 1.0;
                         break;
                     case Phase::OIL:
-                        if (!phaseUsage.phase_used[BlackoilPhases::Liquid]) {
-                            OPM_THROW(std::runtime_error, "Oil phase not used, yet found oil-preferring well.");
+                        if (phaseUsage.phase_used[BlackoilPhases::Liquid]) {
+                            cf[phaseUsage.phase_pos[BlackoilPhases::Liquid]] = 1.0;
                         }
-                        cf[phaseUsage.phase_pos[BlackoilPhases::Liquid]] = 1.0;
                         break;
                     case Phase::GAS:
-                        if (!phaseUsage.phase_used[BlackoilPhases::Vapour]) {
-                            OPM_THROW(std::runtime_error, "Gas phase not used, yet found gas-preferring well.");
+                        if (phaseUsage.phase_used[BlackoilPhases::Vapour]) {
+                            cf[phaseUsage.phase_pos[BlackoilPhases::Vapour]] = 1.0;
                         }
-                        cf[phaseUsage.phase_pos[BlackoilPhases::Vapour]] = 1.0;
                         break;
                     default:
                         OPM_THROW(std::logic_error, "Unknown preferred phase: " << well.getPreferredPhase());
