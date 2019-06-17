@@ -118,8 +118,15 @@ public:
      * \brief Returns true if the error of the solution is below the
      *        tolerance.
      */
-    bool converged() const
+    bool converged() const                        
     {
+        const std::vector<Scalar> B_avg = {1.06032, 1.00122, 0.00724393};
+        const auto& Report = this->simulator_.problem().wellModel().getWellConvergence(B_avg);
+        bool wellConv = Report.converged();
+        //std::cout << Report.converged() << std::endl;
+        if (!wellConv)
+            return false;
+
         if (errorPvFraction_ < relaxedMaxPvFraction_)
             return (this->error_ < relaxedTolerance_ && errorSum_ < sumTolerance_) ;
         else if (this->numIterations() > numStrictIterations_)

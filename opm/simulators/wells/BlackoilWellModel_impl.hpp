@@ -1090,6 +1090,8 @@ namespace Opm {
         // no wells needing testing, otherwise we will have locking.
         std::vector< Scalar > B_avg(numComponents(), Scalar() );
         computeAverageFormationFactor(B_avg);
+        //for (int i = 0; i < numComponents(); i++)
+            //std::cout << B_avg[i] << std::endl;
 
         const Opm::SummaryConfig& summaryConfig = ebosSimulator_.vanguard().summaryConfig();
         const auto& summaryState = ebosSimulator_.vanguard().summaryState();
