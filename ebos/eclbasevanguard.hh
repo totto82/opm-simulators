@@ -45,6 +45,7 @@
 #include <opm/parser/eclipse/EclipseState/Schedule/Schedule.hpp>
 #include <opm/parser/eclipse/EclipseState/SummaryConfig/SummaryConfig.hpp>
 #include <opm/parser/eclipse/EclipseState/Schedule/SummaryState.hpp>
+#include <opm/parser/eclipse/EclipseState/Schedule/Group/GuideRate.hpp>
 
 
 #if HAVE_MPI
@@ -381,6 +382,8 @@ public:
             Opm::RelpermDiagnostics relpermDiagnostics;
             relpermDiagnostics.diagnosis(*eclState_, *deck_, asImp_().grid());
         }
+
+        guideRateModel_(schedule());
     }
 
     /*!
@@ -448,6 +451,13 @@ public:
 
     const Opm::SummaryState& summaryState() const
     { return summaryState_; }
+
+    Opm::GuideRate& guideRate()
+    { return guideRateModel_; }
+
+    const Opm::GuideRateModel& guideRateModel() const
+    { return guideRateModel_; }
+
 
     /*!
      * \brief Parameter deciding the edge-weight strategy of the load balancer.
@@ -599,6 +609,7 @@ private:
     Opm::SummaryConfig* eclSummaryConfig_;
 
     Opm::SummaryState summaryState_;
+    Opm::GuideRateModel guideRateModel_;
 
     Dune::EdgeWeightMethod edgeWeightsMethod_;
 };
