@@ -203,6 +203,11 @@ namespace Opm {
             // Check if well equations is converged.
             ConvergenceReport getWellConvergence(const std::vector<Scalar>& B_avg) const;
 
+            bool hasWellConverged(const std::vector<Scalar>& B_avg) const {
+                ConvergenceReport report = getWellConvergence(B_avg);
+                return report.converged();
+            }
+
             // return all the wells.
             const WellCollection& wellCollection() const;
             // return non const reference to all the wells.

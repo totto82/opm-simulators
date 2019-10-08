@@ -192,6 +192,8 @@ public:
         if (enableAsyncOutput && collectToIORank_.isIORank())
             numWorkerThreads = 1;
         taskletRunner_.reset(new TaskletRunner(numWorkerThreads));
+
+        totalNumberOfNewtonIterations_ = 0;
     }
 
     ~EclWriter()
@@ -246,8 +248,9 @@ public:
             simulator_.setupTimer().realTimeElapsed() +
             simulator_.vanguard().externalSetupTime();
 
+        int numNewtonIterations = simulator_.model().newtonMethod().numIterations();
+        totalNumberOfNewtonIterations_ += numNewtonIterations;
         Opm::data::Wells localWellData = simulator_.problem().wellModel().wellData();
-
         const auto& gridView = simulator_.vanguard().gridView();
         int numElements = gridView.size(/*codim=*/0);
         bool log = collectToIORank_.isIORank();
@@ -277,6 +280,12 @@ public:
             // Add TCPU
             if (totalCpuTime != 0.0)
                 miscSummaryData["TCPU"] = totalCpuTime;
+
+            if (numNewtonIterations != 0)
+                miscSummaryData["NEWTON"] = numNewtonIterations;
+
+            if (totalNumberOfNewtonIterations_ != 0)
+                miscSummaryData["MSUMNEWT"] = totalNumberOfNewtonIterations_;
 
             const Opm::data::Wells& wellData = collectToIORank_.isParallel() ? collectToIORank_.globalWellData() : localWellData;
 
@@ -715,8 +724,7 @@ private:
     Grid globalGrid_;
     std::unique_ptr<TaskletRunner> taskletRunner_;
     Scalar restartTimeStepSize_;
-
-
+    int totalNumberOfNewtonIterations_;
 };
 } // namespace Opm
 
