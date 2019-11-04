@@ -3929,7 +3929,7 @@ namespace Opm
         // Find bhp values for inflow relation corresponding to flo samples.
         std::vector<double> bhp_samples;
         for (double flo_sample : flo_samples) {
-            if (flo_sample < flo_bhp_limit) {
+            if (flo_sample > flo_bhp_limit) {
                 // We would have to go under the bhp limit to obtain a
                 // flow of this magnitude. We associate all such flows
                 // with simply the bhp limit. The first one
