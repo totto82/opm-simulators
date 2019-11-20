@@ -972,8 +972,11 @@ namespace Opm
             return;
         }
 
-        if (!group.isInjectionGroup())
+        if (!group.isInjectionGroup()) {
+            const auto& controls = well.injectionControls(summaryState);
+            control_eq = getBhp() - controls.bhp_limit;
             return;
+        }
 
         int phasePos;
         Well::GuideRateTarget wellTarget;
@@ -1101,8 +1104,11 @@ namespace Opm
             return;
         }
 
-        if (!group.isProductionGroup())
+        if (!group.isProductionGroup()) {
+            const auto& controls = well.productionControls(summaryState);
+            control_eq = getBhp() - controls.bhp_limit;
             return;
+        }
 
         const auto& groupcontrols = group.productionControls(summaryState);
 
@@ -1668,7 +1674,7 @@ namespace Opm
             }
             case Well::InjectorCMode::GRUP:
             {
-                //do nothing at the moment
+                well_state.bhp()[well_index] = controls.bhp_limit;
                 break;
             }
             case Well::InjectorCMode::CMODE_UNDEFINED:
@@ -1794,7 +1800,7 @@ namespace Opm
             }
             case Well::ProducerCMode::GRUP:
             {
-                //do nothing at the moment
+                well_state.bhp()[well_index] = controls.bhp_limit;
                 break;
             }
             case Well::ProducerCMode::CMODE_UNDEFINED:

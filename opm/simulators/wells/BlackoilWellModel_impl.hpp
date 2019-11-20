@@ -786,24 +786,9 @@ namespace Opm {
                 calculateExplicitQuantities(local_deferredLogger);
                 prepareTimeStep(local_deferredLogger);
             }
-            updateWellControls(local_deferredLogger, true);
-
-            // only check group controls for iterationIdx smaller then nupcol
             const int reportStepIdx = ebosSimulator_.episodeIndex();
             const int nupcol = schedule().getNupcol(reportStepIdx);
-            if (iterationIdx < nupcol) {
-                if( localWellsActive() ) {
-                    const Group& fieldGroup = schedule().getGroup("FIELD", reportStepIdx);
-                    std::vector<double> groupTargetReduction(numPhases(), 0.0);
-                    wellGroupHelpers::updateGroupTargetReduction(fieldGroup, schedule(), reportStepIdx, /*isInjector*/ false, well_state_, groupTargetReduction);
-                    std::vector<double> groupTargetReductionInj(numPhases(), 0.0);
-                    wellGroupHelpers::updateGroupTargetReduction(fieldGroup, schedule(), reportStepIdx, /*isInjector*/ true, well_state_, groupTargetReductionInj);
-                    std::vector<double> rein(numPhases(), 0.0);
-                    wellGroupHelpers::updateREINForGroups(fieldGroup, schedule(), reportStepIdx, well_state_, rein);
-                    double resv = 0.0;
-                    wellGroupHelpers::updateVREPForGroups(fieldGroup, schedule(), reportStepIdx, well_state_, resv);
-                }
-            }
+            updateWellControls(local_deferredLogger, iterationIdx < nupcol);
 
             // Set the well primary variables based on the value of well solutions
             initPrimaryVariablesEvaluation();
@@ -1021,7 +1006,7 @@ namespace Opm {
                 // are active wells anywhere in the global domain.
                 if( wellsActive() )
                 {
-                    updateWellControls(deferred_logger, /*don't switch group controls*/false);
+                    updateWellControls(deferred_logger, /*don't switch group controls*/true);
                     initPrimaryVariablesEvaluation();
                 }
             } catch (std::exception& e) {
@@ -1130,6 +1115,17 @@ namespace Opm {
             const int reportStepIdx = ebosSimulator_.episodeIndex();
             const Group& fieldGroup = schedule().getGroup("FIELD", reportStepIdx);
             checkGroupConstraints(fieldGroup, deferred_logger);
+
+            if( localWellsActive() ) {
+                std::vector<double> groupTargetReduction(numPhases(), 0.0);
+                wellGroupHelpers::updateGroupTargetReduction(fieldGroup, schedule(), reportStepIdx, /*isInjector*/ false, well_state_, groupTargetReduction);
+                std::vector<double> groupTargetReductionInj(numPhases(), 0.0);
+                wellGroupHelpers::updateGroupTargetReduction(fieldGroup, schedule(), reportStepIdx, /*isInjector*/ true, well_state_, groupTargetReductionInj);
+                std::vector<double> rein(numPhases(), 0.0);
+                wellGroupHelpers::updateREINForGroups(fieldGroup, schedule(), reportStepIdx, well_state_, rein);
+                double resv = 0.0;
+                wellGroupHelpers::updateVREPForGroups(fieldGroup, schedule(), reportStepIdx, well_state_, resv);
+            }
         }
 
         for (const auto& well : well_container_) {
