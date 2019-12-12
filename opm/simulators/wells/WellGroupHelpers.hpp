@@ -153,12 +153,12 @@ namespace Opm {
 
 
     inline double sumWellPhaseRates(const std::vector<double>& rates, const Group& group, const Schedule& schedule, const WellStateFullyImplicitBlackoil& wellState, const int reportStepIdx, const int phasePos,
-                                    const bool injector) {
+                                    const bool injector, const bool onlyGroup) {
 
         double rate = 0.0;
         for (const std::string& groupName : group.groups()) {
             const Group& groupTmp = schedule.getGroup(groupName, reportStepIdx);
-            rate += groupTmp.getGroupEfficiencyFactor()*sumWellPhaseRates(rates, groupTmp, schedule, wellState, reportStepIdx, phasePos, injector);
+            rate += groupTmp.getGroupEfficiencyFactor()*sumWellPhaseRates(rates, groupTmp, schedule, wellState, reportStepIdx, phasePos, injector, onlyGroup);
         }
         const auto& end = wellState.wellMap().end();
         for (const std::string& wellName : group.wells()) {
@@ -178,20 +178,24 @@ namespace Opm {
 
             double factor = wellEcl.getEfficiencyFactor();
             const auto wellrate_index = well_index * wellState.numPhases();
-            if (injector)
-                rate += factor * rates[ wellrate_index + phasePos];
-            else
-                rate -= factor * rates[ wellrate_index + phasePos];
+            if (injector) {
+                if (!onlyGroup || wellState.currentInjectionControls()[well_index] != Well::InjectorCMode::GRUP)
+                    rate += factor * rates[ wellrate_index + phasePos];
+            } else {
+                if (!onlyGroup || wellState.currentProductionControls()[well_index] !=  Well::ProducerCMode::GRUP)
+                    rate -= factor * rates[ wellrate_index + phasePos];
+            }
+
         }
         return rate;
     }
 
     inline double sumWellRates(const Group& group, const Schedule& schedule, const WellStateFullyImplicitBlackoil& wellState, const int reportStepIdx, const int phasePos, const bool injector) {
-        return sumWellPhaseRates(wellState.wellRates(), group, schedule, wellState, reportStepIdx, phasePos, injector);
+        return sumWellPhaseRates(wellState.wellRates(), group, schedule, wellState, reportStepIdx, phasePos, injector, false);
     }
 
     inline double sumWellResRates(const Group& group, const Schedule& schedule, const WellStateFullyImplicitBlackoil& wellState, const int reportStepIdx, const int phasePos, const bool injector) {
-        return sumWellPhaseRates(wellState.wellReservoirRates(), group, schedule, wellState, reportStepIdx, phasePos, injector);
+        return sumWellPhaseRates(wellState.wellReservoirRates(), group, schedule, wellState, reportStepIdx, phasePos, injector, false);
     }
 
     inline double sumSolventRates(const Group& group, const Schedule& schedule, const WellStateFullyImplicitBlackoil& wellState, const int reportStepIdx, const bool injector) {
@@ -310,15 +314,15 @@ namespace Opm {
 
         double oilPot = 0.0;
         if (pu.phase_used[BlackoilPhases::Liquid])
-            oilPot = sumWellPhaseRates(wellState.wellPotentials(), group, schedule, wellState, reportStepIdx, pu.phase_pos[BlackoilPhases::Liquid], isInjector);
+            oilPot = sumWellPhaseRates(wellState.wellPotentials(), group, schedule, wellState, reportStepIdx, pu.phase_pos[BlackoilPhases::Liquid], isInjector, true);
 
         double gasPot = 0.0;
         if (pu.phase_used[BlackoilPhases::Vapour])
-            gasPot = sumWellPhaseRates(wellState.wellPotentials(), group, schedule, wellState, reportStepIdx, pu.phase_pos[BlackoilPhases::Vapour], isInjector);
+            gasPot = sumWellPhaseRates(wellState.wellPotentials(), group, schedule, wellState, reportStepIdx, pu.phase_pos[BlackoilPhases::Vapour], isInjector, true);
 
         double waterPot = 0.0;
         if (pu.phase_used[BlackoilPhases::Aqua])
-            waterPot = sumWellPhaseRates(wellState.wellPotentials(), group, schedule, wellState, reportStepIdx, pu.phase_pos[BlackoilPhases::Aqua], isInjector);
+            waterPot = sumWellPhaseRates(wellState.wellPotentials(), group, schedule, wellState, reportStepIdx, pu.phase_pos[BlackoilPhases::Aqua], isInjector, true);
 
         guideRate->compute(group.name(), reportStepIdx, simTime, oilPot, gasPot, waterPot);
     }
@@ -332,7 +336,7 @@ namespace Opm {
         }
         const int np = wellState.numPhases();
         for (int phase = 0; phase < np; ++phase) {
-            resv += sumWellPhaseRates(wellState.wellReservoirRates(), group, schedule, wellState, reportStepIdx, phase, /*isInjector*/ false);
+            resv += sumWellPhaseRates(wellState.wellReservoirRates(), group, schedule, wellState, reportStepIdx, phase, /*isInjector*/ false, false);
         }
 
         wellState.setCurrentInjectionVREPRates(group.name(), resv);
@@ -349,7 +353,7 @@ namespace Opm {
             }
         }
         for (int phase = 0; phase < np; ++phase) {
-            rein[phase] = sumWellPhaseRates(wellState.wellRates(), group, schedule, wellState, reportStepIdx, phase, /*isInjector*/ false);
+            rein[phase] = sumWellPhaseRates(wellState.wellRates(), group, schedule, wellState, reportStepIdx, phase, /*isInjector*/ false, false);
         }
 
         // add import rate and substract consumption rate for group for gas
