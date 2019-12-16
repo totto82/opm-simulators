@@ -1025,8 +1025,7 @@ namespace Opm
         const std::vector<double>& groupInjectionReductions = well_state.currentInjectionGroupReductionRates(group.name());
         double groupTargetReduction = groupInjectionReductions[phasePos];
         double fraction = wellGroupHelpers::wellFractionFromGuideRates(well, schedule, well_state, current_step_, Base::guide_rate_, wellTarget, /*isInjector*/true);
-        wellGroupHelpers::accumulateGroupFractions(well.groupName(), group.name(), schedule, well_state, current_step_, Base::guide_rate_, groupTarget, /*isInjector*/true, fraction);
-
+        wellGroupHelpers::accumulateGroupPotentialFractions(well.groupName(), group.name(), schedule, well_state, current_step_, phasePos, /*isInjector*/true, fraction);
         switch(currentGroupControl) {
         case Group::InjectionCMode::NONE:
         {
