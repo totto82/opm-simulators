@@ -1199,20 +1199,26 @@ namespace Opm {
             well->updateWellControl(ebosSimulator_, well_state_, deferred_logger);
         }
 
+        const int nupcol = schedule().getNupcol(reportStepIdx);
+        const int iterationIdx = ebosSimulator_.model().newtonMethod().numIterations();
+        if (iterationIdx < nupcol) {
+            well_state_nupcol_ = well_state_;
+        }
+
         // the group target reduction rates needs to be update since wells may have swicthed to/from GRUP control
         // Currently the group targer reduction does not honor NUPCOL
         if( localWellsActive() ) {
             std::vector<double> groupTargetReduction(numPhases(), 0.0);
-            wellGroupHelpers::updateGroupTargetReduction(fieldGroup, schedule(), reportStepIdx, /*isInjector*/ false, well_state_, groupTargetReduction);
+            wellGroupHelpers::updateGroupTargetReduction(fieldGroup, schedule(), reportStepIdx, /*isInjector*/ false, well_state_nupcol_, well_state_, groupTargetReduction);
             std::vector<double> groupTargetReductionInj(numPhases(), 0.0);
-            wellGroupHelpers::updateGroupTargetReduction(fieldGroup, schedule(), reportStepIdx, /*isInjector*/ true, well_state_, groupTargetReductionInj);
+            wellGroupHelpers::updateGroupTargetReduction(fieldGroup, schedule(), reportStepIdx, /*isInjector*/ true, well_state_nupcol_, well_state_, groupTargetReductionInj);
         }
 
         const double simulationTime = ebosSimulator_.time();
         std::vector<double> pot(numPhases(), 0.0);
-        wellGroupHelpers::updateGuideRateForGroups(fieldGroup, schedule(), phase_usage_, reportStepIdx, simulationTime, /*isInjector*/ false, well_state_, guideRate_.get(), pot);
+        wellGroupHelpers::updateGuideRateForGroups(fieldGroup, schedule(), phase_usage_, reportStepIdx, simulationTime, /*isInjector*/ false, well_state_nupcol_, guideRate_.get(), pot);
         std::vector<double> potInj(numPhases(), 0.0);
-        wellGroupHelpers::updateGuideRateForGroups(fieldGroup, schedule(), phase_usage_, reportStepIdx, simulationTime, /*isInjector*/ true, well_state_, guideRate_.get(), potInj);
+        wellGroupHelpers::updateGuideRateForGroups(fieldGroup, schedule(), phase_usage_, reportStepIdx, simulationTime, /*isInjector*/ true, well_state_nupcol_, guideRate_.get(), potInj);
     }
 
 
