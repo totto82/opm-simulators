@@ -1659,6 +1659,12 @@ std::size_t packSize(const Schedule& data,
            packSize(data.getWellGroupEvents(), comm);
 }
 
+std::size_t packSize(const BrineDensityTable& data,
+                     Dune::MPIHelper::MPICommunicator comm)
+{
+    return packSize(data.getBrineDensityColumn(), comm);
+}
+
 ////// pack routines
 
 template<class T>
@@ -3337,6 +3343,13 @@ void pack(const Schedule& data,
     pack(data.rftConfig(), buffer, position, comm);
     pack(data.getNupCol(), buffer, position, comm);
     pack(data.getWellGroupEvents(), buffer, position, comm);
+}
+
+void pack(const BrineDensityTable& data,
+          std::vector<char>& buffer, int& position,
+          Dune::MPIHelper::MPICommunicator comm)
+{
+    pack(data.getBrineDensityColumn(), buffer, position, comm);
 }
 
 /// unpack routines
@@ -5747,6 +5760,15 @@ void unpack(Schedule& data, std::vector<char>& buffer, int& position,
                     wListManager, udqConfig, udqActive, guideRateConfig,
                     gconSale, gconSump, globalWhistCtlMode, actions,
                     rftConfig, nupCol, wellGroupEvents);
+}
+
+void unpack(BrineDensityTable& data, std::vector<char>& buffer, int& position,
+            Dune::MPIHelper::MPICommunicator comm)
+{
+    std::vector<double> tableValues;
+
+    unpack(tableValues, buffer, position, comm);
+    data = BrineDensityTable(tableValues);
 }
 
 #define INSTANTIATE_PACK_VECTOR(T) \
