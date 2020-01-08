@@ -1665,6 +1665,14 @@ std::size_t packSize(const BrineDensityTable& data,
     return packSize(data.getBrineDensityColumn(), comm);
 }
 
+std::size_t packSize(const PvtwsaltTable& data,
+                     Dune::MPIHelper::MPICommunicator comm)
+{
+   return packSize(data.getReferencePressureValue(), comm) +
+          packSize(data.getReferenceSaltConcentrationValue(), comm) +
+          packSize(data.getTableValues(), comm);
+}
+
 ////// pack routines
 
 template<class T>
@@ -3350,6 +3358,15 @@ void pack(const BrineDensityTable& data,
           Dune::MPIHelper::MPICommunicator comm)
 {
     pack(data.getBrineDensityColumn(), buffer, position, comm);
+}
+
+void pack(const PvtwsaltTable& data,
+          std::vector<char>& buffer, int& position,
+          Dune::MPIHelper::MPICommunicator comm)
+{
+    pack(data.getReferencePressureValue(), buffer, position, comm);
+    pack(data.getReferenceSaltConcentrationValue(), buffer, position, comm);
+    pack(data.getTableValues(), buffer, position, comm);
 }
 
 /// unpack routines
@@ -5769,6 +5786,18 @@ void unpack(BrineDensityTable& data, std::vector<char>& buffer, int& position,
 
     unpack(tableValues, buffer, position, comm);
     data = BrineDensityTable(tableValues);
+}
+
+void unpack(PvtwsaltTable& data, std::vector<char>& buffer, int& position,
+            Dune::MPIHelper::MPICommunicator comm)
+{
+    double refPressValue, refSaltConValue;
+    std::vector<double> tableValues;
+
+    unpack(refPressValue, buffer, position, comm);
+    unpack(refSaltConValue, buffer, position, comm);
+    unpack(tableValues, buffer, position, comm);
+    data = PvtwsaltTable(refPressValue, refSaltConValue, tableValues);
 }
 
 #define INSTANTIATE_PACK_VECTOR(T) \
