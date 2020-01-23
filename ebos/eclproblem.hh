@@ -227,7 +227,7 @@ private:
 public:
     typedef Opm::EcfvStencil<Scalar,
                              GridView,
-                             /*needIntegrationPos=*/false,
+                             /*needIntegrationPos=*/true, //Hack we need this for the SO stuff
                              /*needNormal=*/false> type;
 };
 
