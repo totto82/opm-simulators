@@ -1018,9 +1018,7 @@ namespace Opm
         if (currentGroupControl == Group::InjectionCMode::FLD) {
             // Inject share of parents control
             const auto& parent = schedule.getGroup( group.parent(), current_step_ );
-            if (group.getTransferGroupEfficiencyFactor())
-                efficiencyFactor *= group.getGroupEfficiencyFactor();
-
+            efficiencyFactor *= group.getGroupEfficiencyFactor();
             assembleGroupInjectionControl(parent, well_state, schedule, summaryState, injectorType, control_eq, efficiencyFactor, deferred_logger);
             return;
         }
@@ -1049,7 +1047,7 @@ namespace Opm
         }
         case Group::InjectionCMode::RATE:
         {
-            double target = std::max(0.0, (groupcontrols.surface_max_rate / efficiencyFactor - groupTargetReduction) );
+            double target = std::max(0.0, (groupcontrols.surface_max_rate - groupTargetReduction)) / efficiencyFactor;
             control_eq = getWQTotal() - fraction * target;
             break;
         }
@@ -1058,15 +1056,14 @@ namespace Opm
             std::vector<double> convert_coeff(number_of_phases_, 1.0);
             Base::rateConverter_.calcCoeff(/*fipreg*/ 0, Base::pvtRegionIdx_, convert_coeff);
             double coeff = convert_coeff[phasePos];
-            double target = std::max(0.0, (groupcontrols.resv_max_rate/coeff/efficiencyFactor - groupTargetReduction));
+            double target = std::max(0.0, (groupcontrols.resv_max_rate/coeff - groupTargetReduction)) / efficiencyFactor;
             control_eq = getWQTotal() - fraction * target;
             break;
         }
         case Group::InjectionCMode::REIN:
         {
             double productionRate = well_state.currentInjectionREINRates(groupcontrols.reinj_group)[phasePos];
-            productionRate /= efficiencyFactor;
-            double target = std::max(0.0, (groupcontrols.target_reinj_fraction*productionRate - groupTargetReduction));
+            double target = std::max(0.0, (groupcontrols.target_reinj_fraction*productionRate - groupTargetReduction)) / efficiencyFactor;
             control_eq = getWQTotal() - fraction * target;
             break;
         }
@@ -1090,9 +1087,7 @@ namespace Opm
 
             voidageRate -= injReduction;
 
-            voidageRate /= efficiencyFactor;
-
-            double target = std::max(0.0, ( voidageRate/coeff - groupTargetReduction));
+            double target = std::max(0.0, ( voidageRate/coeff - groupTargetReduction)) / efficiencyFactor;
             control_eq = getWQTotal() - fraction * target;
             break;
         }
@@ -1119,8 +1114,7 @@ namespace Opm
             const auto& gconsale = schedule.gConSale(current_step_).get(group.name(), summaryState);
             inj_rate -= gconsale.sales_target;
 
-            inj_rate /= efficiencyFactor;
-            double target = std::max(0.0, (inj_rate - groupTargetReduction));
+            double target = std::max(0.0, (inj_rate - groupTargetReduction)) / efficiencyFactor;
             control_eq = getWQTotal() - fraction * target;
             break;
         }
@@ -1147,9 +1141,7 @@ namespace Opm
         if (currentGroupControl == Group::ProductionCMode::FLD) {
             // Produce share of parents control
             const auto& parent = schedule.getGroup( group.parent(), current_step_ );
-            if (group.getTransferGroupEfficiencyFactor())
-                efficiencyFactor *= group.getGroupEfficiencyFactor();
-
+            efficiencyFactor *= group.getGroupEfficiencyFactor();
             assembleGroupProductionControl(parent, well_state, schedule, summaryState, control_eq, efficiencyFactor, deferred_logger);
             return;
         }
@@ -1177,7 +1169,7 @@ namespace Opm
             double fraction = wellGroupHelpers::wellFractionFromGuideRates(well, schedule, well_state, current_step_, Base::guide_rate_, Well::GuideRateTarget::OIL, /*isInjector*/false);
             wellGroupHelpers::accumulateGroupFractionsFromGuideRates(well.groupName(), group.name(), schedule, well_state, current_step_, Base::guide_rate_, Group::GuideRateTarget::OIL, fraction);
 
-            const double rate_target = std::max(0.0, groupcontrols.oil_target / efficiencyFactor - groupTargetReduction);
+            const double rate_target = std::max(0.0, groupcontrols.oil_target - groupTargetReduction) / efficiencyFactor;
             assert(FluidSystem::phaseIsActive(FluidSystem::oilPhaseIdx));
             EvalWell rate = -getQs(Indices::canonicalToActiveComponentIndex(FluidSystem::oilCompIdx));
             control_eq = rate - fraction * rate_target;
@@ -1189,7 +1181,7 @@ namespace Opm
             double fraction = wellGroupHelpers::wellFractionFromGuideRates(well, schedule, well_state, current_step_, Base::guide_rate_, Well::GuideRateTarget::WAT, /*isInjector*/false);
             wellGroupHelpers::accumulateGroupFractionsFromGuideRates(well.groupName(), group.name(), schedule, well_state, current_step_, Base::guide_rate_, Group::GuideRateTarget::WAT, fraction);
 
-            const double rate_target = std::max(0.0, groupcontrols.water_target / efficiencyFactor - groupTargetReduction);
+            const double rate_target = std::max(0.0, groupcontrols.water_target - groupTargetReduction) / efficiencyFactor;
             assert(FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx));
             EvalWell rate = -getQs(Indices::canonicalToActiveComponentIndex(FluidSystem::waterCompIdx));
             control_eq = rate - fraction * rate_target;
@@ -1201,7 +1193,7 @@ namespace Opm
             double fraction = wellGroupHelpers::wellFractionFromGuideRates(well, schedule, well_state, current_step_, Base::guide_rate_, Well::GuideRateTarget::GAS, /*isInjector*/false);
             wellGroupHelpers::accumulateGroupFractionsFromGuideRates(well.groupName(), group.name(), schedule, well_state, current_step_, Base::guide_rate_, Group::GuideRateTarget::GAS, fraction);
 
-            const double rate_target = std::max(0.0, groupcontrols.gas_target / efficiencyFactor - groupTargetReduction);
+            const double rate_target = std::max(0.0, groupcontrols.gas_target - groupTargetReduction) / efficiencyFactor;
             assert(FluidSystem::phaseIsActive(FluidSystem::gasCompIdx));
             EvalWell rate = -getQs(Indices::canonicalToActiveComponentIndex(FluidSystem::gasCompIdx));
             control_eq = rate - fraction * rate_target;
@@ -1213,7 +1205,7 @@ namespace Opm
             double fraction = wellGroupHelpers::wellFractionFromGuideRates(well, schedule, well_state, current_step_, Base::guide_rate_, Well::GuideRateTarget::LIQ, /*isInjector*/false);
             wellGroupHelpers::accumulateGroupFractionsFromGuideRates(well.groupName(), group.name(), schedule, well_state, current_step_, Base::guide_rate_, Group::GuideRateTarget::LIQ, fraction);
 
-            const double rate_target = std::max(0.0, groupcontrols.liquid_target / efficiencyFactor - groupTargetReduction);
+            const double rate_target = std::max(0.0, groupcontrols.liquid_target - groupTargetReduction) / efficiencyFactor;
             assert(FluidSystem::phaseIsActive(FluidSystem::oilPhaseIdx));
 
             EvalWell rate = -getQs(Indices::canonicalToActiveComponentIndex(FluidSystem::waterCompIdx))
@@ -1242,7 +1234,7 @@ namespace Opm
                 total_rate -= getQs( flowPhaseToEbosCompIdx(phase) ) * convert_coeff[phase];
             }
 
-            const double rate_target = std::max(0.0, groupcontrols.resv_target/ efficiencyFactor - groupTargetReduction);
+            const double rate_target = std::max(0.0, groupcontrols.resv_target - groupTargetReduction) / efficiencyFactor;
             assert(FluidSystem::phaseIsActive(FluidSystem::gasCompIdx));
             control_eq = total_rate - fraction * rate_target;
             break;

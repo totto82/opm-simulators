@@ -838,11 +838,7 @@ namespace Opm {
                 calculateExplicitQuantities(local_deferredLogger);
                 prepareTimeStep(local_deferredLogger);
             }
-            // check the current group control in the beginning of an episode for the first two iterations. The first itertion is needed for changes in group/well controls and closing of wells etc.
-            // a second check is needed for REIN and VREP controls since they depend on results from other wells.
-            // This check can probably be made more sofisticated, but this simple rule seems to work
-            bool checkCurrentGroupControls = (report_step_starts_ && iterationIdx < 2);
-            updateWellControls(local_deferredLogger, /*allow for switching to group controls*/true, checkCurrentGroupControls);
+            updateWellControls(local_deferredLogger, /* check group controls */ true);
 
             // Set the well primary variables based on the value of well solutions
             initPrimaryVariablesEvaluation();
@@ -1060,7 +1056,7 @@ namespace Opm {
                 // are active wells anywhere in the global domain.
                 if( wellsActive() )
                 {
-                    updateWellControls(deferred_logger, /*don't switch group controls*/false, /*don't check current group controls*/false);
+                    updateWellControls(deferred_logger, /*don't switch group controls*/false);
                     initPrimaryVariablesEvaluation();
                 }
             } catch (std::exception& e) {
@@ -1157,25 +1153,41 @@ namespace Opm {
     template<typename TypeTag>
     void
     BlackoilWellModel<TypeTag>::
-    updateWellControls(Opm::DeferredLogger& deferred_logger, const bool checkGroupControl, const bool checkCurrentGroupControl)
+    updateWellControls(Opm::DeferredLogger& deferred_logger, const bool checkGroupControls)
     {
         // Even if there are no wells active locally, we cannot
         // return as the DeferredLogger uses global communication.
         // For no well active globally we simply return.
         if( !wellsActive() ) return ;
 
+        // Check individual well constraints and communicate.
+        for (const auto& well : well_container_) {
+            const auto mode = WellInterface<TypeTag>::IndividualOrGroup::Individual;
+            well->updateWellControl(ebosSimulator_, mode, well_state_, deferred_logger);
+        }
+        updateAndCommunicateGroupData();
+
+        if (checkGroupControls) {
+            // Check group constraints and communicate.
+            for (const auto& well : well_container_) {
+                const auto mode = WellInterface<TypeTag>::IndividualOrGroup::Group;
+                well->updateWellControl(ebosSimulator_, mode, well_state_, deferred_logger);
+            }
+            updateAndCommunicateGroupData();
+        }
+    }
+
+
+
+
+
+    template<typename TypeTag>
+    void
+    BlackoilWellModel<TypeTag>::
+    updateAndCommunicateGroupData()
+    {
         const int reportStepIdx = ebosSimulator_.episodeIndex();
         const Group& fieldGroup = schedule().getGroup("FIELD", reportStepIdx);
-
-        // update group controls
-        if (checkGroupControl) {
-            checkGroupConstraints(fieldGroup, checkCurrentGroupControl, deferred_logger);
-        }
-
-        for (const auto& well : well_container_) {
-            well->updateWellControl(ebosSimulator_, well_state_, deferred_logger);
-        }
-
         const int nupcol = schedule().getNupcol(reportStepIdx);
         const int iterationIdx = ebosSimulator_.model().newtonMethod().numIterations();
         if (iterationIdx < nupcol) {
