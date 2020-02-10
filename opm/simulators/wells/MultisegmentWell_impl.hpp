@@ -2175,8 +2175,7 @@ namespace Opm
 
         const std::vector<double>& groupInjectionReductions = well_state.currentInjectionGroupReductionRates(group.name());
         double groupTargetReduction = groupInjectionReductions[phasePos];
-        double fraction = wellGroupHelpers::wellFractionFromGuideRates(well, schedule, well_state, current_step_, Base::guide_rate_, wellTarget, /*isInjector*/true);
-        wellGroupHelpers::accumulateGroupInjectionPotentialFractions(well.groupName(), group.name(), schedule, well_state, pu, current_step_, injectionPhase, fraction);
+        double fraction = wellGroupHelpers::fractionFromInjectionPotentials(well.name(), group.name(), schedule,well_state, current_step_, Base::guide_rate_, GuideRateModel::convert_target(wellTarget), pu, injectionPhase,false);
 
         switch(currentGroupControl) {
         case Group::InjectionCMode::NONE:
@@ -2313,8 +2312,7 @@ namespace Opm
         case Group::ProductionCMode::ORAT:
         {
             double groupTargetReduction = groupTargetReductions[pu.phase_pos[Oil]];
-            double fraction = wellGroupHelpers::wellFractionFromGuideRates(well, schedule, well_state, current_step_, Base::guide_rate_, Well::GuideRateTarget::OIL, /*isInjector*/false);
-            wellGroupHelpers::accumulateGroupFractionsFromGuideRates(well.groupName(), group.name(), schedule, well_state, current_step_, Base::guide_rate_, Group::GuideRateTarget::OIL, fraction);
+            double fraction = wellGroupHelpers::fractionFromGuideRates(well.name(), group.name(), schedule, well_state, current_step_, Base::guide_rate_, GuideRateModel::convert_target(Well::GuideRateTarget::OIL));
 
             const double rate_target = std::max(0.0, groupcontrols.oil_target / efficiencyFactor - groupTargetReduction);
             assert(FluidSystem::phaseIsActive(FluidSystem::oilPhaseIdx));
@@ -2325,8 +2323,7 @@ namespace Opm
         case Group::ProductionCMode::WRAT:
         {
             double groupTargetReduction = groupTargetReductions[pu.phase_pos[Water]];
-            double fraction = wellGroupHelpers::wellFractionFromGuideRates(well, schedule, well_state, current_step_, Base::guide_rate_, Well::GuideRateTarget::WAT, /*isInjector*/false);
-            wellGroupHelpers::accumulateGroupFractionsFromGuideRates(well.groupName(), group.name(), schedule, well_state, current_step_, Base::guide_rate_, Group::GuideRateTarget::WAT, fraction);
+            double fraction = wellGroupHelpers::fractionFromGuideRates(well.name(), group.name(), schedule, well_state, current_step_, Base::guide_rate_, GuideRateModel::convert_target(Well::GuideRateTarget::WAT));
 
             const double rate_target = std::max(0.0, groupcontrols.water_target / efficiencyFactor - groupTargetReduction);
             assert(FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx));
@@ -2337,8 +2334,8 @@ namespace Opm
         case Group::ProductionCMode::GRAT:
         {
             double groupTargetReduction = groupTargetReductions[pu.phase_pos[Gas]];
-            double fraction = wellGroupHelpers::wellFractionFromGuideRates(well, schedule, well_state, current_step_, Base::guide_rate_, Well::GuideRateTarget::GAS, /*isInjector*/false);
-            wellGroupHelpers::accumulateGroupFractionsFromGuideRates(well.groupName(), group.name(), schedule, well_state, current_step_, Base::guide_rate_, Group::GuideRateTarget::GAS, fraction);
+            double fraction = wellGroupHelpers::fractionFromGuideRates(well.name(), group.name(), schedule, well_state, current_step_, Base::guide_rate_, GuideRateModel::convert_target(Well::GuideRateTarget::GAS));
+
             const double rate_target = std::max(0.0, groupcontrols.gas_target / efficiencyFactor - groupTargetReduction);
             assert(FluidSystem::phaseIsActive(FluidSystem::gasCompIdx));
             const EvalWell& rate = -getSegmentRate(0, Indices::canonicalToActiveComponentIndex(FluidSystem::gasCompIdx));
@@ -2348,8 +2345,7 @@ namespace Opm
         case Group::ProductionCMode::LRAT:
         {
             double groupTargetReduction = groupTargetReductions[pu.phase_pos[Oil]] + groupTargetReductions[pu.phase_pos[Water]];
-            double fraction = wellGroupHelpers::wellFractionFromGuideRates(well, schedule, well_state, current_step_, Base::guide_rate_, Well::GuideRateTarget::LIQ, /*isInjector*/false);
-            wellGroupHelpers::accumulateGroupFractionsFromGuideRates(well.groupName(), group.name(), schedule, well_state, current_step_, Base::guide_rate_, Group::GuideRateTarget::LIQ, fraction);
+            double fraction = wellGroupHelpers::fractionFromGuideRates(well.name(), group.name(), schedule, well_state, current_step_, Base::guide_rate_, GuideRateModel::convert_target(Well::GuideRateTarget::LIQ));
 
             const double rate_target = std::max(0.0, groupcontrols.liquid_target / efficiencyFactor - groupTargetReduction);
             assert(FluidSystem::phaseIsActive(FluidSystem::oilPhaseIdx));
