@@ -136,7 +136,7 @@ namespace Opm {
             accumulateGroupEfficiencyFactor(schedule.getGroup(group.parent(), reportStepIdx), schedule, reportStepIdx, factor);
     }
 
-
+/*
     inline void computeGroupTargetReduction(const Group& group, const WellStateFullyImplicitBlackoil& wellState, const Schedule& schedule, const int reportStepIdx, const int phasePos, const bool isInjector, double& groupTargetReduction )
     {
 
@@ -173,8 +173,7 @@ namespace Opm {
             }
         }
     }
-
-
+*/
     inline double sumWellPhaseRates(const std::vector<double>& rates, const Group& group, const Schedule& schedule, const WellStateFullyImplicitBlackoil& wellState, const int reportStepIdx, const int phasePos,
                                     const bool injector) {
 
@@ -252,16 +251,16 @@ namespace Opm {
     inline void updateGroupTargetReduction(const Group& group, const Schedule& schedule, const int reportStepIdx, const bool isInjector, const PhaseUsage& pu, const WellStateFullyImplicitBlackoil& wellStateNupcol, WellStateFullyImplicitBlackoil& wellState, std::vector<double>& groupTargetReduction)
     {
         const int np = wellState.numPhases();
-        for (const std::string& groupName : group.groups()) {
-            std::vector<double> thisGroupTargetReduction(np, 0.0);
-            const Group& groupTmp = schedule.getGroup(groupName, reportStepIdx);
-            updateGroupTargetReduction(groupTmp, schedule, reportStepIdx, isInjector, pu, wellStateNupcol, wellState, thisGroupTargetReduction);
+        for (const std::string& subGroupName : group.groups()) {
+            std::vector<double> subGroupTargetReduction(np, 0.0);
+            const Group& subGroup = schedule.getGroup(subGroupName, reportStepIdx);
+            updateGroupTargetReduction(subGroup, schedule, reportStepIdx, isInjector, pu, wellStateNupcol, wellState, subGroupTargetReduction);
 
             // accumulate group contribution from sub group
             if (isInjector) {
                 const Phase all[] = {Phase::WATER, Phase::OIL, Phase::GAS};
                 for (Phase phase : all) {
-                    const Group::InjectionCMode& currentGroupControl = wellState.currentInjectionGroupControl(phase, groupName);
+                    const Group::InjectionCMode& currentGroupControl = wellState.currentInjectionGroupControl(phase, subGroupName);
                     int phasePos;
                     if (phase == Phase::GAS && pu.phase_used[BlackoilPhases::Vapour] )
                         phasePos = pu.phase_pos[BlackoilPhases::Vapour];
@@ -273,21 +272,21 @@ namespace Opm {
                         continue;
 
                     if (currentGroupControl != Group::InjectionCMode::FLD) {
-                        groupTargetReduction[phasePos] += sumWellRates(groupTmp, schedule, wellStateNupcol, reportStepIdx, phasePos, isInjector);
+                        groupTargetReduction[phasePos] += sumWellRates(subGroup, schedule, wellStateNupcol, reportStepIdx, phasePos, isInjector);
                     } else {
-                        groupTargetReduction[phasePos] += thisGroupTargetReduction[phasePos];
+                        groupTargetReduction[phasePos] += subGroupTargetReduction[phasePos];
                     }
                 }
             } else {
-                const Group::ProductionCMode& currentGroupControl = wellState.currentProductionGroupControl(groupName);
+                const Group::ProductionCMode& currentGroupControl = wellState.currentProductionGroupControl(subGroupName);
                 if (currentGroupControl != Group::ProductionCMode::FLD) {
                     for (int phase = 0; phase < np; phase++) {
-                        groupTargetReduction[phase] += sumWellRates(groupTmp, schedule, wellStateNupcol, reportStepIdx, phase, isInjector);
+                        groupTargetReduction[phase] += sumWellRates(subGroup, schedule, wellStateNupcol, reportStepIdx, phase, isInjector);
                     }
                 } else {
                     // or accumulate directly from the wells if controled from its parents
                     for (int phase = 0; phase < np; phase++) {
-                        groupTargetReduction[phase] += thisGroupTargetReduction[phase];
+                        groupTargetReduction[phase] += subGroupTargetReduction[phase];
                     }
                 }
             }
@@ -311,18 +310,23 @@ namespace Opm {
 
             int well_index = it->second[0];
             const auto wellrate_index = well_index * wellState.numPhases();
+            const double efficiency = wellTmp.getEfficiencyFactor();
             // add contributino from wells not under group control
             if (isInjector) {
                 if (wellState.currentInjectionControls()[well_index] != Well::InjectorCMode::GRUP)
                     for (int phase = 0; phase < np; phase++) {
-                        groupTargetReduction[phase] += wellStateNupcol.wellRates()[wellrate_index + phase];
+                        groupTargetReduction[phase] += wellStateNupcol.wellRates()[wellrate_index + phase] * efficiency;
                     }
             } else {
                 if (wellState.currentProductionControls()[well_index] !=  Well::ProducerCMode::GRUP)
                     for (int phase = 0; phase < np; phase++) {
-                        groupTargetReduction[phase] -= wellStateNupcol.wellRates()[wellrate_index + phase];
+                        groupTargetReduction[phase] -= wellStateNupcol.wellRates()[wellrate_index + phase] * efficiency;
                     }
             }
+        }
+        const double groupEfficiency = group.getGroupEfficiencyFactor();
+        for (double& elem : groupTargetReduction) {
+            elem *= groupEfficiency;
         }
         if (isInjector)
             wellState.setCurrentInjectionGroupReductionRates(group.name(), groupTargetReduction);
@@ -414,9 +418,11 @@ namespace Opm {
         if (pu.phase_used[BlackoilPhases::Aqua])
             waterPot = pot [pu.phase_pos[BlackoilPhases::Aqua]];
 
-        oilPot = comm.sum(oilPot);
-        gasPot = comm.sum(gasPot);
-        waterPot = comm.sum(waterPot);
+        const double gefac = group.getGroupEfficiencyFactor();
+
+        oilPot = comm.sum(oilPot) * gefac;
+        gasPot = comm.sum(gasPot) * gefac;
+        waterPot = comm.sum(waterPot) * gefac;
 
         if (isInjector) {
             wellState.setCurrentGroupInjectionPotentials(group.name(), pot);
@@ -449,9 +455,10 @@ namespace Opm {
                 if (pu.phase_used[BlackoilPhases::Aqua] > 0)
                     waterpot = wpot[pu.phase_pos[BlackoilPhases::Aqua]];
             }
-            oilpot = comm.sum(oilpot);
-            gaspot = comm.sum(gaspot);
-            waterpot = comm.sum(waterpot);
+            const double wefac = well.getEfficiencyFactor();
+            oilpot = comm.sum(oilpot) * wefac;
+            gaspot = comm.sum(gaspot) * wefac;
+            waterpot = comm.sum(waterpot) * wefac;
             guideRate->compute(well.name(), reportStepIdx, simTime, oilpot, gaspot, waterpot);
         }
 
@@ -508,14 +515,19 @@ namespace Opm {
         wellState.setCurrentInjectionREINRates(group.name(), rein);
     }
 
-    inline double wellFractionFromGuideRates(const Well& well, const Schedule& schedule, const WellStateFullyImplicitBlackoil& wellState, const int reportStepIdx, const GuideRate* guideRate, const Well::GuideRateTarget& wellTarget, const bool isInjector) {
+    inline double wellFractionFromGuideRates(const Well& well,
+                                             const Schedule& schedule,
+                                             const WellStateFullyImplicitBlackoil& wellState,
+                                             const int reportStepIdx,
+                                             const GuideRate* guideRate,
+                                             const Well::GuideRateTarget& wellTarget,
+                                             const bool isInjector,
+                                             const bool alwaysIncludeThisWell = false)
+    {
         double groupTotalGuideRate = 0.0;
         const Group& groupTmp = schedule.getGroup(well.groupName(), reportStepIdx);
-        int global_well_index = -1;
         for (const std::string& wellName : groupTmp.wells()) {
             const auto& wellTmp = schedule.getWell(wellName, reportStepIdx);
-
-            global_well_index++;
 
             if (wellTmp.isProducer() && isInjector)
                  continue;
@@ -527,11 +539,12 @@ namespace Opm {
                 continue;
 
             // only count wells under group control
+            const bool checkthis = (alwaysIncludeThisWell && wellName == well.name());
             if (isInjector) {
-                if (!wellState.isInjectionGrup(wellName))
+                if (!wellState.isInjectionGrup(wellName) && !checkthis)
                     continue;
             } else {
-                if (!wellState.isProductionGrup(wellName))
+                if (!wellState.isProductionGrup(wellName) && !checkthis)
                     continue;
             }
 
@@ -545,7 +558,13 @@ namespace Opm {
         return wellGuideRate / groupTotalGuideRate;
     }
 
-    inline double groupFractionFromGuideRates(const Group& group, const Schedule& schedule, const WellStateFullyImplicitBlackoil& wellState, const int reportStepIdx, const GuideRate* guideRate, const Group::GuideRateTarget& groupTarget) {
+    inline double groupFractionFromGuideRates(const Group& group,
+                                              const Schedule& schedule,
+                                              const WellStateFullyImplicitBlackoil& wellState,
+                                              const int reportStepIdx,
+                                              const GuideRate* guideRate,
+                                              const Group::GuideRateTarget& groupTarget)
+    {
         double groupTotalGuideRate = 0.0;
         const Group& groupParent = schedule.getGroup(group.parent(), reportStepIdx);
         for (const std::string& groupName : groupParent.groups()) {
@@ -563,11 +582,22 @@ namespace Opm {
         return groupGuideRate / groupTotalGuideRate;
     }
 
-    inline void accumulateGroupFractionsFromGuideRates(const std::string& groupName, const std::string& controlGroupName, const Schedule& schedule, const WellStateFullyImplicitBlackoil& wellState,const int reportStepIdx, const GuideRate* guideRate, const Group::GuideRateTarget& groupTarget, double& fraction) {
+
+
+    inline void accumulateGroupFractionsFromGuideRates(const std::string& groupName,
+                                                       const std::string& controlGroupName,
+                                                       const Schedule& schedule,
+                                                       const WellStateFullyImplicitBlackoil& wellState,
+                                                       const int reportStepIdx,
+                                                       const GuideRate* guideRate,
+                                                       const Group::GuideRateTarget& groupTarget,
+                                                       double& fraction)
+    {
         const Group& group = schedule.getGroup(groupName, reportStepIdx);
         if (groupName != controlGroupName) {
             fraction *= groupFractionFromGuideRates(group, schedule, wellState, reportStepIdx, guideRate, groupTarget);
-            accumulateGroupFractionsFromGuideRates(group.parent(), controlGroupName, schedule, wellState, reportStepIdx, guideRate, groupTarget, fraction);
+            accumulateGroupFractionsFromGuideRates(
+                group.parent(), controlGroupName, schedule, wellState, reportStepIdx, guideRate, groupTarget, fraction);
         }
         return;
     }

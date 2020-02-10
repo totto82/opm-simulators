@@ -301,7 +301,9 @@ namespace Opm {
             // xw to update Well State
             void recoverWellSolutionAndUpdateWellState(const BVector& x);
 
-            void updateWellControls(Opm::DeferredLogger& deferred_logger, const bool checkGroupControl, const bool checkCurrentGroupControl);
+            void updateWellControls(Opm::DeferredLogger& deferred_logger, const bool checkGroupControls);
+
+            void updateAndCommunicateGroupData();
 
             // setting the well_solutions_ based on well_state.
             void updatePrimaryVariables(Opm::DeferredLogger& deferred_logger);
