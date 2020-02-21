@@ -42,6 +42,7 @@ namespace Opm {
             }
         }
 
+        /*
         const auto& end = wellState.wellMap().end();
         for (const std::string& wellName : group.wells()) {
             const auto& it = wellState.wellMap().find( wellName );
@@ -87,6 +88,7 @@ namespace Opm {
                 }
             }
         }
+        */
     }
 
     inline void setCmodeGroup(const Group& group, const Schedule& schedule, const SummaryState& summaryState, const int reportStepIdx, WellStateFullyImplicitBlackoil& wellState) {
@@ -574,6 +576,10 @@ namespace Opm {
                 continue;
 
             groupTotalGuideRate += guideRate->get(groupName, groupTarget);
+            if (currentGroupControl == Group::ProductionCMode::FLD
+                || (groupName == group.name() && currentGroupControl != Group::ProductionCMode::NONE)) {
+                groupTotalGuideRate += guideRate->get(groupName, groupTarget);
+            }
         }
         if (groupTotalGuideRate == 0.0)
             return 1.0;
