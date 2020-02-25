@@ -517,31 +517,39 @@ namespace Opm {
         wellState.setCurrentInjectionREINRates(group.name(), rein);
     }
 
-    inline double wellFractionFromGuideRates(const Well& well,
-                                             const Schedule& schedule,
-                                             const WellStateFullyImplicitBlackoil& wellState,
-                                             const int reportStepIdx,
-                                             const GuideRate* guideRate,
-                                             const Well::GuideRateTarget& wellTarget,
-                                             const bool isInjector,
-                                             const bool alwaysIncludeThisWell = false)
+
+    template <typename GuideRateEnumType>
+    GuideRateModel::Target convertTarget(const GuideRateEnumType target)
+    {
+        return GuideRateModel::convert_target(target);
+    }
+
+
+
+    inline double fractionFromGuideRates(const std::string& name,
+                                         const std::string& parent,
+                                         const Schedule& schedule,
+                                         const WellStateFullyImplicitBlackoil& wellState,
+                                         const int reportStepIdx,
+                                         const GuideRate* guideRate,
+                                         const GuideRateModel::Target target,
+                                         const bool isInjector,
+                                         const bool alwaysIncludeThis = false)
     {
         double groupTotalGuideRate = 0.0;
-        const Group& groupTmp = schedule.getGroup(well.groupName(), reportStepIdx);
-        for (const std::string& wellName : groupTmp.wells()) {
+        const Group& parentGroup = schedule.getGroup(parent, reportStepIdx);
+        // Since a group may contain either wells or group, one of these
+        // for-loop ranges will be empty.
+        for (const std::string& wellName : parentGroup.wells()) {
             const auto& wellTmp = schedule.getWell(wellName, reportStepIdx);
-
             if (wellTmp.isProducer() && isInjector)
                  continue;
-
             if (wellTmp.isInjector() && !isInjector)
                  continue;
-
             if (wellTmp.getStatus() == Well::Status::SHUT)
                 continue;
-
-            // only count wells under group control
-            const bool checkthis = (alwaysIncludeThisWell && wellName == well.name());
+            // Only count wells under group control
+            const bool checkthis = (alwaysIncludeThis && wellName == name);
             if (isInjector) {
                 if (!wellState.isInjectionGrup(wellName) && !checkthis)
                     continue;
@@ -549,43 +557,22 @@ namespace Opm {
                 if (!wellState.isProductionGrup(wellName) && !checkthis)
                     continue;
             }
-
-            groupTotalGuideRate += guideRate->get(wellName, wellTarget);
+            groupTotalGuideRate += guideRate->get(wellName, target);
         }
-
-        if (groupTotalGuideRate == 0.0)
-            return 0.0;
-
-        double wellGuideRate = guideRate->get(well.name(), wellTarget);
-        return wellGuideRate / groupTotalGuideRate;
-    }
-
-    inline double groupFractionFromGuideRates(const Group& group,
-                                              const Schedule& schedule,
-                                              const WellStateFullyImplicitBlackoil& wellState,
-                                              const int reportStepIdx,
-                                              const GuideRate* guideRate,
-                                              const Group::GuideRateTarget& groupTarget)
-    {
-        double groupTotalGuideRate = 0.0;
-        const Group& groupParent = schedule.getGroup(group.parent(), reportStepIdx);
-        for (const std::string& groupName : groupParent.groups()) {
-            // only count group under group control from its parent
+        for (const std::string& groupName : parentGroup.groups()) {
             const Group::ProductionCMode& currentGroupControl = wellState.currentProductionGroupControl(groupName);
-            if (currentGroupControl != Group::ProductionCMode::FLD)
-                continue;
-
-            groupTotalGuideRate += guideRate->get(groupName, groupTarget);
-            if (currentGroupControl == Group::ProductionCMode::FLD
-                || (groupName == group.name() && currentGroupControl != Group::ProductionCMode::NONE)) {
-                groupTotalGuideRate += guideRate->get(groupName, groupTarget);
+            const bool checkthis = (alwaysIncludeThis && groupName == name);
+            if (currentGroupControl == Group::ProductionCMode::FLD || checkthis) {
+                groupTotalGuideRate += guideRate->get(groupName, target);
             }
         }
-        if (groupTotalGuideRate == 0.0)
-            return 1.0;
 
-        double groupGuideRate = guideRate->get(group.name(), groupTarget);
-        return groupGuideRate / groupTotalGuideRate;
+        if (groupTotalGuideRate == 0.0) {
+            return 0.0;
+        }
+
+        const double myGuideRate = guideRate->get(name, target);
+        return myGuideRate / groupTotalGuideRate;
     }
 
 
@@ -596,14 +583,33 @@ namespace Opm {
                                                        const WellStateFullyImplicitBlackoil& wellState,
                                                        const int reportStepIdx,
                                                        const GuideRate* guideRate,
-                                                       const Group::GuideRateTarget& groupTarget,
+                                                       const GuideRateModel::Target target,
+                                                       const bool isInjector,
+                                                       const bool alwaysIncludeThis,
                                                        double& fraction)
     {
         const Group& group = schedule.getGroup(groupName, reportStepIdx);
+        const std::string& parent = group.parent();
         if (groupName != controlGroupName) {
-            fraction *= groupFractionFromGuideRates(group, schedule, wellState, reportStepIdx, guideRate, groupTarget);
-            accumulateGroupFractionsFromGuideRates(
-                group.parent(), controlGroupName, schedule, wellState, reportStepIdx, guideRate, groupTarget, fraction);
+            fraction *= fractionFromGuideRates(groupName,
+                                               parent,
+                                               schedule,
+                                               wellState,
+                                               reportStepIdx,
+                                               guideRate,
+                                               target,
+                                               isInjector,
+                                               alwaysIncludeThis);
+            accumulateGroupFractionsFromGuideRates(parent,
+                                                   controlGroupName,
+                                                   schedule,
+                                                   wellState,
+                                                   reportStepIdx,
+                                                   guideRate,
+                                                   target,
+                                                   isInjector,
+                                                   alwaysIncludeThis,
+                                                   fraction);
         }
         return;
     }
@@ -644,6 +650,131 @@ namespace Opm {
         }
         return;
     }
+
+
+
+    class WellOrGroup
+    {
+    public:
+        virtual const std::string& name() const = 0;
+        virtual double efficiency() const = 0;
+        virtual double guideRateFraction(const std::string& controlGroup,
+                                         const Schedule& schedule,
+                                         const WellStateFullyImplicitBlackoil& wellState,
+                                         const int reportStepIdx,
+                                         const GuideRate* guideRate,
+                                         const GuideRateModel::Target& target,
+                                         const bool isInjector,
+                                         const bool alwaysIncludeThisObject) const = 0;
+        virtual const std::string& parent() const = 0;
+    };
+
+    class W : public WellOrGroup
+    {
+        const Well& w_;
+    public:
+        explicit W(const Well& w)
+            : w_(w)
+        {
+        }
+
+        virtual const std::string& name() const override
+        {
+            return w_.name();
+        }
+        virtual double efficiency() const override
+        {
+            return w_.getEfficiencyFactor();
+        }
+        virtual double guideRateFraction(const std::string& controlGroup,
+                                         const Schedule& schedule,
+                                         const WellStateFullyImplicitBlackoil& wellState,
+                                         const int reportStepIdx,
+                                         const GuideRate* guideRate,
+                                         const GuideRateModel::Target& target,
+                                         const bool isInjector,
+                                         const bool alwaysIncludeThisObject) const override
+        {
+            double fraction = fractionFromGuideRates(name(),
+                                                     parent(),
+                                                     schedule,
+                                                     wellState,
+                                                     reportStepIdx,
+                                                     guideRate,
+                                                     target,
+                                                     isInjector,
+                                                     alwaysIncludeThisObject);
+            accumulateGroupFractionsFromGuideRates(parent(),
+                                                   controlGroup,
+                                                   schedule,
+                                                   wellState,
+                                                   reportStepIdx,
+                                                   guideRate,
+                                                   target,
+                                                   isInjector,
+                                                   alwaysIncludeThisObject,
+                                                   fraction);
+            return fraction;
+        }
+        virtual const std::string& parent() const override
+        {
+            return w_.groupName();
+        }
+    };
+
+    class G : public WellOrGroup
+    {
+        const Group& g_;
+    public:
+        explicit G(const Group& g)
+            : g_(g)
+        {
+        }
+
+        virtual const std::string& name() const override
+        {
+            return g_.name();
+        }
+        virtual double efficiency() const override
+        {
+            return g_.getGroupEfficiencyFactor();
+        }
+        virtual double guideRateFraction(const std::string& controlGroup,
+                                         const Schedule& schedule,
+                                         const WellStateFullyImplicitBlackoil& wellState,
+                                         const int reportStepIdx,
+                                         const GuideRate* guideRate,
+                                         const GuideRateModel::Target& target,
+                                         const bool isInjector,
+                                         const bool alwaysIncludeThisObject) const override
+        {
+            double fraction = fractionFromGuideRates(name(),
+                                                     parent(),
+                                                     schedule,
+                                                     wellState,
+                                                     reportStepIdx,
+                                                     guideRate,
+                                                     target,
+                                                     isInjector,
+                                                     alwaysIncludeThisObject);
+            accumulateGroupFractionsFromGuideRates(parent(),
+                                                   controlGroup,
+                                                   schedule,
+                                                   wellState,
+                                                   reportStepIdx,
+                                                   guideRate,
+                                                   target,
+                                                   isInjector,
+                                                   alwaysIncludeThisObject,
+                                                   fraction);
+            return fraction;
+        }
+        virtual const std::string& parent() const override
+        {
+            return g_.parent();
+        }
+    };
+
 
 
 
