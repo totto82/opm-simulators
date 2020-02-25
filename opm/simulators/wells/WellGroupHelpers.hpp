@@ -21,6 +21,9 @@
 #ifndef OPM_WELLGROUPHELPERS_HEADER_INCLUDED
 #define OPM_WELLGROUPHELPERS_HEADER_INCLUDED
 
+#include <opm/simulators/utils/DeferredLogger.hpp>
+#include <opm/simulators/utils/DeferredLoggingErrorHelpers.hpp>
+
 #include <vector>
 #include <opm/parser/eclipse/EclipseState/Schedule/ScheduleTypes.hpp>
 
@@ -518,11 +521,44 @@ namespace Opm {
     }
 
 
-    template <typename GuideRateEnumType>
-    GuideRateModel::Target convertTarget(const GuideRateEnumType target)
-    {
-        return GuideRateModel::convert_target(target);
+
+    inline double wellFractionFromGuideRates(const Well& well, const Schedule& schedule, const WellStateFullyImplicitBlackoil& wellState, const int reportStepIdx, const GuideRate* guideRate, const Well::GuideRateTarget& wellTarget, const bool isInjector) {
+        double groupTotalGuideRate = 0.0;
+        const Group& groupTmp = schedule.getGroup(well.groupName(), reportStepIdx);
+        int global_well_index = -1;
+        for (const std::string& wellName : groupTmp.wells()) {
+            const auto& wellTmp = schedule.getWell(wellName, reportStepIdx);
+
+            global_well_index++;
+
+            if (wellTmp.isProducer() && isInjector)
+                 continue;
+
+            if (wellTmp.isInjector() && !isInjector)
+                 continue;
+
+            if (wellTmp.getStatus() == Well::Status::SHUT)
+                continue;
+
+            // only count wells under group control
+            if (isInjector) {
+                if (!wellState.isInjectionGrup(wellName))
+                    continue;
+            } else {
+                if (!wellState.isProductionGrup(wellName))
+                    continue;
+            }
+
+            groupTotalGuideRate += guideRate->get(wellName, wellTarget);
+        }
+
+        if (groupTotalGuideRate == 0.0)
+            return 0.0;
+
+        double wellGuideRate = guideRate->get(well.name(), wellTarget);
+        return wellGuideRate / groupTotalGuideRate;
     }
+
 
 
 
@@ -577,6 +613,7 @@ namespace Opm {
 
 
 
+
     inline void accumulateGroupFractionsFromGuideRates(const std::string& groupName,
                                                        const std::string& controlGroupName,
                                                        const Schedule& schedule,
@@ -613,6 +650,35 @@ namespace Opm {
         }
         return;
     }
+
+
+
+    inline void accumulateGroupFractionsFromGuideRates(const std::string& groupName,
+                                                       const std::string& controlGroupName,
+                                                       const Schedule& schedule,
+                                                       const WellStateFullyImplicitBlackoil& wellState,
+                                                       const int reportStepIdx,
+                                                       const GuideRate* guideRate,
+                                                       const Group::GuideRateTarget& groupTarget,
+                                                       double& fraction)
+    {
+        accumulateGroupFractionsFromGuideRates(groupName,
+                                               controlGroupName,
+                                               schedule,
+                                               wellState,
+                                               reportStepIdx,
+                                               guideRate,
+                                               GuideRateModel::convert_target(groupTarget),
+                                               true,
+                                               false,
+                                               fraction);
+    }
+
+
+
+
+
+
 
     inline double groupFractionFromInjectionPotentials(const Group& group, const Schedule& schedule, const WellStateFullyImplicitBlackoil& wellState, const PhaseUsage& pu, const int reportStepIdx, const Phase& injectionPhase) {
         double groupTotalGuideRate = 0.0;
@@ -775,6 +841,172 @@ namespace Opm {
         }
     };
 
+
+
+
+    inline bool checkGroupConstraintsProd(const std::string& name,
+                                          const std::string& parent,
+                                          const Group& group,
+                                          const WellStateFullyImplicitBlackoil& wellState,
+                                          const int reportStepIdx,
+                                          const GuideRate* guideRate,
+                                          const double* rates,
+                                          const PhaseUsage& pu,
+                                          const double efficiencyFactor,
+                                          const Schedule& schedule,
+                                          const SummaryState& summaryState,
+                                          DeferredLogger& deferred_logger)
+    {
+        // When called for a well ('name' is a well name), 'parent'
+        // will be the name of 'group'. But if we recurse, 'name' and
+        // 'parent' will stay fixed while 'group' will be higher up
+        // in the group tree.
+
+        if (!group.isProductionGroup()) {
+            return false;
+        }
+
+        auto fractionFunc = [&](const GuideRateModel::Target target) {
+            double fraction = fractionFromGuideRates(name,
+                                                     parent,
+                                                     schedule,
+                                                     wellState,
+                                                     reportStepIdx,
+                                                     guideRate,
+                                                     target,
+                                                     false, // isInjector
+                                                     true); // alwaysIncludeThisObject
+            accumulateGroupFractionsFromGuideRates(parent,
+                                                   group.name(),
+                                                   schedule,
+                                                   wellState,
+                                                   reportStepIdx,
+                                                   guideRate,
+                                                   target,
+                                                   false, // isInjector,
+                                                   true, // alwaysIncludeThisObject,
+                                                   fraction);
+            return fraction;
+        };
+
+        const Group::ProductionCMode& currentGroupControl = wellState.currentProductionGroupControl(group.name());
+        const auto& groupcontrols = group.productionControls(summaryState);
+        const std::vector<double>& groupTargetReductions = wellState.currentProductionGroupReductionRates(group.name());
+
+        bool constraint_broken = false;
+        switch(currentGroupControl) {
+        case Group::ProductionCMode::NONE:
+        {
+            return false;
+        }
+        case Group::ProductionCMode::ORAT:
+        {
+            assert(pu.phase_used[BlackoilPhases::Liquid]);
+            const int pos = pu.phase_pos[BlackoilPhases::Liquid];
+            const double groupTargetReduction = groupTargetReductions[pos];
+            const double fraction = fractionFunc(GuideRateModel::Target::OIL);
+            const double current_rate = -rates[pos];
+            const double target_rate = fraction * std::max(0.0, groupcontrols.oil_target - groupTargetReduction + current_rate*efficiencyFactor) / efficiencyFactor;
+            if (current_rate > target_rate) {
+                constraint_broken = true;
+            }
+            break;
+        }
+        case Group::ProductionCMode::WRAT:
+        {
+            assert(pu.phase_used[BlackoilPhases::Aqua]);
+            const int pos = pu.phase_pos[BlackoilPhases::Aqua];
+            const double groupTargetReduction = groupTargetReductions[pos];
+            const double fraction = fractionFunc(GuideRateModel::Target::WAT);
+            const double current_rate = -rates[pos];
+            const double target_rate = fraction * std::max(0.0, groupcontrols.water_target - groupTargetReduction + current_rate*efficiencyFactor) / efficiencyFactor;
+            if (current_rate > target_rate) {
+                constraint_broken = true;
+            }
+            break;
+        }
+        case Group::ProductionCMode::GRAT:
+        {
+            assert(pu.phase_used[BlackoilPhases::Vapour]);
+            const int pos = pu.phase_pos[BlackoilPhases::Vapour];
+            const double groupTargetReduction = groupTargetReductions[pos];
+            const double fraction = fractionFunc(GuideRateModel::Target::GAS);
+            const double current_rate = -rates[pos];
+            const double target_rate = fraction * std::max(0.0, groupcontrols.gas_target - groupTargetReduction + current_rate*efficiencyFactor) / efficiencyFactor;
+            if (current_rate > target_rate) {
+                constraint_broken = true;
+            }
+            break;
+        }
+        case Group::ProductionCMode::LRAT:
+        {
+            assert(pu.phase_used[BlackoilPhases::Liquid]);
+            assert(pu.phase_used[BlackoilPhases::Aqua]);
+            const int opos = pu.phase_pos[BlackoilPhases::Liquid];
+            const int wpos = pu.phase_pos[BlackoilPhases::Aqua];
+            const double groupTargetReduction = groupTargetReductions[opos] + groupTargetReductions[wpos];
+            const double fraction = fractionFunc(GuideRateModel::Target::LIQ);
+            const double current_rate = -rates[opos] - rates[wpos];
+            const double target_rate = fraction * std::max(0.0, groupcontrols.liquid_target - groupTargetReduction + current_rate*efficiencyFactor) / efficiencyFactor;
+            if (current_rate > target_rate) {
+                constraint_broken = true;
+            }
+            break;
+        }
+        case Group::ProductionCMode::CRAT:
+        {
+            OPM_DEFLOG_THROW(std::runtime_error, "CRAT group control not implemented for producers", deferred_logger );
+            break;
+        }
+        case Group::ProductionCMode::RESV:
+        {
+            assert(pu.phase_used[BlackoilPhases::Liquid]);
+            assert(pu.phase_used[BlackoilPhases::Aqua]);
+            assert(pu.phase_used[BlackoilPhases::Vapour]);
+            const double groupTargetReduction =
+                groupTargetReductions[pu.phase_pos[BlackoilPhases::Liquid]]
+                + groupTargetReductions[pu.phase_pos[BlackoilPhases::Aqua]]
+                + groupTargetReductions[pu.phase_pos[BlackoilPhases::Vapour]];
+            const double fraction = fractionFunc(GuideRateModel::Target::RES);
+            std::vector<double> convert_coeff(pu.num_phases, 1.0);
+            //rateConverter_.calcCoeff(/*fipreg*/ 0, pvtRegionIdx_, convert_coeff);
+            double current_rate = 0.0;
+            for (int phase = 0; phase < pu.num_phases; ++phase) {
+                current_rate -= rates[phase] * convert_coeff[phase];
+            }
+            const double target_rate = fraction * std::max(0.0, groupcontrols.resv_target - groupTargetReduction + current_rate*efficiencyFactor) / efficiencyFactor;
+            if (current_rate > target_rate) {
+                constraint_broken = true;
+            }
+        }
+        case Group::ProductionCMode::PRBL:
+        {
+            OPM_DEFLOG_THROW(std::runtime_error, "PRBL group control not implemented for producers", deferred_logger );
+            break;
+        }
+        case Group::ProductionCMode::FLD:
+        {
+            // Produce share of parents control
+            const auto& parentGroup = schedule.getGroup(group.parent(), reportStepIdx);
+            return checkGroupConstraintsProd(name,
+                                             parent,
+                                             parentGroup,
+                                             wellState,
+                                             reportStepIdx,
+                                             guideRate,
+                                             rates,
+                                             pu,
+                                             efficiencyFactor * group.getGroupEfficiencyFactor(),
+                                             schedule,
+                                             summaryState,
+                                             deferred_logger);
+        }
+        default:
+            OPM_DEFLOG_THROW(std::runtime_error, "Invalid group control specified for group "  + group.name(), deferred_logger );
+        }
+
+        return constraint_broken;
+    }
 
 
 

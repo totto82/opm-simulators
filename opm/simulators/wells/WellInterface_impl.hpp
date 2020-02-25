@@ -1753,7 +1753,7 @@ namespace Opm
         auto injectorType = well_controls.injector_type;
 
         int phasePos;
-        Well::GuideRateTarget wellTarget;
+        GuideRateModel::Target wellTarget;
         Group::GuideRateTarget groupTarget;
         Phase injectionPhase;
 
@@ -1761,7 +1761,7 @@ namespace Opm
         case Well::InjectorType::WATER:
         {
             phasePos = pu.phase_pos[BlackoilPhases::Aqua];
-            wellTarget = Well::GuideRateTarget::WAT;
+            wellTarget = GuideRateModel::Target::WAT;
             groupTarget = Group::GuideRateTarget::WAT;
             injectionPhase = Phase::WATER;
             break;
@@ -1769,7 +1769,7 @@ namespace Opm
         case Well::InjectorType::OIL:
         {
             phasePos = pu.phase_pos[BlackoilPhases::Liquid];
-            wellTarget = Well::GuideRateTarget::OIL;
+            wellTarget = GuideRateModel::Target::OIL;
             groupTarget = Group::GuideRateTarget::OIL;
             injectionPhase = Phase::OIL;
             break;
@@ -1777,7 +1777,7 @@ namespace Opm
         case Well::InjectorType::GAS:
         {
             phasePos = pu.phase_pos[BlackoilPhases::Vapour];
-            wellTarget = Well::GuideRateTarget::GAS;
+            wellTarget = GuideRateModel::Target::GAS;
             groupTarget = Group::GuideRateTarget::GAS;
             injectionPhase = Phase::GAS;
             break;
@@ -1792,7 +1792,7 @@ namespace Opm
 
         const std::vector<double>& groupInjectionReductions = well_state.currentInjectionGroupReductionRates(group.name());
         const double groupTargetReduction = groupInjectionReductions[phasePos];
-        double fraction = wellGroupHelpers::wellFractionFromGuideRates(well, schedule, well_state, current_step_, guide_rate_, wellTarget, /*isInjector*/ true, /*alwaysIncludeThisWell*/ true);
+        double fraction = wellGroupHelpers::fractionFromGuideRates(well.name(), well.groupName(), schedule, well_state, current_step_, guide_rate_, wellTarget, /*isInjector*/ true, /*alwaysIncludeThisWell*/ true);
         wellGroupHelpers::accumulateGroupInjectionPotentialFractions(well.groupName(), group.name(), schedule, well_state, pu, current_step_, injectionPhase, fraction);
 
         bool constraint_broken = false;
@@ -1911,6 +1911,19 @@ namespace Opm
                                                       const SummaryState& summaryState,
                                                       DeferredLogger& deferred_logger) const
     {
+        return wellGroupHelpers::checkGroupConstraintsProd(name(),
+                                                           well_ecl_.groupName(),
+                                                           group,
+                                                           well_state,
+                                                           current_step_,
+                                                           guide_rate_,
+                                                           well_state.wellRates().data() + index_of_well_ * phaseUsage().num_phases,
+                                                           phaseUsage(),
+                                                           efficiencyFactor,
+                                                           schedule,
+                                                           summaryState,
+                                                           deferred_logger);
+#if 0
         if (!group.isProductionGroup()) {
             return false;
         }
@@ -2045,6 +2058,7 @@ namespace Opm
         }
 
         return constraint_broken;
+#endif
     }
 
 
