@@ -376,7 +376,9 @@ namespace Opm {
 
             const Well& getWellEcl(const std::string& well_name) const;
 
-            void checkGroupConstraints(const Group& group, const bool checkCurrentControl, Opm::DeferredLogger& deferred_logger);
+            void updateGroupIndividualControls(Opm::DeferredLogger& deferred_logger);
+            void updateGroupHigherControls(Opm::DeferredLogger& deferred_logger);
+            void checkGroupConstraints(const Group& group, Opm::DeferredLogger& deferred_logger);
 
             void actionOnBrokenConstraints(const Group& group, const Group::ExceedAction& exceed_action, const Group::ProductionCMode& newControl, const int reportStepIdx, Opm::DeferredLogger& deferred_logger);
 
