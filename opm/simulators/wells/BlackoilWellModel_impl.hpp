@@ -381,7 +381,7 @@ namespace Opm {
 
         //compute well guideRates
         const auto& comm = ebosSimulator_.vanguard().grid().comm();
-        wellGroupHelpers::updateGuideRatesForWells(schedule(), phase_usage_, reportStepIdx, simulationTime, well_state_, comm, guideRate_.get());      
+        wellGroupHelpers::updateGuideRatesForWells(schedule(), phase_usage_, reportStepIdx, simulationTime, well_state_, comm, guideRate_.get());
     }
 
 
@@ -1168,7 +1168,13 @@ namespace Opm {
         updateAndCommunicateGroupData();
 
         if (checkGroupControls) {
-            // Check group constraints and communicate.
+            // Check group individual constraints.
+            updateGroupIndividualControls(deferred_logger);
+
+            // Check group's constraints from higher levels.
+            updateGroupHigherControls(deferred_logger);
+
+            // Check wells' group constraints and communicate.
             for (const auto& well : well_container_) {
                 const auto mode = WellInterface<TypeTag>::IndividualOrGroup::Group;
                 well->updateWellControl(ebosSimulator_, mode, well_state_, deferred_logger);
@@ -1695,10 +1701,38 @@ namespace Opm {
     }
 
 
+
+
     template<typename TypeTag>
     void
     BlackoilWellModel<TypeTag>::
-    checkGroupConstraints(const Group& group, const bool checkCurrentControl, Opm::DeferredLogger& deferred_logger) {
+    updateGroupIndividualControls(Opm::DeferredLogger& deferred_logger)
+    {
+        const int reportStepIdx = ebosSimulator_.episodeIndex();
+        const Group& fieldGroup = schedule().getGroup("FIELD", reportStepIdx);
+        checkGroupConstraints(fieldGroup, deferred_logger);
+    }
+
+
+
+
+    template<typename TypeTag>
+    void
+    BlackoilWellModel<TypeTag>::
+    updateGroupHigherControls(Opm::DeferredLogger& /*deferred_logger*/)
+    {
+        // const int reportStepIdx = ebosSimulator_.episodeIndex();
+        // const Group& fieldGroup = schedule().getGroup("FIELD", reportStepIdx);
+        // checkGroupConstraints(fieldGroup, deferred_logger);
+    }
+
+
+
+
+    template<typename TypeTag>
+    void
+    BlackoilWellModel<TypeTag>::
+    checkGroupConstraints(const Group& group, Opm::DeferredLogger& deferred_logger) {
 
         const int reportStepIdx = ebosSimulator_.episodeIndex();
         const auto& summaryState = ebosSimulator_.vanguard().summaryState();
@@ -1728,7 +1762,7 @@ namespace Opm {
 
                 if (controls.has_control(Group::InjectionCMode::RATE))
                 {
-                    if (checkCurrentControl || currentControl != Group::InjectionCMode::RATE)
+                    if (currentControl != Group::InjectionCMode::RATE)
                     {
                         double current_rate = 0.0;
                         current_rate += wellGroupHelpers::sumWellRates(group, schedule(), well_state, reportStepIdx, phasePos, /*isInjector*/true);
@@ -1743,7 +1777,7 @@ namespace Opm {
                 }
                 if (controls.has_control(Group::InjectionCMode::RESV))
                 {
-                    if (checkCurrentControl || currentControl != Group::InjectionCMode::RESV)
+                    if (currentControl != Group::InjectionCMode::RESV)
                     {
                         double current_rate = 0.0;
                         current_rate += wellGroupHelpers::sumWellResRates(group, schedule(), well_state, reportStepIdx, phasePos, /*isInjector*/true);
@@ -1757,7 +1791,7 @@ namespace Opm {
                 }
                 if (controls.has_control(Group::InjectionCMode::REIN))
                 {
-                    if (checkCurrentControl || currentControl != Group::InjectionCMode::REIN)
+                    if (currentControl != Group::InjectionCMode::REIN)
                     {
                         double production_Rate = 0.0;
                         const Group& groupRein = schedule().getGroup(controls.reinj_group, reportStepIdx);
@@ -1779,7 +1813,7 @@ namespace Opm {
                 }
                 if (controls.has_control(Group::InjectionCMode::VREP))
                 {
-                    if (checkCurrentControl || currentControl != Group::InjectionCMode::VREP)
+                    if (currentControl != Group::InjectionCMode::VREP)
                     {
                         double voidage_rate = 0.0;
                         const Group& groupVoidage = schedule().getGroup(controls.voidage_group, reportStepIdx);
@@ -1847,7 +1881,7 @@ namespace Opm {
 
             if (group.has_control(Group::ProductionCMode::ORAT))
             {
-                if (checkCurrentControl || currentControl != Group::ProductionCMode::ORAT)
+                if (currentControl != Group::ProductionCMode::ORAT)
                 {
                     double current_rate = 0.0;
                     current_rate += wellGroupHelpers::sumWellRates(group, schedule(), well_state, reportStepIdx, phase_usage_.phase_pos[BlackoilPhases::Liquid], false);
@@ -1863,7 +1897,7 @@ namespace Opm {
 
             if (group.has_control(Group::ProductionCMode::WRAT))
             {
-                if (checkCurrentControl || currentControl != Group::ProductionCMode::WRAT)
+                if (currentControl != Group::ProductionCMode::WRAT)
                 {
 
                     double current_rate = 0.0;
@@ -1879,7 +1913,7 @@ namespace Opm {
             }
             if (group.has_control(Group::ProductionCMode::GRAT))
             {
-                if (checkCurrentControl || currentControl != Group::ProductionCMode::GRAT)
+                if (currentControl != Group::ProductionCMode::GRAT)
                 {
                     double current_rate = 0.0;
                     current_rate += wellGroupHelpers::sumWellRates(group, schedule(), well_state, reportStepIdx, phase_usage_.phase_pos[BlackoilPhases::Vapour], false);
@@ -1893,7 +1927,7 @@ namespace Opm {
             }
             if (group.has_control(Group::ProductionCMode::LRAT))
             {
-                if (checkCurrentControl || currentControl != Group::ProductionCMode::LRAT)
+                if (currentControl != Group::ProductionCMode::LRAT)
                 {
                     double current_rate = 0.0;
                     current_rate += wellGroupHelpers::sumWellRates(group, schedule(), well_state, reportStepIdx, phase_usage_.phase_pos[BlackoilPhases::Liquid], false);
@@ -1915,7 +1949,7 @@ namespace Opm {
             }
             if (group.has_control(Group::ProductionCMode::RESV))
             {
-                if (checkCurrentControl || currentControl != Group::ProductionCMode::RESV)
+                if (currentControl != Group::ProductionCMode::RESV)
                 {
                     double current_rate = 0.0;
                     current_rate += wellGroupHelpers::sumWellResRates(group, schedule(), well_state, reportStepIdx, phase_usage_.phase_pos[BlackoilPhases::Aqua], true);
@@ -1943,7 +1977,7 @@ namespace Opm {
 
         // call recursively down the group hiearchy
         for (const std::string& groupName : group.groups()) {
-            checkGroupConstraints( schedule().getGroup(groupName, reportStepIdx), checkCurrentControl, deferred_logger);
+            checkGroupConstraints( schedule().getGroup(groupName, reportStepIdx), deferred_logger);
         }
 
 
