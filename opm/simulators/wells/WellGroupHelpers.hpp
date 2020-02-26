@@ -752,8 +752,181 @@ namespace Opm {
     };
 
 
+    template <class RateConverterType>
+    inline bool checkGroupConstraintsInj(const std::string& name,
+                                         const std::string& parent,
+                                         const Group& group,
+                                         const WellStateFullyImplicitBlackoil& wellState,
+                                         const int reportStepIdx,
+                                         const GuideRate* guideRate,
+                                         const double* rates,
+                                         Phase injectionPhase,
+                                         const PhaseUsage& pu,
+                                         const double efficiencyFactor,
+                                         const Schedule& schedule,
+                                         const SummaryState& summaryState,
+                                         const RateConverterType& rateConverter,
+                                         const int pvtRegionIdx,
+                                         DeferredLogger& deferred_logger)
+    {
+        // When called for a well ('name' is a well name), 'parent'
+        // will be the name of 'group'. But if we recurse, 'name' and
+        // 'parent' will stay fixed while 'group' will be higher up
+        // in the group tree.
+
+        if (!group.isInjectionGroup()) {
+            return false;
+        }
+
+        int phasePos;
+        GuideRateModel::Target target;
+
+        switch (injectionPhase) {
+        case Phase::WATER:
+        {
+            phasePos = pu.phase_pos[BlackoilPhases::Aqua];
+            target = GuideRateModel::Target::WAT;
+            break;
+        }
+        case Phase::OIL:
+        {
+            phasePos = pu.phase_pos[BlackoilPhases::Liquid];
+            target = GuideRateModel::Target::OIL;
+            break;
+        }
+        case Phase::GAS:
+        {
+            phasePos = pu.phase_pos[BlackoilPhases::Vapour];
+            target = GuideRateModel::Target::GAS;
+            break;
+        }
+        default:
+            OPM_DEFLOG_THROW(std::logic_error, "Expected WATER, OIL or GAS as injecting type for " + name, deferred_logger);
+        }
+        const Group::InjectionCMode& currentGroupControl = wellState.currentInjectionGroupControl(injectionPhase, group.name());
+
+        assert(group.hasInjectionControl(injectionPhase));
+        const auto& groupcontrols = group.injectionControls(injectionPhase, summaryState);
+
+        const std::vector<double>& groupInjectionReductions = wellState.currentInjectionGroupReductionRates(group.name());
+        const double groupTargetReduction = groupInjectionReductions[phasePos];
+        double fraction = wellGroupHelpers::fractionFromGuideRates(name, parent, schedule, wellState, reportStepIdx, guideRate, target, /*isInjector*/ true, /*alwaysIncludeThis*/ true);
+        wellGroupHelpers::accumulateGroupInjectionPotentialFractions(parent, group.name(), schedule, wellState, pu, reportStepIdx, injectionPhase, fraction);
+
+        bool constraint_broken = false;
+        switch(currentGroupControl) {
+        case Group::InjectionCMode::NONE:
+        {
+            return false;
+        }
+        case Group::InjectionCMode::RATE:
+        {
+            const double current_rate = rates[phasePos];
+            const double target_rate = fraction * std::max(0.0, (groupcontrols.surface_max_rate - groupTargetReduction + current_rate*efficiencyFactor)) / efficiencyFactor;
+            if (current_rate > target_rate) {
+                constraint_broken = true;
+            }
+            break;
+        }
+        case Group::InjectionCMode::RESV:
+        {
+            std::vector<double> convert_coeff(pu.num_phases, 1.0);
+            rateConverter.calcCoeff(/*fipreg*/ 0, pvtRegionIdx, convert_coeff);
+            const double coeff = convert_coeff[phasePos];
+            const double current_rate = rates[phasePos];
+            const double target_rate = fraction * std::max(0.0, (groupcontrols.resv_max_rate/coeff - groupTargetReduction + current_rate*efficiencyFactor)) / efficiencyFactor;
+            if (current_rate > target_rate) {
+                constraint_broken = true;
+            }
+            break;
+        }
+        case Group::InjectionCMode::REIN:
+        {
+            double productionRate = wellState.currentInjectionREINRates(groupcontrols.reinj_group)[phasePos];
+            const double current_rate = rates[phasePos];
+            const double target_rate = fraction * std::max(0.0, (groupcontrols.target_reinj_fraction*productionRate - groupTargetReduction + current_rate*efficiencyFactor)) / efficiencyFactor;
+            if (current_rate > target_rate) {
+                constraint_broken = true;
+            }
+            break;
+        }
+        case Group::InjectionCMode::VREP:
+        {
+            std::vector<double> convert_coeff(pu.num_phases, 1.0);
+            rateConverter.calcCoeff(/*fipreg*/ 0, pvtRegionIdx, convert_coeff);
+            const double coeff = convert_coeff[phasePos];
+            double voidageRate = wellState.currentInjectionVREPRates(groupcontrols.voidage_group)*groupcontrols.target_void_fraction;
+
+            double injReduction = 0.0;
+            if (groupcontrols.phase != Phase::WATER)
+                injReduction += groupInjectionReductions[pu.phase_pos[BlackoilPhases::Aqua]]*convert_coeff[pu.phase_pos[BlackoilPhases::Aqua]];
+            if (groupcontrols.phase != Phase::OIL)
+                injReduction += groupInjectionReductions[pu.phase_pos[BlackoilPhases::Liquid]]*convert_coeff[pu.phase_pos[BlackoilPhases::Liquid]];
+            if (groupcontrols.phase != Phase::GAS)
+                injReduction += groupInjectionReductions[pu.phase_pos[BlackoilPhases::Vapour]]*convert_coeff[pu.phase_pos[BlackoilPhases::Vapour]];
+            voidageRate -= injReduction;
+
+            const double current_rate = rates[phasePos];
+            const double target_rate = fraction * std::max(0.0, ( voidageRate/coeff - groupTargetReduction + current_rate*efficiencyFactor)) / efficiencyFactor;
+            if (current_rate > target_rate) {
+                constraint_broken = true;
+            }
+            break;
+        }
+        case Group::InjectionCMode::FLD:
+        {
+            // Inject share of parents control
+            const auto& parentGroup = schedule.getGroup( group.parent(), reportStepIdx );
+            return checkGroupConstraintsInj(name,
+                                            parent,
+                                            parentGroup,
+                                            wellState,
+                                            reportStepIdx,
+                                            guideRate,
+                                            rates,
+                                            injectionPhase,
+                                            pu,
+                                            efficiencyFactor * group.getGroupEfficiencyFactor(),
+                                            schedule,
+                                            summaryState,
+                                            rateConverter,
+                                            pvtRegionIdx,
+                                            deferred_logger);
+        }
+        case Group::InjectionCMode::SALE:
+        {
+            // only for gas injectors
+            assert (phasePos == pu.phase_pos[BlackoilPhases::Vapour]);
+
+            // Gas injection rate = Total gas production rate + gas import rate - gas consumption rate - sales rate;
+            double inj_rate = wellState.currentInjectionREINRates(group.name())[phasePos];
+            if (schedule.gConSump(reportStepIdx).has(group.name())) {
+                const auto& gconsump = schedule.gConSump(reportStepIdx).get(group.name(), summaryState);
+                if (pu.phase_used[BlackoilPhases::Vapour]) {
+                    inj_rate += gconsump.import_rate;
+                    inj_rate -= gconsump.consumption_rate;
+                }
+            }
+            const auto& gconsale = schedule.gConSale(reportStepIdx).get(group.name(), summaryState);
+            inj_rate -= gconsale.sales_target;
+
+            const double current_rate = rates[phasePos];
+            const double target_rate = fraction * std::max(0.0, (inj_rate - groupTargetReduction + current_rate*efficiencyFactor)) / efficiencyFactor;
+            if (current_rate > target_rate) {
+                constraint_broken = true;
+            }
+            break;
+        }
+        default:
+            OPM_DEFLOG_THROW(std::runtime_error, "Invalid group control specified for group "  + group.name(), deferred_logger );
+
+        }
+
+        return constraint_broken;
+    }
 
 
+    template <class RateConverterType>
     inline bool checkGroupConstraintsProd(const std::string& name,
                                           const std::string& parent,
                                           const Group& group,
@@ -765,6 +938,8 @@ namespace Opm {
                                           const double efficiencyFactor,
                                           const Schedule& schedule,
                                           const SummaryState& summaryState,
+                                          const RateConverterType& rateConverter,
+                                          const int pvtRegionIdx,
                                           DeferredLogger& deferred_logger)
     {
         // When called for a well ('name' is a well name), 'parent'
@@ -879,7 +1054,7 @@ namespace Opm {
                 + groupTargetReductions[pu.phase_pos[BlackoilPhases::Vapour]];
             const double fraction = fractionFunc(GuideRateModel::Target::RES);
             std::vector<double> convert_coeff(pu.num_phases, 1.0);
-            //rateConverter_.calcCoeff(/*fipreg*/ 0, pvtRegionIdx_, convert_coeff);
+            rateConverter.calcCoeff(/*fipreg*/ 0, pvtRegionIdx, convert_coeff);
             double current_rate = 0.0;
             for (int phase = 0; phase < pu.num_phases; ++phase) {
                 current_rate -= rates[phase] * convert_coeff[phase];
@@ -909,6 +1084,8 @@ namespace Opm {
                                              efficiencyFactor * group.getGroupEfficiencyFactor(),
                                              schedule,
                                              summaryState,
+                                             rateConverter,
+                                             pvtRegionIdx,
                                              deferred_logger);
         }
         default:
