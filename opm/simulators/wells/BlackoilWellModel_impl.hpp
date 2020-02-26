@@ -1716,18 +1716,6 @@ namespace Opm {
 
 
 
-    template<typename TypeTag>
-    void
-    BlackoilWellModel<TypeTag>::
-    updateGroupHigherControls(Opm::DeferredLogger& /*deferred_logger*/)
-    {
-        // const int reportStepIdx = ebosSimulator_.episodeIndex();
-        // const Group& fieldGroup = schedule().getGroup("FIELD", reportStepIdx);
-        // checkGroupConstraints(fieldGroup, deferred_logger);
-    }
-
-
-
 
     template<typename TypeTag>
     void
@@ -2066,6 +2054,77 @@ namespace Opm {
             deferred_logger.info(ss.str());
 
     }
+
+
+
+
+    template<typename TypeTag>
+    void
+    BlackoilWellModel<TypeTag>::
+    updateGroupHigherControls(Opm::DeferredLogger& deferred_logger)
+    {
+        const int reportStepIdx = ebosSimulator_.episodeIndex();
+        const Group& fieldGroup = schedule().getGroup("FIELD", reportStepIdx);
+        checkGroupHigherConstraints(fieldGroup, deferred_logger);
+    }
+
+
+    template<typename TypeTag>
+    void
+    BlackoilWellModel<TypeTag>::
+    checkGroupHigherConstraints(const Group& group, Opm::DeferredLogger& deferred_logger)
+    {
+        // Use the pvtRegionIdx from the top cell of the first well.
+        // TODO fix this!
+        const int well_cell_top = well_perf_data_[0][0].cell_index;
+        const int pvtreg = pvt_region_idx_[well_cell_top];
+
+        const int reportStepIdx = ebosSimulator_.episodeIndex();
+        const auto& summaryState = ebosSimulator_.vanguard().summaryState();
+
+        std::vector<double> rates = {0.0, 0.0, 0.0}; // TODO set properly!
+
+        if (group.isInjectionGroup()) {
+            const Phase all[] = {Phase::WATER, Phase::OIL, Phase::GAS};
+            for (Phase phase : all) {
+                // Check higher up only if under individual (not FLD) control.
+                const Group::InjectionCMode& currentControl = well_state_.currentInjectionGroupControl(phase, group.name());
+                if (currentControl != Group::InjectionCMode::FLD) {
+                    const Group& parentGroup = schedule().getGroup(group.parent(), reportStepIdx);
+                    const bool changed = wellGroupHelpers::checkGroupConstraintsInj(
+                        group.name(),
+                        group.parent(),
+                        parentGroup,
+                        well_state_,
+                        reportStepIdx,
+                        guideRate_.get(),
+                        rates.data(),
+                        phase,
+                        phase_usage_,
+                        group.getGroupEfficiencyFactor(),
+                        schedule(),
+                        summaryState,
+                        *rateConverter_,
+                        pvtreg,
+                        deferred_logger);
+                    if (changed) {
+                        actionOnBrokenConstraints(group, Group::InjectionCMode::FLD, phase, reportStepIdx, deferred_logger);
+                    }
+                }
+            }
+        }
+
+        if (group.isInjectionGroup()) {
+            // TODO: do something
+        }
+
+        // call recursively down the group hiearchy
+        for (const std::string& groupName : group.groups()) {
+            checkGroupHigherConstraints( schedule().getGroup(groupName, reportStepIdx), deferred_logger);
+         }
+    }
+
+
 
     template<typename TypeTag>
     void
