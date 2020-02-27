@@ -32,19 +32,6 @@ namespace Opm {
     namespace wellGroupHelpers
     {
 
-    inline void setGroupControl(const Group& group, const Schedule& schedule, const Phase& groupInjectionPhase, const int reportStepIdx, const bool injector, WellStateFullyImplicitBlackoil& wellState, std::ostringstream& ss) {
-
-        for (const std::string& groupName : group.groups()) {
-            const Group& groupTmp = schedule.getGroup(groupName, reportStepIdx);
-            setGroupControl(groupTmp, schedule, groupInjectionPhase, reportStepIdx, injector, wellState, ss);
-            if (injector) {
-                wellState.setCurrentInjectionGroupControl(groupInjectionPhase, groupName, Group::InjectionCMode::FLD);
-            } else {
-                wellState.setCurrentProductionGroupControl(groupName, Group::ProductionCMode::FLD);
-            }
-        }
-    }
-
     inline void setCmodeGroup(const Group& group, const Schedule& schedule, const SummaryState& summaryState, const int reportStepIdx, WellStateFullyImplicitBlackoil& wellState) {
 
         for (const std::string& groupName : group.groups()) {
@@ -80,8 +67,6 @@ namespace Opm {
 
         if (schedule.gConSale(reportStepIdx).has(group.name())) {
             wellState.setCurrentInjectionGroupControl(Phase::GAS, group.name(), Group::InjectionCMode::SALE);
-            std::ostringstream ss;
-            setGroupControl(group, schedule, Phase::GAS, reportStepIdx, /*injector*/true, wellState, ss);
         }
     }
 
@@ -651,6 +636,37 @@ namespace Opm {
         // 'parent' will stay fixed while 'group' will be higher up
         // in the group tree.
 
+        const Group::InjectionCMode& currentGroupControl = wellState.currentInjectionGroupControl(injectionPhase, group.name());
+        if (currentGroupControl == Group::InjectionCMode::FLD ||
+            currentGroupControl == Group::InjectionCMode::NONE) {
+            // Return if we are not available for parent group.
+            if (!group.isAvailableForGroupControl()) {
+                return false;
+            }
+            // Otherwise: check injection share of parent's control.
+            const auto& parentGroup = schedule.getGroup(group.parent(), reportStepIdx);
+            return checkGroupConstraintsInj(name,
+                                            parent,
+                                            parentGroup,
+                                            wellState,
+                                            reportStepIdx,
+                                            guideRate,
+                                            rates,
+                                            injectionPhase,
+                                            pu,
+                                            efficiencyFactor * group.getGroupEfficiencyFactor(),
+                                            schedule,
+                                            summaryState,
+                                            rateConverter,
+                                            pvtRegionIdx,
+                                            deferred_logger);
+        }
+
+        // If we are here, we are at the topmost group to be visited in the recursion.
+        // This is the group containing the control we will check against.
+
+        // This can be false for FLD-controlled groups, we must therefore
+        // check for FLD first (done above).
         if (!group.isInjectionGroup()) {
             return false;
         }
@@ -680,7 +696,6 @@ namespace Opm {
         default:
             OPM_DEFLOG_THROW(std::logic_error, "Expected WATER, OIL or GAS as injecting type for " + name, deferred_logger);
         }
-        const Group::InjectionCMode& currentGroupControl = wellState.currentInjectionGroupControl(injectionPhase, group.name());
 
         assert(group.hasInjectionControl(injectionPhase));
         const auto& groupcontrols = group.injectionControls(injectionPhase, summaryState);
@@ -692,10 +707,6 @@ namespace Opm {
 
         bool constraint_broken = false;
         switch(currentGroupControl) {
-        case Group::InjectionCMode::NONE:
-        {
-            return false;
-        }
         case Group::InjectionCMode::RATE:
         {
             const double current_rate = rates[phasePos];
@@ -750,26 +761,6 @@ namespace Opm {
             }
             break;
         }
-        case Group::InjectionCMode::FLD:
-        {
-            // Inject share of parents control
-            const auto& parentGroup = schedule.getGroup( group.parent(), reportStepIdx );
-            return checkGroupConstraintsInj(name,
-                                            parent,
-                                            parentGroup,
-                                            wellState,
-                                            reportStepIdx,
-                                            guideRate,
-                                            rates,
-                                            injectionPhase,
-                                            pu,
-                                            efficiencyFactor * group.getGroupEfficiencyFactor(),
-                                            schedule,
-                                            summaryState,
-                                            rateConverter,
-                                            pvtRegionIdx,
-                                            deferred_logger);
-        }
         case Group::InjectionCMode::SALE:
         {
             // only for gas injectors
@@ -793,6 +784,14 @@ namespace Opm {
                 constraint_broken = true;
             }
             break;
+        }
+        case Group::InjectionCMode::NONE:
+        {
+            assert(false); // Should already be handled at the top.
+        }
+        case Group::InjectionCMode::FLD:
+        {
+            assert(false); // Should already be handled at the top.
         }
         default:
             OPM_DEFLOG_THROW(std::runtime_error, "Invalid group control specified for group "  + group.name(), deferred_logger );
@@ -824,6 +823,39 @@ namespace Opm {
         // 'parent' will stay fixed while 'group' will be higher up
         // in the group tree.
 
+
+
+        const Group::ProductionCMode& currentGroupControl = wellState.currentProductionGroupControl(group.name());
+
+        if (currentGroupControl == Group::ProductionCMode::FLD ||
+            currentGroupControl == Group::ProductionCMode::NONE) {
+            // Return if we are not available for parent group.
+            if (!group.isAvailableForGroupControl()) {
+                return false;
+            }
+            // Otherwise: check production share of parent's control.
+            const auto& parentGroup = schedule.getGroup(group.parent(), reportStepIdx);
+            return checkGroupConstraintsProd(name,
+                                             parent,
+                                             parentGroup,
+                                             wellState,
+                                             reportStepIdx,
+                                             guideRate,
+                                             rates,
+                                             pu,
+                                             efficiencyFactor * group.getGroupEfficiencyFactor(),
+                                             schedule,
+                                             summaryState,
+                                             rateConverter,
+                                             pvtRegionIdx,
+                                             deferred_logger);
+        }
+
+        // If we are here, we are at the topmost group to be visited in the recursion.
+        // This is the group containing the control we will check against.
+
+        // This can be false for FLD-controlled groups, we must therefore
+        // check for FLD first (done above).
         if (!group.isProductionGroup()) {
             return false;
         }
@@ -851,7 +883,6 @@ namespace Opm {
             return fraction;
         };
 
-        const Group::ProductionCMode& currentGroupControl = wellState.currentProductionGroupControl(group.name());
         const auto& groupcontrols = group.productionControls(summaryState);
         const std::vector<double>& groupTargetReductions = wellState.currentProductionGroupReductionRates(group.name());
 
