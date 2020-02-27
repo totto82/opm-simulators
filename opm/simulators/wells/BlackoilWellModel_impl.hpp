@@ -2082,10 +2082,18 @@ namespace Opm {
         const int reportStepIdx = ebosSimulator_.episodeIndex();
         const auto& summaryState = ebosSimulator_.vanguard().summaryState();
 
-        std::vector<double> rates = {0.0, 0.0, 0.0}; // TODO set properly!
+        std::vector<double> rates(phase_usage_.num_phases, 0.0);
+        const auto& comm = ebosSimulator_.vanguard().grid().comm();
 
         if (group.isInjectionGroup()) {
-            const Phase all[] = {Phase::WATER, Phase::OIL, Phase::GAS};
+            // Obtain rates for group.
+            for (int phasePos = 0; phasePos < phase_usage_.num_phases; ++phasePos) {
+                const double local_current_rate = wellGroupHelpers::sumWellRates(
+                    group, schedule(), well_state_, reportStepIdx, phasePos, /* isInjector */ true);
+                // Sum over all processes
+                rates[phasePos] = comm.sum(local_current_rate);
+            }
+            const Phase all[] = { Phase::WATER, Phase::OIL, Phase::GAS };
             for (Phase phase : all) {
                 // Check higher up only if under individual (not FLD) control.
                 const Group::InjectionCMode& currentControl = well_state_.currentInjectionGroupControl(phase, group.name());
@@ -2115,7 +2123,37 @@ namespace Opm {
         }
 
         if (group.isInjectionGroup()) {
-            // TODO: do something
+            // Obtain rates for group.
+            for (int phasePos = 0; phasePos < phase_usage_.num_phases; ++phasePos) {
+                const double local_current_rate = wellGroupHelpers::sumWellRates(
+                    group, schedule(), well_state_, reportStepIdx, phasePos, /* isInjector */ false);
+                // Sum over all processes
+                rates[phasePos] = comm.sum(local_current_rate);
+            }
+            // Check higher up only if under individual (not FLD) control.
+            const Group::ProductionCMode& currentControl = well_state_.currentProductionGroupControl(group.name());
+                if (currentControl != Group::ProductionCMode::FLD) {
+                    const Group& parentGroup = schedule().getGroup(group.parent(), reportStepIdx);
+                    const bool changed = wellGroupHelpers::checkGroupConstraintsProd(
+                        group.name(),
+                        group.parent(),
+                        parentGroup,
+                        well_state_,
+                        reportStepIdx,
+                        guideRate_.get(),
+                        rates.data(),
+                        phase_usage_,
+                        group.getGroupEfficiencyFactor(),
+                        schedule(),
+                        summaryState,
+                        *rateConverter_,
+                        pvtreg,
+                        deferred_logger);
+                    if (changed) {
+                        const auto exceed_action = group.productionControls(summaryState).exceed_action;
+                        actionOnBrokenConstraints(group, exceed_action, Group::ProductionCMode::FLD, reportStepIdx, deferred_logger);
+                    }
+                }
         }
 
         // call recursively down the group hiearchy
