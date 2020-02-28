@@ -2118,13 +2118,13 @@ namespace Opm {
             }
         }
 
-        if (group.isInjectionGroup()) {
+        if (group.isProductionGroup()) {
             // Obtain rates for group.
             for (int phasePos = 0; phasePos < phase_usage_.num_phases; ++phasePos) {
                 const double local_current_rate = wellGroupHelpers::sumWellRates(
                     group, schedule(), well_state_, reportStepIdx, phasePos, /* isInjector */ false);
                 // Sum over all processes
-                rates[phasePos] = comm.sum(local_current_rate);
+                rates[phasePos] = -comm.sum(local_current_rate);
             }
             // Check higher up only if under individual (not FLD) control.
             const Group::ProductionCMode& currentControl = well_state_.currentProductionGroupControl(group.name());
