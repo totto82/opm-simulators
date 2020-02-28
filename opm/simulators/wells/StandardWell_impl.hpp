@@ -981,6 +981,20 @@ namespace Opm
     StandardWell<TypeTag>::
     assembleGroupInjectionControl(const Group& group, const WellState& well_state, const Opm::Schedule& schedule, const SummaryState& summaryState, const Well::InjectorType& injectorType, EvalWell& control_eq, double efficiencyFactor, Opm::DeferredLogger& deferred_logger)
     {
+        if (!group.isAvailableForGroupControl()) {
+            // We cannot go any further up the hierarchy. This could
+            // be the FIELD group, or any group for which this has
+            // been set in GCONINJE or GCONPROD. If we are here
+            // anyway, it is likely that the deck set inconsistent
+            // requirements, such as GRUP control mode on a well with
+            // no appropriate controls defined on any of its
+            // containing groups. We will therefore use the wells' bhp
+            // limit equation as a fallback.
+            const auto& controls = well_ecl_.injectionControls(summaryState);
+            control_eq = getBhp() - controls.bhp_limit;
+            return;
+        }
+
         const auto& well = well_ecl_;
         const auto pu = phaseUsage();
 
@@ -1015,7 +1029,8 @@ namespace Opm
         }
         const Group::InjectionCMode& currentGroupControl = well_state.currentInjectionGroupControl(injectionPhase, group.name());
 
-        if (currentGroupControl == Group::InjectionCMode::FLD) {
+        if (currentGroupControl == Group::InjectionCMode::FLD ||
+            currentGroupControl == Group::InjectionCMode::NONE) {
             // Inject share of parents control
             const auto& parent = schedule.getGroup( group.parent(), current_step_ );
             efficiencyFactor *= group.getGroupEfficiencyFactor();
@@ -1023,16 +1038,8 @@ namespace Opm
             return;
         }
 
-        if (!group.isInjectionGroup() || currentGroupControl == Group::InjectionCMode::NONE) {
-            // use bhp as control eq and let the updateControl code find a valid control
-            const auto& controls = well.injectionControls(summaryState);
-            control_eq = getBhp() - controls.bhp_limit;
-            return;
-        }
-
         assert(group.hasInjectionControl(injectionPhase));
         const auto& groupcontrols = group.injectionControls(injectionPhase, summaryState);
-
 
         const std::vector<double>& groupInjectionReductions = well_state.currentInjectionGroupReductionRates(group.name());
         double groupTargetReduction = groupInjectionReductions[phasePos];
@@ -1133,12 +1140,26 @@ namespace Opm
     StandardWell<TypeTag>::
     assembleGroupProductionControl(const Group& group, const WellState& well_state, const Opm::Schedule& schedule, const SummaryState& summaryState, EvalWell& control_eq, double efficiencyFactor, Opm::DeferredLogger& deferred_logger)
     {
+        if (!group.isAvailableForGroupControl()) {
+            // We cannot go any further up the hierarchy. This could
+            // be the FIELD group, or any group for which this has
+            // been set in GCONINJE or GCONPROD. If we are here
+            // anyway, it is likely that the deck set inconsistent
+            // requirements, such as GRUP control mode on a well with
+            // no appropriate controls defined on any of its
+            // containing groups. We will therefore use the wells' bhp
+            // limit equation as a fallback.
+            const auto& controls = well_ecl_.productionControls(summaryState);
+            control_eq = getBhp() - controls.bhp_limit;
+            return;
+        }
 
         const auto& well = well_ecl_;
         const auto pu = phaseUsage();
 
         const Group::ProductionCMode& currentGroupControl = well_state.currentProductionGroupControl(group.name());
-        if (currentGroupControl == Group::ProductionCMode::FLD) {
+        if (currentGroupControl == Group::ProductionCMode::FLD ||
+            currentGroupControl == Group::ProductionCMode::NONE) {
             // Produce share of parents control
             const auto& parent = schedule.getGroup( group.parent(), current_step_ );
             efficiencyFactor *= group.getGroupEfficiencyFactor();
@@ -1146,7 +1167,7 @@ namespace Opm
             return;
         }
 
-        if (!group.isProductionGroup() || currentGroupControl == Group::ProductionCMode::NONE) {
+        if (!group.isProductionGroup()) {
             // use bhp as control eq and let the updateControl code find a vallied control
             const auto& controls = well.productionControls(summaryState);
             control_eq = getBhp() - controls.bhp_limit;
