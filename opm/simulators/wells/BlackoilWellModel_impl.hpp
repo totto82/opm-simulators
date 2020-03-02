@@ -1160,11 +1160,6 @@ namespace Opm {
         // For no well active globally we simply return.
         if( !wellsActive() ) return ;
 
-        // Check individual well constraints and communicate.
-        for (const auto& well : well_container_) {
-            const auto mode = WellInterface<TypeTag>::IndividualOrGroup::Individual;
-            well->updateWellControl(ebosSimulator_, mode, well_state_, deferred_logger);
-        }
         updateAndCommunicateGroupData();
 
         if (checkGroupControls) {
@@ -1174,6 +1169,8 @@ namespace Opm {
             // Check group's constraints from higher levels.
             updateGroupHigherControls(deferred_logger);
 
+            updateAndCommunicateGroupData();
+
             // Check wells' group constraints and communicate.
             for (const auto& well : well_container_) {
                 const auto mode = WellInterface<TypeTag>::IndividualOrGroup::Group;
@@ -1181,6 +1178,14 @@ namespace Opm {
             }
             updateAndCommunicateGroupData();
         }
+
+        // Check individual well constraints and communicate.
+        for (const auto& well : well_container_) {
+            const auto mode = WellInterface<TypeTag>::IndividualOrGroup::Individual;
+            well->updateWellControl(ebosSimulator_, mode, well_state_, deferred_logger);
+        }
+        updateAndCommunicateGroupData();
+
     }
 
 
