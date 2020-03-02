@@ -174,7 +174,9 @@ namespace Opm {
                     else
                         continue;
 
-                    if (currentGroupControl != Group::InjectionCMode::FLD) {
+                    if (currentGroupControl != Group::InjectionCMode::FLD &&
+                        currentGroupControl != Group::InjectionCMode::NONE) {
+                        // Subgroup is under individual control.
                         groupTargetReduction[phasePos] += sumWellRates(subGroup, schedule, wellStateNupcol, reportStepIdx, phasePos, isInjector);
                     } else {
                         groupTargetReduction[phasePos] += subGroupTargetReduction[phasePos];
@@ -182,7 +184,9 @@ namespace Opm {
                 }
             } else {
                 const Group::ProductionCMode& currentGroupControl = wellState.currentProductionGroupControl(subGroupName);
-                if (currentGroupControl != Group::ProductionCMode::FLD) {
+                if (currentGroupControl != Group::ProductionCMode::FLD &&
+                    currentGroupControl != Group::ProductionCMode::NONE) {
+                    // Subgroup is under individual control.
                     for (int phase = 0; phase < np; phase++) {
                         groupTargetReduction[phase] += sumWellRates(subGroup, schedule, wellStateNupcol, reportStepIdx, phase, isInjector);
                     }
