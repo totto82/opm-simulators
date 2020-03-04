@@ -432,7 +432,7 @@ namespace Opm {
                                const GuideRate* guideRate,
                                const GuideRateModel::Target target)
     {
-        if (guideRate->has(name))
+        if (guideRate->has(name, reportStepIdx))
             return guideRate->get(name, target);
 
         double totalGuideRate = 0.0;
@@ -464,6 +464,47 @@ namespace Opm {
         return totalGuideRate;
    }
 
+
+    inline double getGuideRateInj(const std::string& name,
+                               const Schedule& schedule,
+                               const WellStateFullyImplicitBlackoil& wellState,
+                               const int reportStepIdx,
+                               const GuideRate* guideRate,
+                               const GuideRateModel::Target target,
+                               const Phase& injectionPhase)
+    {
+        if (guideRate->has(name, reportStepIdx))
+            return guideRate->get(name, target);
+
+        double totalGuideRate = 0.0;
+        const Group& group = schedule.getGroup(name, reportStepIdx);
+
+        for (const std::string& groupName : group.groups()) {
+            const Group::InjectionCMode& currentGroupControl = wellState.currentInjectionGroupControl(injectionPhase, groupName);
+            if (currentGroupControl == Group::InjectionCMode::FLD || currentGroupControl == Group::InjectionCMode::NONE) {
+                // accumulate from sub wells/groups
+                totalGuideRate += getGuideRateInj(groupName, schedule, wellState, reportStepIdx, guideRate, target, injectionPhase);
+            }
+        }
+
+        for (const std::string& wellName : group.wells()) {
+            const auto& wellTmp = schedule.getWell(wellName, reportStepIdx);
+
+            if (!wellTmp.isInjector())
+                 continue;
+
+            if (wellTmp.getStatus() == Well::Status::SHUT)
+                continue;
+
+            // Only count wells under group control or the ru
+            if (!wellState.isInjectionGrup(wellName))
+                continue;
+
+            totalGuideRate += guideRate->get(wellName, target);
+        }
+        return totalGuideRate;
+   }
+
     inline double fractionFromGuideRates(const std::string& name,
                                          const std::string& controlGroupName,
                                          const Schedule& schedule,
@@ -481,8 +522,8 @@ namespace Opm {
         return thisGuideRate / controlGroupGuideRate;
     }
 
-    inline double fractionFromInjectionPotentials(const std::string& wellName,
-                                                  const std::string& groupName,
+    inline double fractionFromInjectionPotentials(const std::string& name,
+                                                  const std::string& controlGroupName,
                                                   const Schedule& schedule,
                                                   const WellStateFullyImplicitBlackoil& wellState,
                                                   const int reportStepIdx,
@@ -492,23 +533,12 @@ namespace Opm {
                                                   const Phase& injectionPhase,
                                                   const bool alwaysIncludeThis = false)
     {
-   
-        int phasePos;
-        if (injectionPhase == Phase::GAS && pu.phase_used[BlackoilPhases::Vapour] )
-            phasePos = pu.phase_pos[ pu.phase_pos[BlackoilPhases::Vapour] ];
-        else if (injectionPhase == Phase::OIL && pu.phase_used[BlackoilPhases::Liquid])
-            phasePos = pu.phase_pos[ pu.phase_pos[BlackoilPhases::Liquid] ];
-        else if (injectionPhase == Phase::WATER && pu.phase_used[BlackoilPhases::Aqua] )
-            phasePos = pu.phase_pos[ pu.phase_pos[BlackoilPhases::Aqua] ];
-        else
-            throw("this should not happen");
-
-        double groupTotalGuideRate = wellState.currentGroupInjectionPotentials(groupName)[phasePos];
-        double wellGuideRate = guideRate->get(wellName, target);
+        double thisGuideRate = getGuideRateInj(name, schedule, wellState, reportStepIdx, guideRate, target, injectionPhase);
+        double controlGroupGuideRate = getGuideRateInj(controlGroupName, schedule, wellState, reportStepIdx, guideRate, target, injectionPhase);
         if (alwaysIncludeThis)
-            groupTotalGuideRate += wellGuideRate;
+            controlGroupGuideRate += thisGuideRate;
 
-        return wellGuideRate / groupTotalGuideRate;
+        return thisGuideRate / controlGroupGuideRate;
     }
 
 
