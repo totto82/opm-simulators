@@ -251,14 +251,11 @@ namespace Opm {
             const Group& groupTmp = schedule.getGroup(groupName, reportStepIdx);
             updateGuideRateForGroups(groupTmp, schedule, pu, reportStepIdx, simTime, isInjector, wellState, comm, guideRate, thisPot);
 
-            // accumulate group contribution from sub group if FLD
+            // accumulate group contribution from sub group
             if (isInjector) {
                 const Phase all[] = {Phase::WATER, Phase::OIL, Phase::GAS};
                 for (Phase phase : all) {
                     const Group::InjectionCMode& currentGroupControl = wellState.currentInjectionGroupControl(phase, groupName);
-                    if (currentGroupControl != Group::InjectionCMode::FLD) {
-                        continue;
-                    }
                     int phasePos;
                     if (phase == Phase::GAS && pu.phase_used[BlackoilPhases::Vapour] )
                         phasePos = pu.phase_pos[BlackoilPhases::Vapour];
@@ -273,9 +270,6 @@ namespace Opm {
                 }
             } else {
                 const Group::ProductionCMode& currentGroupControl = wellState.currentProductionGroupControl(groupName);
-                if (currentGroupControl != Group::ProductionCMode::FLD) {
-                    continue;
-                }
                 for (int phase = 0; phase < np; phase++) {
                     pot[phase] += thisPot[phase];
                 }
@@ -459,7 +453,9 @@ namespace Opm {
         for (const std::string& groupName : parentGroup.groups()) {
             const Group::ProductionCMode& currentGroupControl = wellState.currentProductionGroupControl(groupName);
             const bool checkthis = (alwaysIncludeThis && groupName == name);
-            if (currentGroupControl == Group::ProductionCMode::FLD || checkthis) {
+            if (checkthis ||
+                currentGroupControl == Group::ProductionCMode::FLD ||
+                currentGroupControl == Group::ProductionCMode::NONE) {
                 groupTotalGuideRate += guideRate->get(groupName, target);
             }
         }
@@ -596,9 +592,6 @@ namespace Opm {
         for (const std::string& groupName : groupParent.groups()) {
             // only count group under group control from its parent
             const Group::InjectionCMode& currentGroupControl = wellState.currentInjectionGroupControl(injectionPhase, groupName);
-            if (currentGroupControl != Group::InjectionCMode::FLD)
-                continue;
-
             groupTotalGuideRate += wellState.currentGroupInjectionPotentials(groupName)[phasePos];
         }
         if (groupTotalGuideRate == 0.0)
@@ -893,10 +886,6 @@ namespace Opm {
 
         bool constraint_broken = false;
         switch(currentGroupControl) {
-        case Group::ProductionCMode::NONE:
-        {
-            return false;
-        }
         case Group::ProductionCMode::ORAT:
         {
             assert(pu.phase_used[BlackoilPhases::Liquid]);
@@ -983,24 +972,9 @@ namespace Opm {
             break;
         }
         case Group::ProductionCMode::FLD:
-        {
-            // Produce share of parents control
-            const auto& parentGroup = schedule.getGroup(group.parent(), reportStepIdx);
-            return checkGroupConstraintsProd(name,
-                                             parent,
-                                             parentGroup,
-                                             wellState,
-                                             reportStepIdx,
-                                             guideRate,
-                                             rates,
-                                             pu,
-                                             efficiencyFactor * group.getGroupEfficiencyFactor(),
-                                             schedule,
-                                             summaryState,
-                                             rateConverter,
-                                             pvtRegionIdx,
-                                             deferred_logger);
-        }
+            // Handled above.
+        case Group::ProductionCMode::NONE:
+            // Handled above.
         default:
             OPM_DEFLOG_THROW(std::runtime_error, "Invalid group control specified for group "  + group.name(), deferred_logger );
         }
