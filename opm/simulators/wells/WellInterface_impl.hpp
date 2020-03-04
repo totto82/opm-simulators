@@ -1747,17 +1747,17 @@ namespace Opm
         auto injectorType = well_controls.injector_type;
         Phase injectionPhase;
         switch (injectorType) {
-        case Well::InjectorType::WATER:
+        case InjectorType::WATER:
         {
             injectionPhase = Phase::WATER;
             break;
         }
-        case Well::InjectorType::OIL:
+        case InjectorType::OIL:
         {
             injectionPhase = Phase::OIL;
             break;
         }
-        case Well::InjectorType::GAS:
+        case InjectorType::GAS:
         {
             injectionPhase = Phase::GAS;
             break;
