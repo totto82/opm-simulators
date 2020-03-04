@@ -1162,25 +1162,34 @@ namespace Opm {
 
         updateAndCommunicateGroupData();
 
+        std::set<std::string> switched_wells;
+        std::set<std::string> switched_groups;
+
         if (checkGroupControls) {
             // Check group individual constraints.
-            updateGroupIndividualControls(deferred_logger);
+            updateGroupIndividualControls(deferred_logger, switched_groups);
 
             // Check group's constraints from higher levels.
-            updateGroupHigherControls(deferred_logger);
+            updateGroupHigherControls(deferred_logger, switched_groups);
 
             updateAndCommunicateGroupData();
 
             // Check wells' group constraints and communicate.
             for (const auto& well : well_container_) {
                 const auto mode = WellInterface<TypeTag>::IndividualOrGroup::Group;
-                well->updateWellControl(ebosSimulator_, mode, well_state_, deferred_logger);
+                const bool changed = well->updateWellControl(ebosSimulator_, mode, well_state_, deferred_logger);
+                if (changed) {
+                    switched_wells.insert(well->name());
+                }
             }
             updateAndCommunicateGroupData();
         }
 
         // Check individual well constraints and communicate.
         for (const auto& well : well_container_) {
+            if (switched_wells.count(well->name())) {
+                continue;
+            }
             const auto mode = WellInterface<TypeTag>::IndividualOrGroup::Individual;
             well->updateWellControl(ebosSimulator_, mode, well_state_, deferred_logger);
         }
@@ -1711,11 +1720,11 @@ namespace Opm {
     template<typename TypeTag>
     void
     BlackoilWellModel<TypeTag>::
-    updateGroupIndividualControls(Opm::DeferredLogger& deferred_logger)
+    updateGroupIndividualControls(Opm::DeferredLogger& deferred_logger, std::set<std::string>& switched_groups)
     {
         const int reportStepIdx = ebosSimulator_.episodeIndex();
         const Group& fieldGroup = schedule().getGroup("FIELD", reportStepIdx);
-        checkGroupConstraints(fieldGroup, deferred_logger);
+        checkGroupConstraints(fieldGroup, deferred_logger, switched_groups);
     }
 
 
@@ -1725,14 +1734,16 @@ namespace Opm {
     template<typename TypeTag>
     void
     BlackoilWellModel<TypeTag>::
-    checkGroupConstraints(const Group& group, Opm::DeferredLogger& deferred_logger) {
+    checkGroupConstraints(const Group& group, Opm::DeferredLogger& deferred_logger, std::set<std::string>& switched_groups) {
 
         const int reportStepIdx = ebosSimulator_.episodeIndex();
         const auto& summaryState = ebosSimulator_.vanguard().summaryState();
         const auto& comm = ebosSimulator_.vanguard().grid().comm();
         auto& well_state = well_state_;
 
-        if (group.isInjectionGroup())
+        const bool skip = switched_groups.count(group.name());
+
+        if (!skip && group.isInjectionGroup())
         {
 
             const Phase all[] = {Phase::WATER, Phase::OIL, Phase::GAS};
@@ -1764,6 +1775,7 @@ namespace Opm {
                         current_rate = comm.sum(current_rate);
 
                         if (controls.surface_max_rate < current_rate) {
+                            switched_groups.insert(group.name());
                             actionOnBrokenConstraints(group, Group::InjectionCMode::RATE, phase, reportStepIdx, deferred_logger);
                         }
                     }
@@ -1778,6 +1790,7 @@ namespace Opm {
                         current_rate = comm.sum(current_rate);
 
                         if (controls.resv_max_rate < current_rate) {
+                            switched_groups.insert(group.name());
                             actionOnBrokenConstraints(group, Group::InjectionCMode::RESV, phase, reportStepIdx, deferred_logger);
                         }
                     }
@@ -1800,6 +1813,7 @@ namespace Opm {
                         current_rate = comm.sum(current_rate);
 
                         if (controls.target_reinj_fraction*production_Rate < current_rate) {
+                            switched_groups.insert(group.name());
                             actionOnBrokenConstraints(group, Group::InjectionCMode::REIN, phase,reportStepIdx, deferred_logger);
                         }
                     }
@@ -1826,6 +1840,7 @@ namespace Opm {
                         total_rate = comm.sum(total_rate);
 
                         if (controls.target_void_fraction*voidage_rate < total_rate) {
+                            switched_groups.insert(group.name());
                             actionOnBrokenConstraints(group, Group::InjectionCMode::VREP, phase, reportStepIdx, deferred_logger);
                         }
                     }
@@ -1868,7 +1883,7 @@ namespace Opm {
             }
         }
 
-        if (group.isProductionGroup()) {
+        if (!skip && group.isProductionGroup()) {
             const auto controls = group.productionControls(summaryState);
             const Group::ProductionCMode& currentControl = well_state.currentProductionGroupControl(group.name());
 
@@ -1883,6 +1898,7 @@ namespace Opm {
                     current_rate = comm.sum(current_rate);
 
                     if (controls.oil_target < current_rate  ) {
+                        switched_groups.insert(group.name());
                         actionOnBrokenConstraints(group, controls.exceed_action, Group::ProductionCMode::ORAT, reportStepIdx, deferred_logger);
                     }
                 }
@@ -1900,6 +1916,7 @@ namespace Opm {
                     current_rate = comm.sum(current_rate);
 
                     if (controls.water_target < current_rate  ) {
+                        switched_groups.insert(group.name());
                         actionOnBrokenConstraints(group, controls.exceed_action, Group::ProductionCMode::WRAT, reportStepIdx, deferred_logger);
                     }
                 }
@@ -1914,6 +1931,7 @@ namespace Opm {
                     // sum over all nodes
                     current_rate = comm.sum(current_rate);
                     if (controls.gas_target < current_rate  ) {
+                        switched_groups.insert(group.name());
                         actionOnBrokenConstraints(group, controls.exceed_action, Group::ProductionCMode::GRAT, reportStepIdx, deferred_logger);
                     }
                 }
@@ -1930,6 +1948,7 @@ namespace Opm {
                     current_rate = comm.sum(current_rate);
 
                     if (controls.liquid_target < current_rate  ) {
+                        switched_groups.insert(group.name());
                         actionOnBrokenConstraints(group, controls.exceed_action, Group::ProductionCMode::LRAT, reportStepIdx, deferred_logger);
                     }
                 }
@@ -1953,6 +1972,7 @@ namespace Opm {
                     current_rate = comm.sum(current_rate);
 
                     if (controls.resv_target < current_rate  ) {
+                        switched_groups.insert(group.name());
                         actionOnBrokenConstraints(group, controls.exceed_action, Group::ProductionCMode::RESV, reportStepIdx, deferred_logger);
                     }
                 }
@@ -1970,7 +1990,7 @@ namespace Opm {
 
         // call recursively down the group hiearchy
         for (const std::string& groupName : group.groups()) {
-            checkGroupConstraints( schedule().getGroup(groupName, reportStepIdx), deferred_logger);
+            checkGroupConstraints( schedule().getGroup(groupName, reportStepIdx), deferred_logger, switched_groups);
         }
 
 
@@ -2062,18 +2082,18 @@ namespace Opm {
     template<typename TypeTag>
     void
     BlackoilWellModel<TypeTag>::
-    updateGroupHigherControls(Opm::DeferredLogger& deferred_logger)
+    updateGroupHigherControls(Opm::DeferredLogger& deferred_logger, std::set<std::string>& switched_groups)
     {
         const int reportStepIdx = ebosSimulator_.episodeIndex();
         const Group& fieldGroup = schedule().getGroup("FIELD", reportStepIdx);
-        checkGroupHigherConstraints(fieldGroup, deferred_logger);
+        checkGroupHigherConstraints(fieldGroup, deferred_logger, switched_groups);
     }
 
 
     template<typename TypeTag>
     void
     BlackoilWellModel<TypeTag>::
-    checkGroupHigherConstraints(const Group& group, Opm::DeferredLogger& deferred_logger)
+    checkGroupHigherConstraints(const Group& group, Opm::DeferredLogger& deferred_logger, std::set<std::string>& switched_groups)
     {
         // Use the pvtRegionIdx from the top cell of the first well.
         // TODO fix this!
@@ -2086,7 +2106,9 @@ namespace Opm {
         std::vector<double> rates(phase_usage_.num_phases, 0.0);
         const auto& comm = ebosSimulator_.vanguard().grid().comm();
 
-        if (group.isInjectionGroup()) {
+        const bool skip = switched_groups.count(group.name());
+
+        if (!skip && group.isInjectionGroup()) {
             // Obtain rates for group.
             for (int phasePos = 0; phasePos < phase_usage_.num_phases; ++phasePos) {
                 const double local_current_rate = wellGroupHelpers::sumWellRates(
@@ -2117,13 +2139,14 @@ namespace Opm {
                         pvtreg,
                         deferred_logger);
                     if (changed) {
+                        switched_groups.insert(group.name());
                         actionOnBrokenConstraints(group, Group::InjectionCMode::FLD, phase, reportStepIdx, deferred_logger);
                     }
                 }
             }
         }
 
-        if (group.isProductionGroup()) {
+        if (!skip && group.isProductionGroup()) {
             // Obtain rates for group.
             for (int phasePos = 0; phasePos < phase_usage_.num_phases; ++phasePos) {
                 const double local_current_rate = wellGroupHelpers::sumWellRates(
@@ -2151,6 +2174,7 @@ namespace Opm {
                         pvtreg,
                         deferred_logger);
                     if (changed) {
+                        switched_groups.insert(group.name());
                         const auto exceed_action = group.productionControls(summaryState).exceed_action;
                         actionOnBrokenConstraints(group, exceed_action, Group::ProductionCMode::FLD, reportStepIdx, deferred_logger);
                     }
@@ -2159,7 +2183,7 @@ namespace Opm {
 
         // call recursively down the group hiearchy
         for (const std::string& groupName : group.groups()) {
-            checkGroupHigherConstraints( schedule().getGroup(groupName, reportStepIdx), deferred_logger);
+            checkGroupHigherConstraints( schedule().getGroup(groupName, reportStepIdx), deferred_logger, switched_groups);
          }
     }
 

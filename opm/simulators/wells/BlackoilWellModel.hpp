@@ -376,10 +376,10 @@ namespace Opm {
 
             const Well& getWellEcl(const std::string& well_name) const;
 
-            void updateGroupIndividualControls(Opm::DeferredLogger& deferred_logger);
-            void checkGroupConstraints(const Group& group, Opm::DeferredLogger& deferred_logger);
-            void updateGroupHigherControls(Opm::DeferredLogger& deferred_logger);
-            void checkGroupHigherConstraints(const Group& group, Opm::DeferredLogger& deferred_logger);
+            void updateGroupIndividualControls(Opm::DeferredLogger& deferred_logger, std::set<std::string>& switched_groups);
+            void checkGroupConstraints(const Group& group, Opm::DeferredLogger& deferred_logger, std::set<std::string>& switched_groups);
+            void updateGroupHigherControls(Opm::DeferredLogger& deferred_logger, std::set<std::string>& switched_groups);
+            void checkGroupHigherConstraints(const Group& group, Opm::DeferredLogger& deferred_logger, std::set<std::string>& switched_groups);
 
             void actionOnBrokenConstraints(const Group& group, const Group::ExceedAction& exceed_action, const Group::ProductionCMode& newControl, const int reportStepIdx, Opm::DeferredLogger& deferred_logger);
 
