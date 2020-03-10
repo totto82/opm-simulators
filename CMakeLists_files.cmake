@@ -70,6 +70,7 @@ list (APPEND TEST_SOURCE_FILES
   tests/test_norne_pvt.cpp
   tests/test_ParallelRestart.cpp
   tests/test_wellstatefullyimplicitblackoil.cpp
+  tests/smooth1Dtransport_immiscible_sofv_ad.cc
   )
 
 if(MPI_FOUND)
