@@ -265,6 +265,7 @@ int main(int argc, char** argv)
 #if HAVE_DUNE_FEM
     Dune::Fem::MPIManager::initialize(argc, argv);
     int mpiRank = Dune::Fem::MPIManager::rank();
+    const auto& collectiveComm = Dune::Fem::MPIManager::comm();
 #else
     // the design of the plain dune MPIHelper class is quite flawed: there is no way to
     // get the instance without having the argc and argv parameters available and it is
@@ -272,6 +273,7 @@ int main(int argc, char** argv)
     // rank() and size() methods are supposed to be static.)
     const auto& mpiHelper = Dune::MPIHelper::instance(argc, argv);
     int mpiRank = mpiHelper.rank();
+    const auto& collectiveComm = mpiHelper.getCollectiveCommunication();
 #endif
 
     // we always want to use the default locale, and thus spare us the trouble
@@ -313,6 +315,7 @@ int main(int argc, char** argv)
         if ( mpiRank == 0 )
             std::cerr << "Exception received: " << e.what() << ". Try '--help' for a usage description.\n";
 #if HAVE_MPI
+        // this is done in MPIHelper
         MPI_Finalize();
 #endif
         return 1;
@@ -386,8 +389,8 @@ int main(int argc, char** argv)
                 setupMessageLimiter(schedule->getMessageLimits(), "STDOUT_LOGGER");
                 summaryConfig.reset( new Opm::SummaryConfig(*deck, *schedule, eclipseState->getTableManager(), parseContext, errorGuard));
 #ifdef HAVE_MPI
-                Opm::Mpi::packAndSend(*summaryConfig, Dune::MPIHelper::getCollectiveCommunication());
-                Opm::Mpi::packAndSend(*schedule, Dune::MPIHelper::getCollectiveCommunication());
+                Opm::Mpi::packAndSend(*summaryConfig, collectiveComm );
+                Opm::Mpi::packAndSend(*schedule, collectiveComm );
 #endif
             }
 #ifdef HAVE_MPI
@@ -395,11 +398,11 @@ int main(int argc, char** argv)
                 summaryConfig.reset(new Opm::SummaryConfig);
                 schedule.reset(new Opm::Schedule);
                 parState = new Opm::ParallelEclipseState;
-                Opm::Mpi::receiveAndUnpack(*summaryConfig, mpiHelper.getCollectiveCommunication());
-                Opm::Mpi::receiveAndUnpack(*schedule, mpiHelper.getCollectiveCommunication());
+                Opm::Mpi::receiveAndUnpack(*summaryConfig, collectiveComm);
+                Opm::Mpi::receiveAndUnpack(*schedule, collectiveComm);
                 eclipseState.reset(parState);
             }
-            Opm::EclMpiSerializer ser(mpiHelper.getCollectiveCommunication());
+            Opm::EclMpiSerializer ser(collectiveComm);
             ser.broadcast(*parState);
 #endif
 
