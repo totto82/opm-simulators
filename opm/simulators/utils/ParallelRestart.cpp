@@ -23,11 +23,14 @@
 
 #include "ParallelRestart.hpp"
 #include <opm/common/OpmLog/Location.hpp>
-#include <opm/material/fluidmatrixinteractions/EclEpsScalingPoints.hpp>
-#include <opm/material/fluidmatrixinteractions/EclTwoPhaseMaterialParams.hpp>
-#include <opm/material/fluidmatrixinteractions/EclMultiplexerMaterialParams.hpp>
+#include <opm/parser/eclipse/EclipseState/EclipseConfig.hpp>
 #include <opm/parser/eclipse/EclipseState/Runspec.hpp>
+#include <opm/parser/eclipse/EclipseState/Grid/Fault.hpp>
+#include <opm/parser/eclipse/EclipseState/Grid/FaultCollection.hpp>
+#include <opm/parser/eclipse/EclipseState/Grid/FaultFace.hpp>
+#include <opm/parser/eclipse/EclipseState/Grid/MULTREGTScanner.hpp>
 #include <opm/parser/eclipse/EclipseState/Grid/NNC.hpp>
+#include <opm/parser/eclipse/EclipseState/Grid/TransMult.hpp>
 #include <opm/parser/eclipse/EclipseState/InitConfig/Equil.hpp>
 #include <opm/parser/eclipse/EclipseState/InitConfig/FoamConfig.hpp>
 #include <opm/parser/eclipse/EclipseState/InitConfig/InitConfig.hpp>
@@ -42,11 +45,13 @@
 #include <opm/parser/eclipse/EclipseState/Schedule/Events.hpp>
 #include <opm/parser/eclipse/EclipseState/Schedule/Group/GuideRateConfig.hpp>
 #include <opm/parser/eclipse/EclipseState/Schedule/MessageLimits.hpp>
+#include <opm/parser/eclipse/EclipseState/Schedule/MSW/icd.hpp>
 #include <opm/parser/eclipse/EclipseState/Schedule/MSW/SpiralICD.hpp>
 #include <opm/parser/eclipse/EclipseState/Schedule/MSW/Valve.hpp>
 #include <opm/parser/eclipse/EclipseState/Schedule/OilVaporizationProperties.hpp>
 #include <opm/parser/eclipse/EclipseState/Schedule/RFTConfig.hpp>
 #include <opm/parser/eclipse/EclipseState/Schedule/Schedule.hpp>
+#include <opm/parser/eclipse/EclipseState/Schedule/ScheduleTypes.hpp>
 #include <opm/parser/eclipse/EclipseState/Schedule/TimeMap.hpp>
 #include <opm/parser/eclipse/EclipseState/Schedule/Tuning.hpp>
 #include <opm/parser/eclipse/EclipseState/Schedule/UDQ/UDQASTNode.hpp>
@@ -64,6 +69,8 @@
 #include <opm/parser/eclipse/EclipseState/Schedule/Well/WellTracerProperties.hpp>
 #include <opm/parser/eclipse/EclipseState/Schedule/Well/WList.hpp>
 #include <opm/parser/eclipse/EclipseState/Schedule/Well/WListManager.hpp>
+#include <opm/parser/eclipse/EclipseState/SimulationConfig/BCConfig.hpp>
+#include <opm/parser/eclipse/EclipseState/SimulationConfig/RockConfig.hpp>
 #include <opm/parser/eclipse/EclipseState/SimulationConfig/SimulationConfig.hpp>
 #include <opm/parser/eclipse/EclipseState/SimulationConfig/ThresholdPressure.hpp>
 #include <opm/parser/eclipse/EclipseState/SummaryConfig/SummaryConfig.hpp>
@@ -79,9 +86,12 @@
 #include <opm/parser/eclipse/EclipseState/Tables/Regdims.hpp>
 #include <opm/parser/eclipse/EclipseState/Tables/Rock2dTable.hpp>
 #include <opm/parser/eclipse/EclipseState/Tables/Rock2dtrTable.hpp>
+#include <opm/parser/eclipse/EclipseState/Tables/RocktabTable.hpp>
+#include <opm/parser/eclipse/EclipseState/Tables/PlyshlogTable.hpp>
 #include <opm/parser/eclipse/EclipseState/Tables/SimpleTable.hpp>
 #include <opm/parser/eclipse/EclipseState/Tables/SkprpolyTable.hpp>
 #include <opm/parser/eclipse/EclipseState/Tables/SkprwatTable.hpp>
+#include <opm/parser/eclipse/EclipseState/Tables/StandardCond.hpp>
 #include <opm/parser/eclipse/EclipseState/Tables/TableColumn.hpp>
 #include <opm/parser/eclipse/EclipseState/Tables/TableContainer.hpp>
 #include <opm/parser/eclipse/EclipseState/Tables/TableManager.hpp>
@@ -186,26 +196,6 @@ std::size_t packSizeDynMap(const Map<Key, Opm::DynamicState<Type>>& data,
            Opm::Mpi::packSize(split.second, comm);
 }
 
-template<class T>
-std::size_t packSizeDynState(const Opm::DynamicState<T>& data,
-                             Dune::MPIHelper::MPICommunicator comm)
-{
-    auto split = splitDynState(data);
-    return Opm::Mpi::packSize(split.first, comm) +
-           Opm::Mpi::packSize(split.second, comm);
-}
-
-template<class T>
-void packDynState(const Opm::DynamicState<T>& data,
-                  std::vector<char>& buffer,
-                  int& position,
-                  Dune::MPIHelper::MPICommunicator comm)
-{
-    auto split = splitDynState(data);
-    Opm::Mpi::pack(split.first, buffer, position, comm);
-    Opm::Mpi::pack(split.second, buffer, position, comm);
-}
-
 template<template<class, class> class Map, class Type, class Key>
 void packDynMap(const Map<Key, Opm::DynamicState<Type>>& data,
                 std::vector<char>& buffer,
@@ -215,19 +205,6 @@ void packDynMap(const Map<Key, Opm::DynamicState<Type>>& data,
     auto split = splitDynMap<Map,Type,Key>(data);
     Opm::Mpi::pack(split.first, buffer, position, comm);
     Opm::Mpi::pack(split.second, buffer, position, comm);
-}
-
-template<class T>
-void unpackDynState(Opm::DynamicState<T>& data,
-                    std::vector<char>& buffer,
-                    int& position,
-                    Dune::MPIHelper::MPICommunicator comm)
-{
-    std::vector<T> unique;
-    std::vector<int> indices;
-    Opm::Mpi::unpack(unique, buffer, position, comm);
-    Opm::Mpi::unpack(indices, buffer, position, comm);
-    reconstructDynState(unique, indices, data);
 }
 
 template<template<class, class> class Map, class Type, class Key>
@@ -321,7 +298,7 @@ std::size_t packSize(const std::vector<T,A>& data, Dune::MPIHelper::MPICommunica
     std::size_t size = packSize(data.size(), comm);
 
     for (const auto& entry: data)
-        size+=packSize(entry, comm);
+        size += packSize(entry, comm);
 
     return size;
 }
@@ -386,7 +363,9 @@ std::size_t packSize(const OrderedMap<Key,Value>& data, Dune::MPIHelper::MPIComm
 template<class T>
 std::size_t packSize(const DynamicState<T>& data, Dune::MPIHelper::MPICommunicator comm)
 {
-    return packSize(data.data(), comm) + packSize(data.initialRange(), comm);
+
+    auto split = splitDynState(data);
+    return packSize(split.first, comm) + packSize(split.second, comm);
 }
 
 template<class T>
@@ -445,18 +424,30 @@ std::size_t packSize(const std::array<T,N>& data, Dune::MPIHelper::MPICommunicat
 
 HANDLE_AS_POD(Actdims)
 HANDLE_AS_POD(Aqudims)
+HANDLE_AS_POD(BCConfig::BCFace)
 HANDLE_AS_POD(data::Connection)
+HANDLE_AS_POD(data::CurrentControl)
 HANDLE_AS_POD(data::Rates)
 HANDLE_AS_POD(data::Segment)
 HANDLE_AS_POD(DENSITYRecord)
+HANDLE_AS_POD(DenT::entry)
 HANDLE_AS_POD(Eqldims)
 HANDLE_AS_POD(MLimits)
+HANDLE_AS_POD(PlmixparRecord)
+HANDLE_AS_POD(PlyvmhRecord)
 HANDLE_AS_POD(PVTWRecord)
 HANDLE_AS_POD(PVCDORecord)
 HANDLE_AS_POD(Regdims)
+HANDLE_AS_POD(RockConfig::RockComp)
 HANDLE_AS_POD(ROCKRecord)
+HANDLE_AS_POD(SatFuncControls)
+HANDLE_AS_POD(ShrateRecord)
+HANDLE_AS_POD(StandardCond)
+HANDLE_AS_POD(Stone1exRecord)
 HANDLE_AS_POD(Tabdims)
 HANDLE_AS_POD(TimeStampUTC::YMD)
+HANDLE_AS_POD(TlmixparRecord)
+HANDLE_AS_POD(Tuning)
 HANDLE_AS_POD(VISCREFRecord)
 HANDLE_AS_POD(WATDENTRecord)
 HANDLE_AS_POD(WellBrineProperties)
@@ -472,6 +463,7 @@ std::size_t packSize(const data::Well& data, Dune::MPIHelper::MPICommunicator co
     size += packSize(data.control, comm);
     size += packSize(data.connections, comm);
     size += packSize(data.segments, comm);
+    size += packSize(data.current_control, comm);
     return size;
 }
 
@@ -510,6 +502,94 @@ std::size_t packSize(const ThresholdPressure& data, Dune::MPIHelper::MPICommunic
           packSize(data.restart(), comm) +
           packSize(data.thresholdPressureTable(), comm) +
           packSize(data.pressureTable(), comm);
+}
+
+std::size_t packSize(const WellType& data, Dune::MPIHelper::MPICommunicator comm)
+{
+    return packSize(data.producer(), comm) +
+           packSize(data.preferred_phase(), comm);
+}
+
+std::size_t packSize(const DenT& data, Dune::MPIHelper::MPICommunicator comm)
+{
+    return packSize(data.records(), comm);
+}
+
+std::size_t packSize(const Aquifetp& data, Dune::MPIHelper::MPICommunicator comm)
+{
+    return packSize(data.data(), comm);
+}
+
+std::size_t packSize(const Aquifetp::AQUFETP_data& data, Dune::MPIHelper::MPICommunicator comm)
+{
+    return packSize(data.aquiferID, comm) +
+           packSize(data.pvttableID, comm) +
+           packSize(data.J, comm) +
+           packSize(data.C_t, comm) +
+           packSize(data.V0, comm) +
+           packSize(data.d0, comm) +
+           packSize(data.p0, comm);
+}
+
+std::size_t packSize(const AquiferCT::AQUCT_data& data, Dune::MPIHelper::MPICommunicator comm)
+{
+    return packSize(data.aquiferID, comm) +
+           packSize(data.inftableID, comm) +
+           packSize(data.pvttableID, comm) +
+           packSize(data.phi_aq, comm) +
+           packSize(data.d0, comm) +
+           packSize(data.C_t, comm) +
+           packSize(data.r_o, comm) +
+           packSize(data.k_a, comm) +
+           packSize(data.c1, comm) +
+           packSize(data.h, comm) +
+           packSize(data.theta, comm) +
+           packSize(data.c2, comm) +
+           packSize(data.p0, comm) +
+           packSize(data.td, comm) +
+           packSize(data.pi, comm) +
+           packSize(data.cell_id, comm);
+}
+
+std::size_t packSize(const AquiferCT& data, Dune::MPIHelper::MPICommunicator comm)
+{
+    return packSize(data.data(), comm);
+}
+
+std::size_t packSize(const AquiferConfig& data, Dune::MPIHelper::MPICommunicator comm)
+{
+    return packSize(data.fetp(), comm) +
+           packSize(data.ct(), comm) +
+           packSize(data.connections(), comm);
+}
+
+std::size_t packSize(const Aquancon::AquancCell& data, Dune::MPIHelper::MPICommunicator comm)
+{
+    return packSize(data.aquiferID, comm) +
+           packSize(data.global_index, comm) +
+           packSize(data.influx_coeff, comm) +
+           packSize(data.influx_mult, comm) +
+           packSize(data.face_dir, comm);
+}
+
+std::size_t packSize(const Aquancon& data, Dune::MPIHelper::MPICommunicator comm)
+{
+    return packSize(data.data(), comm);
+}
+
+std::size_t packSize(const BCConfig& bc, Dune::MPIHelper::MPICommunicator comm)
+{
+    return packSize(bc.faces(), comm);
+}
+
+std::size_t packSize(const RockConfig& data, Dune::MPIHelper::MPICommunicator comm)
+{
+    return packSize(data.active(), comm) +
+           packSize(data.rocknum_property(), comm) +
+           packSize(data.comp(), comm) +
+           packSize(data.num_rock_tables(), comm) +
+           packSize(data.water_compaction(), comm) +
+           packSize(data.hysteresis_mode(), comm);
 }
 
 std::size_t packSize(const NNC& data, Dune::MPIHelper::MPICommunicator comm)
@@ -586,7 +666,9 @@ std::size_t packSize(const Equil& data, Dune::MPIHelper::MPICommunicator comm)
 
 std::size_t packSize(const FoamConfig& data, Dune::MPIHelper::MPICommunicator comm)
 {
-    return packSize(data.records(), comm);
+    return packSize(data.records(), comm) +
+           packSize(data.getTransportPhase(), comm) +
+           packSize(data.getMobilityModel(), comm);
 }
 
 std::size_t packSize(const InitConfig& data, Dune::MPIHelper::MPICommunicator comm)
@@ -603,6 +685,8 @@ std::size_t packSize(const InitConfig& data, Dune::MPIHelper::MPICommunicator co
 std::size_t packSize(const SimulationConfig& data, Dune::MPIHelper::MPICommunicator comm)
 {
     return packSize(data.getThresholdPressure(), comm) +
+           packSize(data.bcconfig(), comm) +
+           packSize(data.rock_config(), comm) +
            packSize(data.useCPR(), comm) +
            packSize(data.hasDISGAS(), comm) +
            packSize(data.hasVAPOIL(), comm) +
@@ -632,7 +716,6 @@ std::size_t packSize(const IOConfig& data, Dune::MPIHelper::MPICommunicator comm
            packSize(data.getUNIFOUT(), comm) +
            packSize(data.getFMTIN(), comm) +
            packSize(data.getFMTOUT(), comm) +
-           packSize(data.getFirstRestartStep(), comm) +
            packSize(data.getDeckFileName(), comm) +
            packSize(data.getOutputEnabled(), comm) +
            packSize(data.getOutputDir(), comm) +
@@ -669,7 +752,8 @@ std::size_t packSize(const Runspec& data, Dune::MPIHelper::MPICommunicator comm)
            packSize(data.wellSegmentDimensions(), comm) +
            packSize(data.udqParams(), comm) +
            packSize(data.hysterPar(), comm) +
-           packSize(data.actdims(), comm);
+           packSize(data.actdims(), comm) +
+           packSize(data.saturationFunctionControls(), comm);
 }
 
 std::size_t packSize(const PvtxTable& data, Dune::MPIHelper::MPICommunicator comm)
@@ -746,9 +830,57 @@ std::size_t packSize(const RockTable& data, Dune::MPIHelper::MPICommunicator com
     return packSize(static_cast<const std::vector<ROCKRecord>&>(data), comm);
 }
 
+namespace {
+
+struct SplitSimpleTables {
+    size_t plyshMax = 0;
+    size_t rockMax = 0;
+    std::map<size_t, std::shared_ptr<PlyshlogTable>> plyshMap;
+    std::map<size_t, std::shared_ptr<RocktabTable>> rockMap;
+};
+
+SplitSimpleTables
+splitSimpleTable(std::map<std::string, TableContainer>& simpleTables)
+{
+    SplitSimpleTables result;
+
+    // PlyshlogTable need special treatment
+    auto it = simpleTables.find("PLYSHLOG");
+    if (it != simpleTables.end()) {
+        result.plyshMax = it->second.max();
+        for (const auto& mapIt : it->second.tables()) {
+            auto ptr = std::static_pointer_cast<PlyshlogTable>(mapIt.second);
+            result.plyshMap.insert(std::make_pair(mapIt.first, ptr));
+        }
+        simpleTables.erase(it);
+    }
+
+    // RocktabTable need special treatment
+    it = simpleTables.find("ROCKMAP");
+    if (it != simpleTables.end()) {
+        result.rockMax = it->second.max();
+        for (const auto& mapIt : it->second.tables()) {
+            auto ptr = std::static_pointer_cast<RocktabTable>(mapIt.second);
+            result.rockMap.insert(std::make_pair(mapIt.first,  ptr));
+        }
+        simpleTables.erase(it);
+    }
+
+    return result;
+}
+
+}
+
 std::size_t packSize(const TableManager& data, Dune::MPIHelper::MPICommunicator comm)
 {
-    return packSize(data.getSimpleTables(), comm) +
+    auto simpleTables = data.getSimpleTables();
+    auto splitTab = splitSimpleTable(simpleTables);
+
+    return packSize(simpleTables, comm) +
+           packSize(splitTab.plyshMax, comm) +
+           packSize(splitTab.plyshMap, comm) +
+           packSize(splitTab.rockMax, comm) +
+           packSize(splitTab.rockMap, comm) +
            packSize(data.getPvtgTables(), comm) +
            packSize(data.getPvtoTables(), comm) +
            packSize(data.getRock2dTables(), comm) +
@@ -756,11 +888,17 @@ std::size_t packSize(const TableManager& data, Dune::MPIHelper::MPICommunicator 
            packSize(data.getPvtwTable(), comm) +
            packSize(data.getPvcdoTable(), comm) +
            packSize(data.getDensityTable(), comm) +
+           packSize(data.getPlyvmhTable(), comm) +
            packSize(data.getRockTable(), comm) +
+           packSize(data.getPlmixparTable(), comm) +
+           packSize(data.getShrateTable(), comm) +
+           packSize(data.getStone1exTable(), comm) +
+           packSize(data.getTlmixparTable(), comm) +
            packSize(data.getViscrefTable(), comm) +
            packSize(data.getWatdentTable(), comm) +
            packSize(data.getPvtwSaltTables(), comm) +
            packSize(data.getBrineDensityTables(), comm) +
+           packSize(data.getSolventDensityTables(), comm) +
            packSize(data.getPlymwinjTables(), comm) +
            packSize(data.getSkprwatTables(), comm) +
            packSize(data.getSkprpolyTables(), comm) +
@@ -771,344 +909,20 @@ std::size_t packSize(const TableManager& data, Dune::MPIHelper::MPICommunicator 
            packSize(data.useImptvd(), comm) +
            packSize(data.useEnptvd(), comm) +
            packSize(data.useEqlnum(), comm) +
+           packSize(data.useShrate(), comm) +
            packSize(data.useJFunc(), comm) +
-           (data.useJFunc() ? packSize(data.getJFunc(), comm) : 0) +
+          (data.useJFunc() ? packSize(data.getJFunc(), comm) : 0) +
+           packSize(data.OilDenT(), comm) +
+           packSize(data.GasDenT(), comm) +
+           packSize(data.WatDenT(), comm) +
+           packSize(data.stCond(), comm) +
+           packSize(data.gas_comp_index(), comm) +
            packSize(data.rtemp(), comm);
 }
 
-template<class Scalar>
-std::size_t packSize(const Tabulated1DFunction<Scalar>& data,
-                     Dune::MPIHelper::MPICommunicator comm)
-{
-    return packSize(data.xValues(), comm) +
-           packSize(data.yValues(), comm);
-}
-
-template std::size_t packSize(const Tabulated1DFunction<double>& data,
-                              Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar>
-std::size_t packSize(const SolventPvt<Scalar>& data,
-                     Dune::MPIHelper::MPICommunicator comm)
-{
-    return packSize(data.solventReferenceDensity(), comm) +
-           packSize(data.inverseSolventB(), comm) +
-           packSize(data.solventMu(), comm) +
-           packSize(data.inverseSolventBMu(), comm);
-}
-
-template std::size_t packSize(const SolventPvt<double>& data,
-                              Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar>
-std::size_t packSize(const IntervalTabulated2DFunction<Scalar>& data,
-                     Dune::MPIHelper::MPICommunicator comm)
-{
-    return packSize(data.xPos(), comm) +
-           packSize(data.yPos(), comm) +
-           packSize(data.samples(), comm) +
-           packSize(data.xExtrapolate(), comm) +
-           packSize(data.yExtrapolate(), comm);
-}
-
-template std::size_t packSize(const IntervalTabulated2DFunction<double>& data,
-                              Dune::MPIHelper::MPICommunicator comm);
-
 template
-std::size_t packSize(const std::vector<IntervalTabulated2DFunction<double>>& data,
+std::size_t packSize(const std::map<Phase,Group::GroupInjectionProperties>& data,
                      Dune::MPIHelper::MPICommunicator comm);
-template
-std::size_t packSize(const std::map<int,IntervalTabulated2DFunction<double>>& data,
-                     Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar>
-std::size_t packSize(const UniformXTabulated2DFunction<Scalar>& data,
-                     Dune::MPIHelper::MPICommunicator comm)
-{
-    return packSize(data.xPos(), comm) +
-           packSize(data.yPos(), comm) +
-           packSize(data.samples(), comm) +
-           packSize(data.interpolationGuide(), comm);
-}
-
-template std::size_t packSize(const UniformXTabulated2DFunction<double>& data,
-                              Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar>
-std::size_t packSize(const DryGasPvt<Scalar>& data,
-                     Dune::MPIHelper::MPICommunicator comm)
-{
-    return packSize(data.gasReferenceDensity(), comm) +
-           packSize(data.inverseGasB(), comm) +
-           packSize(data.gasMu(), comm) +
-           packSize(data.inverseGasBMu(), comm);
-}
-
-template std::size_t packSize(const DryGasPvt<double>& data,
-                              Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar>
-std::size_t packSize(const GasPvtThermal<Scalar>& data,
-                     Dune::MPIHelper::MPICommunicator comm)
-{
-    std::size_t size = packSize(data.gasvisctCurves(), comm) +
-                       packSize(data.gasdentRefTemp(), comm) +
-                       packSize(data.gasdentCT1(), comm) +
-                       packSize(data.gasdentCT2(), comm) +
-                       packSize(data.internalEnergyCurves(), comm) +
-                       packSize(data.enableThermalDensity(), comm) +
-                       packSize(data.enableThermalViscosity(), comm) +
-                       packSize(data.enableInternalEnergy(), comm);
-    size += packSize(bool(), comm);
-    if (data.isoThermalPvt())
-        size += packSize(*data.isoThermalPvt(), comm);
-
-    return size;
-}
-
-template std::size_t packSize(const GasPvtThermal<double>& data,
-                              Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar, bool enableThermal>
-std::size_t packSize(const GasPvtMultiplexer<Scalar,enableThermal>& data,
-                     Dune::MPIHelper::MPICommunicator comm)
-{
-    std::size_t size = packSize(data.gasPvtApproach(), comm);
-    const void* realGasPvt = data.realGasPvt();
-    using PvtApproach = GasPvtMultiplexer<Scalar,enableThermal>;
-    if (data.gasPvtApproach() == PvtApproach::DryGasPvt) {
-        const auto& pvt = *static_cast<const DryGasPvt<Scalar>*>(realGasPvt);
-        size += packSize(pvt, comm);
-    } else if (data.gasPvtApproach() == PvtApproach::WetGasPvt) {
-        const auto& pvt = *static_cast<const WetGasPvt<Scalar>*>(realGasPvt);
-        size += packSize(pvt, comm);
-    } else if (data.gasPvtApproach() == PvtApproach::ThermalGasPvt) {
-        const auto& pvt = *static_cast<const GasPvtThermal<Scalar>*>(realGasPvt);
-        size += packSize(pvt, comm);
-    }
-
-    return size;
-}
-
-template std::size_t packSize(const GasPvtMultiplexer<double,true>& data,
-                              Dune::MPIHelper::MPICommunicator comm);
-template std::size_t packSize(const GasPvtMultiplexer<double,false>& data,
-                              Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar>
-std::size_t packSize(const WetGasPvt<Scalar>& data,
-                     Dune::MPIHelper::MPICommunicator comm)
-{
-    return packSize(data.gasReferenceDensity(), comm) +
-           packSize(data.oilReferenceDensity(), comm) +
-           packSize(data.inverseGasB(), comm) +
-           packSize(data.inverseSaturatedGasB(), comm) +
-           packSize(data.gasMu(), comm) +
-           packSize(data.inverseGasBMu(), comm) +
-           packSize(data.inverseSaturatedGasBMu(), comm) +
-           packSize(data.saturatedOilVaporizationFactorTable(), comm) +
-           packSize(data.saturationPressure(), comm) +
-           packSize(data.vapPar1(), comm);
-}
-
-template std::size_t packSize(const WetGasPvt<double>& data,
-                              Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar, bool enableThermal>
-std::size_t packSize(const OilPvtMultiplexer<Scalar,enableThermal>& data,
-                     Dune::MPIHelper::MPICommunicator comm)
-{
-    std::size_t size = packSize(data.approach(), comm);
-    const void* realOilPvt = data.realOilPvt();
-    using PvtApproach = OilPvtMultiplexer<Scalar,enableThermal>;
-    if (data.approach() == PvtApproach::ConstantCompressibilityOilPvt) {
-        const auto& pvt = *static_cast<const ConstantCompressibilityOilPvt<Scalar>*>(realOilPvt);
-        size += packSize(pvt, comm);
-    } else if (data.approach() == PvtApproach::DeadOilPvt) {
-        const auto& pvt = *static_cast<const DeadOilPvt<Scalar>*>(realOilPvt);
-        size += packSize(pvt, comm);
-    } else if (data.approach() == PvtApproach::LiveOilPvt) {
-        const auto& pvt = *static_cast<const LiveOilPvt<Scalar>*>(realOilPvt);
-        size += packSize(pvt, comm);
-    } else if (data.approach() == PvtApproach::ThermalOilPvt) {
-        const auto& pvt = *static_cast<const OilPvtThermal<Scalar>*>(realOilPvt);
-        size += packSize(pvt, comm);
-    }
-
-    return size;
-}
-
-template std::size_t packSize(const OilPvtMultiplexer<double,true>& data,
-                              Dune::MPIHelper::MPICommunicator comm);
-template std::size_t packSize(const OilPvtMultiplexer<double,false>& data,
-                              Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar>
-std::size_t packSize(const ConstantCompressibilityOilPvt<Scalar>& data,
-                     Dune::MPIHelper::MPICommunicator comm)
-{
-    return packSize(data.oilReferenceDensity(), comm) +
-           packSize(data.oilReferencePressure(), comm) +
-           packSize(data.oilReferenceFormationVolumeFactor(), comm) +
-           packSize(data.oilCompressibility(), comm) +
-           packSize(data.oilViscosity(), comm) +
-           packSize(data.oilViscosibility(), comm);
-}
-
-template std::size_t packSize(const ConstantCompressibilityOilPvt<double>& data,
-                              Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar>
-std::size_t packSize(const DeadOilPvt<Scalar>& data,
-                     Dune::MPIHelper::MPICommunicator comm)
-{
-    return packSize(data.oilReferenceDensity(), comm) +
-           packSize(data.inverseOilB(), comm) +
-           packSize(data.oilMu(), comm) +
-           packSize(data.inverseOilBMu(), comm);
-}
-
-template std::size_t packSize(const DeadOilPvt<double>& data,
-                              Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar>
-std::size_t packSize(const LiveOilPvt<Scalar>& data,
-                     Dune::MPIHelper::MPICommunicator comm)
-{
-    return packSize(data.gasReferenceDensity(), comm) +
-           packSize(data.oilReferenceDensity(), comm) +
-           packSize(data.inverseOilBTable(), comm) +
-           packSize(data.oilMuTable(), comm) +
-           packSize(data.inverseOilBMuTable(), comm) +
-           packSize(data.saturatedOilMuTable(), comm) +
-           packSize(data.inverseSaturatedOilBTable(), comm) +
-           packSize(data.inverseSaturatedOilBMuTable(), comm) +
-           packSize(data.saturatedGasDissolutionFactorTable(), comm) +
-           packSize(data.saturationPressure(), comm) +
-           packSize(data.vapPar2(), comm);
-}
-
-template std::size_t packSize(const LiveOilPvt<double>& data,
-                              Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar>
-std::size_t packSize(const OilPvtThermal<Scalar>& data,
-                     Dune::MPIHelper::MPICommunicator comm)
-{
-    std::size_t size = packSize(data.oilvisctCurves(), comm) +
-                       packSize(data.viscrefPress(), comm) +
-                       packSize(data.viscrefRs(), comm) +
-                       packSize(data.viscRef(), comm) +
-                       packSize(data.oildentRefTemp(), comm) +
-                       packSize(data.oildentCT1(), comm) +
-                       packSize(data.oildentCT2(), comm) +
-                       packSize(data.internalEnergyCurves(), comm) +
-                       packSize(data.enableThermalDensity(), comm) +
-                       packSize(data.enableThermalViscosity(), comm) +
-                       packSize(data.enableInternalEnergy(), comm);
-    size += packSize(bool(), comm);
-    if (data.isoThermalPvt())
-        size += packSize(*data.isoThermalPvt(), comm);
-
-    return size;
-}
-
-template std::size_t packSize(const OilPvtThermal<double>& data,
-                              Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar, bool enableThermal>
-std::size_t packSize(const WaterPvtMultiplexer<Scalar,enableThermal>& data,
-                     Dune::MPIHelper::MPICommunicator comm)
-{
-    std::size_t size = packSize(data.approach(), comm);
-    const void* realWaterPvt = data.realWaterPvt();
-    using PvtApproach = WaterPvtMultiplexer<Scalar,enableThermal>;
-    if (data.approach() == PvtApproach::ConstantCompressibilityWaterPvt) {
-        const auto& pvt = *static_cast<const ConstantCompressibilityWaterPvt<Scalar>*>(realWaterPvt);
-        size += packSize(pvt, comm);
-    } else if (data.approach() == PvtApproach::ThermalWaterPvt) {
-        const auto& pvt = *static_cast<const WaterPvtThermal<Scalar>*>(realWaterPvt);
-        size += packSize(pvt, comm);
-    }
-
-    return size;
-}
-
-template std::size_t packSize(const WaterPvtMultiplexer<double,true>& data,
-                              Dune::MPIHelper::MPICommunicator comm);
-template std::size_t packSize(const WaterPvtMultiplexer<double,false>& data,
-                              Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar>
-std::size_t packSize(const ConstantCompressibilityWaterPvt<Scalar>& data,
-                     Dune::MPIHelper::MPICommunicator comm)
-{
-    return packSize(data.waterReferenceDensity(), comm) +
-           packSize(data.waterReferencePressure(), comm) +
-           packSize(data.waterReferenceFormationVolumeFactor(), comm) +
-           packSize(data.waterCompressibility(), comm) +
-           packSize(data.waterViscosity(), comm) +
-           packSize(data.waterViscosibility(), comm);
-}
-
-template std::size_t packSize(const ConstantCompressibilityWaterPvt<double>& data,
-                              Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar>
-std::size_t packSize(const WaterPvtThermal<Scalar>& data,
-                     Dune::MPIHelper::MPICommunicator comm)
-{
-    std::size_t size = packSize(data.viscrefPress(), comm) +
-                       packSize(data.watdentRefTemp(), comm) +
-                       packSize(data.watdentCT1(), comm) +
-                       packSize(data.watdentCT2(), comm) +
-                       packSize(data.pvtwRefPress(), comm) +
-                       packSize(data.pvtwRefB(), comm) +
-                       packSize(data.pvtwCompressibility(), comm) +
-                       packSize(data.pvtwViscosity(), comm) +
-                       packSize(data.pvtwViscosibility(), comm) +
-                       packSize(data.watvisctCurves(), comm) +
-                       packSize(data.internalEnergyCurves(), comm) +
-                       packSize(data.enableThermalDensity(), comm) +
-                       packSize(data.enableThermalViscosity(), comm) +
-                       packSize(data.enableInternalEnergy(), comm);
-    size += packSize(bool(), comm);
-    using PvtApproach = WaterPvtThermal<Scalar>;
-    if (data.isoThermalPvt()->approach() != PvtApproach::IsothermalPvt::NoWaterPvt)
-        size += packSize(*data.isoThermalPvt(), comm);
-
-    return size;
-}
-
-template std::size_t packSize(const WaterPvtThermal<double>& data,
-                              Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar>
-std::size_t packSize(const EclEpsScalingPointsInfo<Scalar>& data,
-                     Dune::MPIHelper::MPICommunicator comm)
-{
-    return packSize(data.Swl, comm) +
-           packSize(data.Sgl, comm) +
-           packSize(data.Sowl, comm) +
-           packSize(data.Sogl, comm) +
-           packSize(data.krCriticalEps, comm) +
-           packSize(data.Swcr, comm) +
-           packSize(data.Sgcr, comm) +
-           packSize(data.Sowcr, comm) +
-           packSize(data.Sogcr, comm) +
-           packSize(data.Swu, comm) +
-           packSize(data.Sgu, comm) +
-           packSize(data.Sowu, comm) +
-           packSize(data.Sogu, comm) +
-           packSize(data.maxPcow, comm) +
-           packSize(data.maxPcgo, comm) +
-           packSize(data.pcowLeverettFactor, comm) +
-           packSize(data.pcgoLeverettFactor, comm) +
-           packSize(data.maxKrw, comm) +
-           packSize(data.maxKrow, comm) +
-           packSize(data.maxKrog, comm) +
-           packSize(data.maxKrg, comm);
-}
 
 std::size_t packSize(const OilVaporizationProperties& data,
                      Dune::MPIHelper::MPICommunicator comm)
@@ -1141,8 +955,7 @@ std::size_t packSize(const VFPInjTable& data,
            packSize(data.getFloType(), comm) +
            packSize(data.getFloAxis(), comm) +
            packSize(data.getTHPAxis(), comm) +
-           data.getTable().num_elements() *
-           packSize(double(), comm);
+           packSize(data.getTable(), comm);
 }
 
 std::size_t packSize(const VFPProdTable& data,
@@ -1159,8 +972,7 @@ std::size_t packSize(const VFPProdTable& data,
            packSize(data.getWFRAxis(), comm) +
            packSize(data.getGFRAxis(), comm) +
            packSize(data.getALQAxis(), comm) +
-           data.getTable().num_elements() *
-           packSize(double(), comm);
+           packSize(data.getTable(), comm);
 }
 
 std::size_t packSize(const WellTestConfig::WTESTWell& data,
@@ -1366,8 +1178,7 @@ std::size_t packSize(const std::unique_ptr<T>& data,
 std::size_t packSize(const Dimension& data,
                      Dune::MPIHelper::MPICommunicator comm)
 {
-    return packSize(data.getName(), comm) +
-           packSize(data.getSIScalingRaw(), comm) +
+    return packSize(data.getSIScalingRaw(), comm) +
            packSize(data.getSIOffset(), comm);
 }
 
@@ -1383,16 +1194,8 @@ std::size_t packSize(const UnitSystem& data,
 std::size_t packSize(const WellSegments& data,
                      Dune::MPIHelper::MPICommunicator comm)
 {
-    return packSize(data.wellName(), comm) +
-           packSize(data.depthTopSegment(), comm) +
-           packSize(data.lengthTopSegment(), comm) +
-           packSize(data.volumeTopSegment(), comm) +
-           packSize(data.lengthDepthType(), comm) +
-           packSize(data.compPressureDrop(), comm) +
-           packSize(data.multiPhaseModel(), comm) +
-           packSize(data.segments(), comm) +
-           packSize(data.segmentNumberIndex(), comm);
-
+    return packSize(data.compPressureDrop(), comm) +
+           packSize(data.segments(), comm);
 }
 
 std::size_t packSize(const Well& data,
@@ -1405,7 +1208,7 @@ std::size_t packSize(const Well& data,
                        packSize(data.getHeadI(), comm) +
                        packSize(data.getHeadJ(), comm) +
                        packSize(data.getRefDepth(), comm) +
-                       packSize(data.getPreferredPhase(), comm) +
+                       packSize(data.wellType(), comm) +
                        packSize(data.getWellConnectionOrdering(), comm) +
                        packSize(data.units(), comm) +
                        packSize(data.udqUndefined(), comm) +
@@ -1413,7 +1216,6 @@ std::size_t packSize(const Well& data,
                        packSize(data.getDrainageRadius(), comm) +
                        packSize(data.getAllowCrossFlow(), comm) +
                        packSize(data.getAutomaticShutIn(), comm) +
-                       packSize(data.isProducer(), comm) +
                        packSize(data.wellGuideRate(), comm) +
                        packSize(data.getEfficiencyFactor(), comm) +
                        packSize(data.getSolventFraction(), comm) +
@@ -1481,6 +1283,7 @@ std::size_t packSize(const Group& data,
            packSize(data.type(), comm) +
            packSize(data.getGroupEfficiencyFactor(), comm) +
            packSize(data.getTransferGroupEfficiencyFactor(), comm) +
+           packSize(data.isAvailableForGroupControl(), comm) +
            packSize(data.getGroupNetVFPTable(), comm) +
            packSize(data.parent(), comm) +
            packSize(data.iwells(), comm) +
@@ -1501,19 +1304,7 @@ std::size_t packSize(const WListManager& data,
     return packSize(data.lists(), comm);
 }
 
-std::size_t packSize(const UDQFunction& data,
-                     Dune::MPIHelper::MPICommunicator comm)
-{
-    return packSize(data.name(), comm) +
-           packSize(data.type(), comm);
-}
 
-std::size_t packSize(const UDQFunctionTable& data,
-                     Dune::MPIHelper::MPICommunicator comm)
-{
-    return packSize(data.getParams(), comm) +
-           packSize(data.functionMap(), comm);
-}
 
 std::size_t packSize(const UDQASTNode& data,
                      Dune::MPIHelper::MPICommunicator comm)
@@ -1717,48 +1508,6 @@ std::size_t packSize(const Deck& data,
            packSize(data.unitSystemAccessCount(), comm);
 }
 
-std::size_t packSize(const Tuning& data,
-                     Dune::MPIHelper::MPICommunicator comm)
-{
-    return packSize(data.getTSINIT(), comm) +
-           packSize(data.getTSMAXZ(), comm) +
-           packSize(data.getTSMINZ(), comm) +
-           packSize(data.getTSMCHP(), comm) +
-           packSize(data.getTSFMAX(), comm) +
-           packSize(data.getTSFMIN(), comm) +
-           packSize(data.getTSFCNV(), comm) +
-           packSize(data.getTFDIFF(), comm) +
-           packSize(data.getTHRUPT(), comm) +
-           packSize(data.getTMAXWC(), comm) +
-           packSize(data.getTMAXWC_has_value(), comm) +
-           packSize(data.getTRGTTE(), comm) +
-           packSize(data.getTRGCNV(), comm) +
-           packSize(data.getTRGMBE(), comm) +
-           packSize(data.getTRGLCV(), comm) +
-           packSize(data.getXXXTTE(), comm) +
-           packSize(data.getXXXCNV(), comm) +
-           packSize(data.getXXXMBE(), comm) +
-           packSize(data.getXXXLCV(), comm) +
-           packSize(data.getXXXWFL(), comm) +
-           packSize(data.getTRGFIP(), comm) +
-           packSize(data.getTRGSFT(), comm) +
-           packSize(data.getTRGSFT_has_value(), comm) +
-           packSize(data.getTHIONX(), comm) +
-           packSize(data.getTRWGHT(), comm) +
-           packSize(data.getNEWTMX(), comm) +
-           packSize(data.getNEWTMN(), comm) +
-           packSize(data.getLITMAX(), comm) +
-           packSize(data.getLITMIN(), comm) +
-           packSize(data.getMXWSIT(), comm) +
-           packSize(data.getMXWPIT(), comm) +
-           packSize(data.getDDPLIM(), comm) +
-           packSize(data.getDDSLIM(), comm) +
-           packSize(data.getTRGDPR(), comm) +
-           packSize(data.getXXXDPR(), comm) +
-           packSize(data.getXXXDPR_has_value(), comm) +
-           packSize(data.getResetValues(), comm);
-}
-
 std::size_t packSize(const Action::ASTNode& data,
                      Dune::MPIHelper::MPICommunicator comm)
 {
@@ -1829,17 +1578,18 @@ std::size_t packSize(const Schedule& data,
            packSize(data.getRunspec(), comm) +
            packSizeDynMap<Map2>(data.getVFPProdTables(), comm) +
            packSizeDynMap<Map2>(data.getVFPInjTables(), comm) +
-           packSizeDynState(data.getWellTestConfig(), comm) +
-           packSizeDynState(data.getWListManager(), comm) +
-           packSizeDynState(data.getUDQConfig(), comm) +
-           packSizeDynState(data.getUDQActive(), comm) +
-           packSizeDynState(data.getGuideRateConfig(), comm) +
-           packSizeDynState(data.getGConSale(), comm) +
-           packSizeDynState(data.getGConSump(), comm) +
+           packSize(data.getWellTestConfig(), comm) +
+           packSize(data.getWListManager(), comm) +
+           packSize(data.getUDQConfig(), comm) +
+           packSize(data.getUDQActive(), comm) +
+           packSize(data.getGuideRateConfig(), comm) +
+           packSize(data.getGConSale(), comm) +
+           packSize(data.getGConSump(), comm) +
            packSize(data.getGlobalWhistCtlMode(), comm) +
-           packSizeDynState(data.getActions(), comm) +
+           packSize(data.getActions(), comm) +
            packSize(data.rftConfig(), comm) +
            packSize(data.getNupCol(), comm) +
+           packSize(data.restart(), comm) +
            packSize(data.getWellGroupEvents(), comm);
 }
 
@@ -1999,8 +1749,7 @@ std::size_t packSize(const EclipseConfig& data,
                      Dune::MPIHelper::MPICommunicator comm)
 {
     return packSize(data.init(), comm) +
-           packSize(data.io(), comm) +
-           packSize(data.restart(), comm);
+           packSize(data.io(), comm);
 }
 
 std::size_t packSize(const TransMult& data,
@@ -2031,6 +1780,59 @@ std::size_t packSize(const FaultCollection& data,
                      Dune::MPIHelper::MPICommunicator comm)
 {
     return packSize(data.getFaults(), comm);
+}
+
+std::size_t packSize(const SolventDensityTable& data,
+                     Dune::MPIHelper::MPICommunicator comm)
+{
+    return packSize(data.getSolventDensityColumn(), comm);
+}
+
+std::size_t packSize(const GridDims& data,
+                     Dune::MPIHelper::MPICommunicator comm)
+{
+    return packSize(data.getNXYZ(), comm);
+}
+
+std::size_t packSize(const ShrateTable& data, Dune::MPIHelper::MPICommunicator comm)
+{
+    return packSize(static_cast<const std::vector<ShrateRecord>&>(data), comm);
+}
+
+std::size_t packSize(const TlmixparTable& data, Dune::MPIHelper::MPICommunicator comm)
+{
+    return packSize(static_cast<const std::vector<TlmixparRecord>&>(data), comm);
+}
+
+std::size_t packSize(const PlmixparTable& data, Dune::MPIHelper::MPICommunicator comm)
+{
+    return packSize(static_cast<const std::vector<PlmixparRecord>&>(data), comm);
+}
+
+std::size_t packSize(const PlyvmhTable& data, Dune::MPIHelper::MPICommunicator comm)
+{
+    return packSize(static_cast<const std::vector<PlyvmhRecord>&>(data), comm);
+}
+
+std::size_t packSize(const Stone1exTable& data, Dune::MPIHelper::MPICommunicator comm)
+{
+    return packSize(static_cast<const std::vector<Stone1exRecord>&>(data), comm);
+}
+
+std::size_t packSize(const PlyshlogTable& data, Dune::MPIHelper::MPICommunicator comm)
+{
+    return packSize(static_cast<const SimpleTable&>(data), comm) +
+           packSize(data.getRefPolymerConcentration(), comm) +
+           packSize(data.getRefSalinity(), comm) +
+           packSize(data.getRefTemperature(), comm) +
+           packSize(data.hasRefSalinity(), comm) +
+           packSize(data.hasRefTemperature(), comm);
+}
+
+std::size_t packSize(const RocktabTable& data, Dune::MPIHelper::MPICommunicator comm)
+{
+    return packSize(static_cast<const SimpleTable&>(data), comm) +
+           packSize(data.isDirectional(), comm);
 }
 
 ////// pack routines
@@ -2202,8 +2004,9 @@ template<class T>
 void pack(const DynamicState<T>& data, std::vector<char>& buffer, int& position,
           Dune::MPIHelper::MPICommunicator comm)
 {
-    pack(data.data(), buffer, position, comm);
-    pack(data.initialRange(), buffer, position, comm);
+    auto split = splitDynState(data);
+    pack(split.first, buffer, position, comm);
+    pack(split.second, buffer, position, comm);
 }
 
 template<class T>
@@ -2260,6 +2063,13 @@ void pack(const std::unordered_map<T1,T2,H,P,A>& data, std::vector<char>& buffer
     }
 }
 
+
+template void pack(const std::map<Phase, Group::GroupInjectionProperties>& data,
+          std::vector<char>& buffer, int& position,
+          Dune::MPIHelper::MPICommunicator comm);
+
+
+
 void pack(const data::Well& data, std::vector<char>& buffer, int& position,
           Dune::MPIHelper::MPICommunicator comm)
 {
@@ -2270,6 +2080,7 @@ void pack(const data::Well& data, std::vector<char>& buffer, int& position,
     pack(data.control, buffer, position, comm);
     pack(data.connections, buffer, position, comm);
     pack(data.segments, buffer, position, comm);
+    pack(data.current_control, buffer, position, comm);
 }
 
 void pack(const RestartKey& data, std::vector<char>& buffer, int& position,
@@ -2322,6 +2133,99 @@ void pack(const ThresholdPressure& data, std::vector<char>& buffer, int& positio
     pack(data.thresholdPressureTable(), buffer, position, comm);
     pack(data.pressureTable(), buffer, position, comm);
 }
+
+void pack(const AquiferCT::AQUCT_data& data, std::vector<char>& buffer, int& position,
+          Dune::MPIHelper::MPICommunicator comm) {
+    pack(data.aquiferID, buffer, position, comm);
+    pack(data.inftableID, buffer, position, comm);
+    pack(data.pvttableID, buffer, position, comm);
+    pack(data.phi_aq, buffer, position, comm);
+    pack(data.d0, buffer, position, comm);
+    pack(data.C_t, buffer, position, comm);
+    pack(data.r_o, buffer, position, comm);
+    pack(data.k_a, buffer, position, comm);
+    pack(data.c1, buffer, position, comm);
+    pack(data.h, buffer, position, comm);
+    pack(data.theta, buffer, position, comm);
+    pack(data.c2, buffer, position, comm);
+    pack(data.p0, buffer, position, comm);
+    pack(data.td, buffer, position, comm);
+    pack(data.pi, buffer, position, comm);
+    pack(data.cell_id, buffer, position, comm);
+}
+
+void pack(const AquiferCT& data, std::vector<char>& buffer, int& position,
+          Dune::MPIHelper::MPICommunicator comm) {
+    pack(data.data(), buffer, position, comm);
+}
+
+
+void pack(const Aquifetp::AQUFETP_data& data, std::vector<char>& buffer, int& position,
+          Dune::MPIHelper::MPICommunicator comm) {
+    pack(data.aquiferID, buffer, position, comm);
+    pack(data.pvttableID, buffer, position, comm);
+    pack(data.J, buffer, position, comm);
+    pack(data.C_t, buffer, position, comm);
+    pack(data.V0, buffer, position, comm);
+    pack(data.d0, buffer, position, comm);
+    pack(data.p0, buffer, position, comm);
+}
+
+void pack(const WellType& data, std::vector<char>& buffer, int& position,
+          Dune::MPIHelper::MPICommunicator comm) {
+    pack(data.producer(), buffer, position, comm);
+    pack(data.preferred_phase(), buffer, position, comm);
+}
+
+void pack(const DenT& data, std::vector<char>& buffer, int& position,
+          Dune::MPIHelper::MPICommunicator comm) {
+    pack(data.records(), buffer, position, comm);
+}
+
+
+void pack(const Aquifetp& data, std::vector<char>& buffer, int& position,
+          Dune::MPIHelper::MPICommunicator comm) {
+    pack(data.data(), buffer, position, comm);
+}
+
+void pack(const AquiferConfig& data, std::vector<char>& buffer, int& position,
+          Dune::MPIHelper::MPICommunicator comm) {
+    pack(data.fetp(), buffer, position, comm);
+    pack(data.ct(), buffer, position, comm);
+    pack(data.connections(), buffer, position, comm);
+}
+
+void pack(const Aquancon::AquancCell& data, std::vector<char>& buffer, int& position,
+          Dune::MPIHelper::MPICommunicator comm) {
+    pack(data.aquiferID, buffer, position, comm);
+    pack(data.global_index, buffer, position, comm);
+    pack(data.influx_coeff, buffer, position, comm);
+    pack(data.influx_mult, buffer, position, comm);
+    pack(data.face_dir, buffer, position, comm);
+}
+
+void pack(const Aquancon& data, std::vector<char>& buffer, int& position,
+          Dune::MPIHelper::MPICommunicator comm) {
+    pack(data.data(), buffer, position, comm);
+}
+
+void pack(const BCConfig& bc, std::vector<char>& buffer, int& position,
+    Dune::MPIHelper::MPICommunicator comm)
+{
+    pack(bc.faces(), buffer, position, comm);
+}
+
+void pack(const RockConfig& data, std::vector<char>& buffer, int& position,
+          Dune::MPIHelper::MPICommunicator comm)
+{
+    pack(data.active(), buffer, position, comm);
+    pack(data.rocknum_property(), buffer, position, comm);
+    pack(data.comp(), buffer, position, comm);
+    pack(data.num_rock_tables(), buffer, position, comm);
+    pack(data.water_compaction(), buffer, position, comm);
+    pack(data.hysteresis_mode(), buffer, position, comm);
+}
+
 
 void pack(const NNC& data, std::vector<char>& buffer, int& position,
           Dune::MPIHelper::MPICommunicator comm)
@@ -2412,6 +2316,8 @@ void pack(const FoamConfig& data, std::vector<char>& buffer, int& position,
           Dune::MPIHelper::MPICommunicator comm)
 {
     pack(data.records(), buffer, position, comm);
+    pack(data.getTransportPhase(), buffer, position, comm);
+    pack(data.getMobilityModel(), buffer, position, comm);
 }
 
 void pack(const InitConfig& data, std::vector<char>& buffer, int& position,
@@ -2430,6 +2336,8 @@ void pack(const SimulationConfig& data, std::vector<char>& buffer, int& position
           Dune::MPIHelper::MPICommunicator comm)
 {
     pack(data.getThresholdPressure(), buffer, position, comm);
+    pack(data.bcconfig(), buffer, position, comm);
+    pack(data.rock_config(), buffer, position, comm);
     pack(data.useCPR(), buffer, position, comm);
     pack(data.hasDISGAS(), buffer, position, comm);
     pack(data.hasVAPOIL(), buffer, position, comm);
@@ -2462,7 +2370,6 @@ void pack(const IOConfig& data, std::vector<char>& buffer, int& position,
     pack(data.getUNIFOUT(), buffer, position, comm);
     pack(data.getFMTIN(), buffer, position, comm);
     pack(data.getFMTOUT(), buffer, position, comm);
-    pack(data.getFirstRestartStep(), buffer, position, comm);
     pack(data.getDeckFileName(), buffer, position, comm);
     pack(data.getOutputEnabled(), buffer, position, comm);
     pack(data.getOutputDir(), buffer, position, comm);
@@ -2504,6 +2411,7 @@ void pack(const Runspec& data, std::vector<char>& buffer, int& position,
     pack(data.udqParams(), buffer, position, comm);
     pack(data.hysterPar(), buffer, position, comm);
     pack(data.actdims(), buffer, position, comm);
+    pack(data.saturationFunctionControls(), buffer, position, comm);
 }
 
 void pack(const PvtxTable& data, std::vector<char>& buffer, int& position,
@@ -2596,7 +2504,14 @@ void pack(const RockTable& data, std::vector<char>& buffer, int& position,
 void pack(const TableManager& data, std::vector<char>& buffer, int& position,
           Dune::MPIHelper::MPICommunicator comm)
 {
-    pack(data.getSimpleTables(), buffer, position, comm);
+    auto simpleTables = data.getSimpleTables();
+    auto splitTab = splitSimpleTable(simpleTables);
+
+    pack(simpleTables, buffer, position, comm);
+    pack(splitTab.plyshMax, buffer, position, comm);
+    pack(splitTab.plyshMap, buffer, position, comm);
+    pack(splitTab.rockMax, buffer, position, comm);
+    pack(splitTab.rockMap, buffer, position, comm);
     pack(data.getPvtgTables(), buffer, position, comm);
     pack(data.getPvtoTables(), buffer, position, comm);
     pack(data.getRock2dTables(), buffer, position, comm);
@@ -2604,11 +2519,17 @@ void pack(const TableManager& data, std::vector<char>& buffer, int& position,
     pack(data.getPvtwTable(), buffer, position, comm);
     pack(data.getPvcdoTable(), buffer, position, comm);
     pack(data.getDensityTable(), buffer, position, comm);
+    pack(data.getPlyvmhTable(), buffer, position, comm);
     pack(data.getRockTable(), buffer, position, comm);
+    pack(data.getPlmixparTable(), buffer, position, comm);
+    pack(data.getShrateTable(), buffer, position, comm);
+    pack(data.getStone1exTable(), buffer, position, comm);
+    pack(data.getTlmixparTable(), buffer, position, comm);
     pack(data.getViscrefTable(), buffer, position, comm);
     pack(data.getWatdentTable(), buffer, position, comm);
     pack(data.getPvtwSaltTables(), buffer, position, comm);
     pack(data.getBrineDensityTables(), buffer, position, comm);
+    pack(data.getSolventDensityTables(), buffer, position, comm);
     pack(data.getPlymwinjTables(), buffer, position, comm);
     pack(data.getSkprwatTables(), buffer, position, comm);
     pack(data.getSkprpolyTables(), buffer, position, comm);
@@ -2619,338 +2540,17 @@ void pack(const TableManager& data, std::vector<char>& buffer, int& position,
     pack(data.useImptvd(), buffer, position, comm);
     pack(data.useEnptvd(), buffer, position, comm);
     pack(data.useEqlnum(), buffer, position, comm);
+    pack(data.useShrate(), buffer, position, comm);
     pack(data.useJFunc(), buffer, position, comm);
     if (data.useJFunc())
         pack(data.getJFunc(), buffer, position, comm);
+    pack(data.OilDenT(), buffer, position, comm);
+    pack(data.GasDenT(), buffer, position, comm);
+    pack(data.WatDenT(), buffer, position, comm);
+    pack(data.stCond(), buffer, position, comm);
+    pack(data.gas_comp_index(), buffer, position, comm);
     pack(data.rtemp(), buffer, position, comm);
 }
-
-template<class Scalar>
-void pack(const Tabulated1DFunction<Scalar>& data, std::vector<char>& buffer,
-          int& position, Dune::MPIHelper::MPICommunicator comm)
-{
-    pack(data.xValues(), buffer, position, comm);
-    pack(data.yValues(), buffer, position, comm);
-}
-
-template void pack(const Tabulated1DFunction<double>& data, std::vector<char>& buffer,
-                   int& position, Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar>
-void pack(const IntervalTabulated2DFunction<Scalar>& data, std::vector<char>& buffer,
-          int& position, Dune::MPIHelper::MPICommunicator comm)
-{
-    pack(data.xPos(), buffer, position, comm);
-    pack(data.yPos(), buffer, position, comm);
-    pack(data.samples(), buffer, position, comm);
-    pack(data.xExtrapolate(), buffer, position, comm);
-    pack(data.yExtrapolate(), buffer, position, comm);
-}
-
-template void pack(const IntervalTabulated2DFunction<double>& data,
-                   std::vector<char>& buffer,
-                   int& position, Dune::MPIHelper::MPICommunicator comm);
-
-template
-void pack(const std::vector<IntervalTabulated2DFunction<double>>& data,
-          std::vector<char>& buffer,
-          int& position, Dune::MPIHelper::MPICommunicator comm);
-
-template
-void pack(const std::map<int,IntervalTabulated2DFunction<double>>& data,
-          std::vector<char>& buffer,
-          int& position, Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar>
-void pack(const UniformXTabulated2DFunction<Scalar>& data, std::vector<char>& buffer,
-          int& position, Dune::MPIHelper::MPICommunicator comm)
-{
-    pack(data.xPos(), buffer, position, comm);
-    pack(data.yPos(), buffer, position, comm);
-    pack(data.samples(), buffer, position, comm);
-    pack(data.interpolationGuide(), buffer, position, comm);
-}
-
-template void pack(const UniformXTabulated2DFunction<double>& data,
-                   std::vector<char>& buffer,
-                   int& position, Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar>
-void pack(const SolventPvt<Scalar>& data, std::vector<char>& buffer, int& position,
-          Dune::MPIHelper::MPICommunicator comm)
-{
-    pack(data.solventReferenceDensity(), buffer, position, comm);
-    pack(data.inverseSolventB(), buffer, position, comm);
-    pack(data.solventMu(), buffer, position, comm);
-    pack(data.inverseSolventBMu(), buffer, position, comm);
-}
-
-template void pack(const SolventPvt<double>& data,
-                   std::vector<char>& buffer, int& position,
-                   Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar, bool enableThermal>
-void pack(const GasPvtMultiplexer<Scalar,enableThermal>& data,
-          std::vector<char>& buffer, int& position,
-          Dune::MPIHelper::MPICommunicator comm)
-{
-    pack(data.gasPvtApproach(), buffer, position, comm);
-    const void* realGasPvt = data.realGasPvt();
-    using PvtApproach = GasPvtMultiplexer<Scalar,enableThermal>;
-    if (data.gasPvtApproach() == PvtApproach::DryGasPvt) {
-        const auto& pvt = *static_cast<const DryGasPvt<Scalar>*>(realGasPvt);
-        pack(pvt, buffer, position, comm);
-    } else if (data.gasPvtApproach() == PvtApproach::WetGasPvt) {
-        const auto& pvt = *static_cast<const WetGasPvt<Scalar>*>(realGasPvt);
-        pack(pvt, buffer, position, comm);
-    } else if (data.gasPvtApproach() == PvtApproach::ThermalGasPvt) {
-        const auto& pvt = *static_cast<const GasPvtThermal<Scalar>*>(realGasPvt);
-        pack(pvt, buffer, position, comm);
-    }
-}
-
-template void pack(const GasPvtMultiplexer<double,true>& data,
-                   std::vector<char>& buffer, int& position,
-                   Dune::MPIHelper::MPICommunicator comm);
-template void pack(const GasPvtMultiplexer<double,false>& data,
-                   std::vector<char>& buffer, int& position,
-                   Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar>
-void pack(const DryGasPvt<Scalar>& data, std::vector<char>& buffer, int& position,
-          Dune::MPIHelper::MPICommunicator comm)
-{
-    pack(data.gasReferenceDensity(), buffer, position, comm);
-    pack(data.inverseGasB(), buffer, position, comm);
-    pack(data.gasMu(), buffer, position, comm);
-    pack(data.inverseGasBMu(), buffer, position, comm);
-}
-
-template void pack(const DryGasPvt<double>& data,
-                   std::vector<char>& buffer, int& position,
-                   Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar>
-void pack(const GasPvtThermal<Scalar>& data,
-          std::vector<char>& buffer, int& position,
-          Dune::MPIHelper::MPICommunicator comm)
-{
-    pack(data.gasvisctCurves(), buffer, position, comm);
-    pack(data.gasdentRefTemp(), buffer, position, comm);
-    pack(data.gasdentCT1(), buffer, position, comm);
-    pack(data.gasdentCT2(), buffer, position, comm);
-    pack(data.internalEnergyCurves(), buffer, position, comm);
-    pack(data.enableThermalDensity(), buffer, position, comm);
-    pack(data.enableThermalViscosity(), buffer, position, comm);
-    pack(data.enableInternalEnergy(), buffer, position, comm);
-    pack(data.isoThermalPvt() != nullptr, buffer, position, comm);
-    if (data.isoThermalPvt())
-        pack(*data.isoThermalPvt(), buffer, position, comm);
-}
-
-template void pack(const GasPvtThermal<double>& data,
-                   std::vector<char>& buffer, int& position,
-                   Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar>
-void pack(const WetGasPvt<Scalar>& data, std::vector<char>& buffer, int& position,
-          Dune::MPIHelper::MPICommunicator comm)
-{
-    pack(data.gasReferenceDensity(), buffer, position, comm);
-    pack(data.oilReferenceDensity(), buffer, position, comm);
-    pack(data.inverseGasB(), buffer, position, comm);
-    pack(data.inverseSaturatedGasB(), buffer, position, comm);
-    pack(data.gasMu(), buffer, position, comm);
-    pack(data.inverseGasBMu(), buffer, position, comm);
-    pack(data.inverseSaturatedGasBMu(), buffer, position, comm);
-    pack(data.saturatedOilVaporizationFactorTable(), buffer, position, comm);
-    pack(data.saturationPressure(), buffer, position, comm);
-    pack(data.vapPar1(), buffer, position, comm);
-}
-
-template void pack(const WetGasPvt<double>& data,
-                   std::vector<char>& buffer, int& position,
-                   Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar, bool enableThermal>
-void pack(const OilPvtMultiplexer<Scalar,enableThermal>& data,
-          std::vector<char>& buffer, int& position,
-          Dune::MPIHelper::MPICommunicator comm)
-{
-    pack(data.approach(), buffer, position, comm);
-    const void* realOilPvt = data.realOilPvt();
-    using PvtApproach = OilPvtMultiplexer<Scalar,enableThermal>;
-    if (data.approach() == PvtApproach::ConstantCompressibilityOilPvt) {
-        const auto& pvt = *static_cast<const ConstantCompressibilityOilPvt<Scalar>*>(realOilPvt);
-        pack(pvt, buffer, position, comm);
-    } else if (data.approach() == PvtApproach::DeadOilPvt) {
-        const auto& pvt = *static_cast<const DeadOilPvt<Scalar>*>(realOilPvt);
-        pack(pvt, buffer, position, comm);
-    } else if (data.approach() == PvtApproach::LiveOilPvt) {
-        const auto& pvt = *static_cast<const LiveOilPvt<Scalar>*>(realOilPvt);
-        pack(pvt, buffer, position, comm);
-    } else if (data.approach() == PvtApproach::ThermalOilPvt) {
-        const auto& pvt = *static_cast<const OilPvtThermal<Scalar>*>(realOilPvt);
-        pack(pvt, buffer, position, comm);
-    }
-}
-
-template void pack(const OilPvtMultiplexer<double,true>& data,
-                   std::vector<char>& buffer, int& position,
-                   Dune::MPIHelper::MPICommunicator comm);
-template void pack(const OilPvtMultiplexer<double,false>& data,
-                   std::vector<char>& buffer, int& position,
-                   Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar>
-void pack(const ConstantCompressibilityOilPvt<Scalar>& data,
-          std::vector<char>& buffer, int& position,
-          Dune::MPIHelper::MPICommunicator comm)
-{
-    pack(data.oilReferenceDensity(), buffer, position, comm);
-    pack(data.oilReferencePressure(), buffer, position, comm);
-    pack(data.oilReferenceFormationVolumeFactor(), buffer, position, comm);
-    pack(data.oilCompressibility(), buffer, position, comm);
-    pack(data.oilViscosity(), buffer, position, comm);
-    pack(data.oilViscosibility(), buffer, position, comm);
-}
-
-template void pack(const ConstantCompressibilityOilPvt<double>& data,
-                   std::vector<char>& buffer, int& position,
-                   Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar>
-void pack(const DeadOilPvt<Scalar>& data,
-          std::vector<char>& buffer, int& position,
-          Dune::MPIHelper::MPICommunicator comm)
-{
-    pack(data.oilReferenceDensity(), buffer, position, comm);
-    pack(data.inverseOilB(), buffer, position, comm);
-    pack(data.oilMu(), buffer, position, comm);
-    pack(data.inverseOilBMu(), buffer, position, comm);
-}
-
-template void pack(const DeadOilPvt<double>& data,
-                   std::vector<char>& buffer, int& position,
-                   Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar>
-void pack(const LiveOilPvt<Scalar>& data,
-          std::vector<char>& buffer, int& position,
-          Dune::MPIHelper::MPICommunicator comm)
-{
-    pack(data.gasReferenceDensity(), buffer, position, comm);
-    pack(data.oilReferenceDensity(), buffer, position, comm);
-    pack(data.inverseOilBTable(), buffer, position, comm);
-    pack(data.oilMuTable(), buffer, position, comm);
-    pack(data.inverseOilBMuTable(), buffer, position, comm);
-    pack(data.saturatedOilMuTable(), buffer, position, comm);
-    pack(data.inverseSaturatedOilBTable(), buffer, position, comm);
-    pack(data.inverseSaturatedOilBMuTable(), buffer, position, comm);
-    pack(data.saturatedGasDissolutionFactorTable(), buffer, position, comm);
-    pack(data.saturationPressure(), buffer, position, comm);
-    pack(data.vapPar2(), buffer, position, comm);
-}
-
-template void pack(const LiveOilPvt<double>& data,
-                   std::vector<char>& buffer, int& position,
-                   Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar>
-void pack(const OilPvtThermal<Scalar>& data,
-          std::vector<char>& buffer, int& position,
-          Dune::MPIHelper::MPICommunicator comm)
-{
-    pack(data.oilvisctCurves(), buffer, position, comm);
-    pack(data.viscrefPress(), buffer, position, comm);
-    pack(data.viscrefRs(), buffer, position, comm);
-    pack(data.viscRef(), buffer, position, comm);
-    pack(data.oildentRefTemp(), buffer, position, comm);
-    pack(data.oildentCT1(), buffer, position, comm);
-    pack(data.oildentCT2(), buffer, position, comm);
-    pack(data.internalEnergyCurves(), buffer, position, comm);
-    pack(data.enableThermalDensity(), buffer, position, comm);
-    pack(data.enableThermalViscosity(), buffer, position, comm);
-    pack(data.enableInternalEnergy(), buffer, position, comm);
-    pack(data.isoThermalPvt() != nullptr, buffer, position, comm);
-    if (data.isoThermalPvt())
-        pack(*data.isoThermalPvt(), buffer, position, comm);
-}
-
-template void pack(const OilPvtThermal<double>& data,
-                   std::vector<char>& buffer, int& position,
-                   Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar, bool enableThermal>
-void pack(const WaterPvtMultiplexer<Scalar,enableThermal>& data,
-          std::vector<char>& buffer, int& position,
-          Dune::MPIHelper::MPICommunicator comm)
-{
-    pack(data.approach(), buffer, position, comm);
-    const void* realWaterPvt = data.realWaterPvt();
-    using PvtApproach = WaterPvtMultiplexer<Scalar,enableThermal>;
-    if (data.approach() == PvtApproach::ConstantCompressibilityWaterPvt) {
-        const auto& pvt = *static_cast<const ConstantCompressibilityWaterPvt<Scalar>*>(realWaterPvt);
-        pack(pvt, buffer, position, comm);
-    } else if (data.approach() == PvtApproach::ThermalWaterPvt) {
-        const auto& pvt = *static_cast<const WaterPvtThermal<Scalar>*>(realWaterPvt);
-        pack(pvt, buffer, position, comm);
-    }
-}
-
-template void pack(const WaterPvtMultiplexer<double,true>& data,
-                   std::vector<char>& buffer, int& position,
-                   Dune::MPIHelper::MPICommunicator comm);
-template void pack(const WaterPvtMultiplexer<double,false>& data,
-                   std::vector<char>& buffer, int& position,
-                   Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar>
-void pack(const ConstantCompressibilityWaterPvt<Scalar>& data,
-          std::vector<char>& buffer, int& position,
-          Dune::MPIHelper::MPICommunicator comm)
-{
-    pack(data.waterReferenceDensity(), buffer, position, comm);
-    pack(data.waterReferencePressure(), buffer, position, comm);
-    pack(data.waterReferenceFormationVolumeFactor(), buffer, position, comm);
-    pack(data.waterCompressibility(), buffer, position, comm);
-    pack(data.waterViscosity(), buffer, position, comm);
-    pack(data.waterViscosibility(), buffer, position, comm);
-}
-
-template void pack(const ConstantCompressibilityWaterPvt<double>& data,
-                   std::vector<char>& buffer, int& position,
-                   Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar>
-void pack(const WaterPvtThermal<Scalar>& data,
-          std::vector<char>& buffer, int& position,
-          Dune::MPIHelper::MPICommunicator comm)
-{
-    pack(data.viscrefPress(), buffer, position, comm);
-    pack(data.watdentRefTemp(), buffer, position, comm);
-    pack(data.watdentCT1(), buffer, position, comm);
-    pack(data.watdentCT2(), buffer, position, comm);
-    pack(data.pvtwRefPress(), buffer, position, comm);
-    pack(data.pvtwRefB(), buffer, position, comm);
-    pack(data.pvtwCompressibility(), buffer, position, comm);
-    pack(data.pvtwViscosity(), buffer, position, comm);
-    pack(data.pvtwViscosibility(), buffer, position, comm);
-    pack(data.watvisctCurves(), buffer, position, comm);
-    pack(data.internalEnergyCurves(), buffer, position, comm);
-    pack(data.enableThermalDensity(), buffer, position, comm);
-    pack(data.enableThermalViscosity(), buffer, position, comm);
-    pack(data.enableInternalEnergy(), buffer, position, comm);
-    pack(data.isoThermalPvt() != nullptr, buffer, position, comm);
-
-    using PvtApproach = WaterPvtThermal<Scalar>;
-    if (data.isoThermalPvt()->approach() != PvtApproach::IsothermalPvt::NoWaterPvt)
-        pack(*data.isoThermalPvt(), buffer, position, comm);
-}
-
-template void pack(const WaterPvtThermal<double>& data,
-                   std::vector<char>& buffer, int& position,
-                   Dune::MPIHelper::MPICommunicator comm);
 
 void pack(const OilVaporizationProperties& data,
           std::vector<char>& buffer, int& position,
@@ -2987,8 +2587,7 @@ void pack(const VFPInjTable& data,
     pack(data.getFloType(), buffer, position, comm);
     pack(data.getFloAxis(), buffer, position, comm);
     pack(data.getTHPAxis(), buffer, position, comm);
-    for (size_t i = 0; i < data.getTable().num_elements(); ++i)
-        pack(*(data.getTable().data() + i), buffer, position, comm);
+    pack(data.getTable(), buffer, position, comm);
 }
 
 void pack(const VFPProdTable& data,
@@ -3006,8 +2605,7 @@ void pack(const VFPProdTable& data,
     pack(data.getWFRAxis(), buffer, position, comm);
     pack(data.getGFRAxis(), buffer, position, comm);
     pack(data.getALQAxis(), buffer, position, comm);
-    for (size_t i = 0; i < data.getTable().num_elements(); ++i)
-        pack(*(data.getTable().data() + i), buffer, position, comm);
+    pack(data.getTable(), buffer, position, comm);
 }
 
 void pack(const WellTestConfig::WTESTWell& data,
@@ -3224,7 +2822,6 @@ void pack(const Dimension& data,
           std::vector<char>& buffer, int& position,
           Dune::MPIHelper::MPICommunicator comm)
 {
-    pack(data.getName(), buffer, position, comm);
     pack(data.getSIScalingRaw(), buffer, position, comm);
     pack(data.getSIOffset(), buffer, position, comm);
 }
@@ -3243,15 +2840,8 @@ void pack(const WellSegments& data,
           std::vector<char>& buffer, int& position,
           Dune::MPIHelper::MPICommunicator comm)
 {
-    pack(data.wellName(), buffer, position, comm);
-    pack(data.depthTopSegment(), buffer, position, comm);
-    pack(data.lengthTopSegment(), buffer, position, comm);
-    pack(data.volumeTopSegment(), buffer, position, comm);
-    pack(data.lengthDepthType(), buffer, position, comm);
     pack(data.compPressureDrop(), buffer, position, comm);
-    pack(data.multiPhaseModel(), buffer, position, comm);
     pack(data.segments(), buffer, position, comm);
-    pack(data.segmentNumberIndex(), buffer, position, comm);
 }
 
 void pack(const Well& data,
@@ -3265,7 +2855,7 @@ void pack(const Well& data,
     pack(data.getHeadI(), buffer, position, comm);
     pack(data.getHeadJ(), buffer, position, comm);
     pack(data.getRefDepth(), buffer, position, comm);
-    pack(data.getPreferredPhase(), buffer, position, comm);
+    pack(data.wellType(), buffer, position, comm);
     pack(data.getWellConnectionOrdering(), buffer, position, comm);
     pack(data.units(), buffer, position, comm);
     pack(data.udqUndefined(), buffer, position, comm);
@@ -3273,7 +2863,6 @@ void pack(const Well& data,
     pack(data.getDrainageRadius(), buffer, position, comm);
     pack(data.getAllowCrossFlow(), buffer, position, comm);
     pack(data.getAutomaticShutIn(), buffer, position, comm);
-    pack(data.isProducer(), buffer, position, comm);
     pack(data.wellGuideRate(), buffer, position, comm);
     pack(data.getEfficiencyFactor(), buffer, position, comm);
     pack(data.getSolventFraction(), buffer, position, comm);
@@ -3342,6 +2931,7 @@ void pack(const Group& data,
     pack(data.type(), buffer, position, comm);
     pack(data.getGroupEfficiencyFactor(), buffer, position, comm);
     pack(data.getTransferGroupEfficiencyFactor(), buffer, position, comm);
+    pack(data.isAvailableForGroupControl(), buffer, position, comm);
     pack(data.getGroupNetVFPTable(), buffer, position, comm);
     pack(data.parent(), buffer, position, comm);
     pack(data.iwells(), buffer, position, comm);
@@ -3364,21 +2954,6 @@ void pack(const WListManager& data,
     pack(data.lists(), buffer, position, comm);
 }
 
-void pack(const UDQFunction& data,
-          std::vector<char>& buffer, int& position,
-          Dune::MPIHelper::MPICommunicator comm)
-{
-    pack(data.name(), buffer, position, comm);
-    pack(data.type(), buffer, position, comm);
-}
-
-void pack(const UDQFunctionTable& data,
-          std::vector<char>& buffer, int& position,
-          Dune::MPIHelper::MPICommunicator comm)
-{
-    pack(data.getParams(), buffer, position, comm);
-    pack(data.functionMap(), buffer, position, comm);
-}
 
 void pack(const UDQASTNode& data,
           std::vector<char>& buffer, int& position,
@@ -3602,49 +3177,6 @@ void pack(const Deck& data,
     pack(data.unitSystemAccessCount(), buffer, position, comm);
 }
 
-void pack(const Tuning& data,
-          std::vector<char>& buffer, int& position,
-          Dune::MPIHelper::MPICommunicator comm)
-{
-    pack(data.getTSINIT(), buffer, position, comm);
-    pack(data.getTSMAXZ(), buffer, position, comm);
-    pack(data.getTSMINZ(), buffer, position, comm);
-    pack(data.getTSMCHP(), buffer, position, comm);
-    pack(data.getTSFMAX(), buffer, position, comm);
-    pack(data.getTSFMIN(), buffer, position, comm);
-    pack(data.getTSFCNV(), buffer, position, comm);
-    pack(data.getTFDIFF(), buffer, position, comm);
-    pack(data.getTHRUPT(), buffer, position, comm);
-    pack(data.getTMAXWC(), buffer, position, comm);
-    pack(data.getTMAXWC_has_value(), buffer, position, comm);
-    pack(data.getTRGTTE(), buffer, position, comm);
-    pack(data.getTRGCNV(), buffer, position, comm);
-    pack(data.getTRGMBE(), buffer, position, comm);
-    pack(data.getTRGLCV(), buffer, position, comm);
-    pack(data.getXXXTTE(), buffer, position, comm);
-    pack(data.getXXXCNV(), buffer, position, comm);
-    pack(data.getXXXMBE(), buffer, position, comm);
-    pack(data.getXXXLCV(), buffer, position, comm);
-    pack(data.getXXXWFL(), buffer, position, comm);
-    pack(data.getTRGFIP(), buffer, position, comm);
-    pack(data.getTRGSFT(), buffer, position, comm);
-    pack(data.getTRGSFT_has_value(), buffer, position, comm);
-    pack(data.getTHIONX(), buffer, position, comm);
-    pack(data.getTRWGHT(), buffer, position, comm);
-    pack(data.getNEWTMX(), buffer, position, comm);
-    pack(data.getNEWTMN(), buffer, position, comm);
-    pack(data.getLITMAX(), buffer, position, comm);
-    pack(data.getLITMIN(), buffer, position, comm);
-    pack(data.getMXWSIT(), buffer, position, comm);
-    pack(data.getMXWPIT(), buffer, position, comm);
-    pack(data.getDDPLIM(), buffer, position, comm);
-    pack(data.getDDSLIM(), buffer, position, comm);
-    pack(data.getTRGDPR(), buffer, position, comm);
-    pack(data.getXXXDPR(), buffer, position, comm);
-    pack(data.getXXXDPR_has_value(), buffer, position, comm);
-    pack(data.getResetValues(), buffer, position, comm);
-}
-
 void pack(const Action::ASTNode& data,
           std::vector<char>& buffer, int& position,
           Dune::MPIHelper::MPICommunicator comm)
@@ -3720,17 +3252,18 @@ void pack(const Schedule& data,
     pack(data.getRunspec(), buffer, position, comm);
     packDynMap<Map2>(data.getVFPProdTables(), buffer, position, comm);
     packDynMap<Map2>(data.getVFPInjTables(), buffer, position, comm);
-    packDynState(data.getWellTestConfig(), buffer, position, comm);
-    packDynState(data.getWListManager(), buffer, position, comm);
-    packDynState(data.getUDQConfig(), buffer, position, comm);
-    packDynState(data.getUDQActive(), buffer, position, comm);
-    packDynState(data.getGuideRateConfig(), buffer, position, comm);
-    packDynState(data.getGConSale(), buffer, position, comm);
-    packDynState(data.getGConSump(), buffer, position, comm);
+    pack(data.getWellTestConfig(), buffer, position, comm);
+    pack(data.getWListManager(), buffer, position, comm);
+    pack(data.getUDQConfig(), buffer, position, comm);
+    pack(data.getUDQActive(), buffer, position, comm);
+    pack(data.getGuideRateConfig(), buffer, position, comm);
+    pack(data.getGConSale(), buffer, position, comm);
+    pack(data.getGConSump(), buffer, position, comm);
     pack(data.getGlobalWhistCtlMode(), buffer, position, comm);
-    packDynState(data.getActions(), buffer, position, comm);
+    pack(data.getActions(), buffer, position, comm);
     pack(data.rftConfig(), buffer, position, comm);
     pack(data.getNupCol(), buffer, position, comm);
+    pack(data.restart(), buffer, position, comm);
     pack(data.getWellGroupEvents(), buffer, position, comm);
 }
 
@@ -3908,7 +3441,6 @@ void pack(const EclipseConfig& data,
 {
     pack(data.init(), buffer, position, comm);
     pack(data.io(), buffer, position, comm);
-    pack(data.restart(), buffer, position, comm);
 }
 
 void pack(const TransMult& data,
@@ -3945,31 +3477,66 @@ void pack(const FaultCollection& data,
     pack(data.getFaults(), buffer, position, comm);
 }
 
-template<class Scalar>
-void pack(const EclEpsScalingPointsInfo<Scalar>& data, std::vector<char>& buffer,
-          int& position, Dune::MPIHelper::MPICommunicator comm)
+void pack(const SolventDensityTable& data,
+          std::vector<char>& buffer, int& position,
+          Dune::MPIHelper::MPICommunicator comm)
 {
-    pack(data.Swl, buffer, position, comm);
-    pack(data.Sgl, buffer, position, comm);
-    pack(data.Sowl, buffer, position, comm);
-    pack(data.Sogl, buffer, position, comm);
-    pack(data.krCriticalEps, buffer, position, comm);
-    pack(data.Swcr, buffer, position, comm);
-    pack(data.Sgcr, buffer, position, comm);
-    pack(data.Sowcr, buffer, position, comm);
-    pack(data.Sogcr, buffer, position, comm);
-    pack(data.Swu, buffer, position, comm);
-    pack(data.Sgu, buffer, position, comm);
-    pack(data.Sowu, buffer, position, comm);
-    pack(data.Sogu, buffer, position, comm);
-    pack(data.maxPcow, buffer, position, comm);
-    pack(data.maxPcgo, buffer, position, comm);
-    pack(data.pcowLeverettFactor, buffer, position, comm);
-    pack(data.pcgoLeverettFactor, buffer, position, comm);
-    pack(data.maxKrw, buffer, position, comm);
-    pack(data.maxKrow, buffer, position, comm);
-    pack(data.maxKrog, buffer, position, comm);
-    pack(data.maxKrg, buffer, position, comm);
+    pack(data.getSolventDensityColumn(), buffer, position, comm);
+}
+
+void pack(const GridDims& data,
+          std::vector<char>& buffer, int& position,
+          Dune::MPIHelper::MPICommunicator comm)
+{
+    pack(data.getNXYZ(), buffer, position, comm);
+}
+
+void pack(const ShrateTable& data, std::vector<char>& buffer, int& position,
+          Dune::MPIHelper::MPICommunicator comm)
+{
+    pack(static_cast<const std::vector<ShrateRecord>&>(data), buffer, position, comm);
+}
+
+void pack(const TlmixparTable& data, std::vector<char>& buffer, int& position,
+          Dune::MPIHelper::MPICommunicator comm)
+{
+    pack(static_cast<const std::vector<TlmixparRecord>&>(data), buffer, position, comm);
+}
+
+void pack(const PlmixparTable& data, std::vector<char>& buffer, int& position,
+          Dune::MPIHelper::MPICommunicator comm)
+{
+    pack(static_cast<const std::vector<PlmixparRecord>&>(data), buffer, position, comm);
+}
+
+void pack(const PlyvmhTable& data, std::vector<char>& buffer, int& position,
+          Dune::MPIHelper::MPICommunicator comm)
+{
+    pack(static_cast<const std::vector<PlyvmhRecord>&>(data), buffer, position, comm);
+}
+
+void pack(const Stone1exTable& data, std::vector<char>& buffer, int& position,
+          Dune::MPIHelper::MPICommunicator comm)
+{
+    pack(static_cast<const std::vector<Stone1exRecord>&>(data), buffer, position, comm);
+}
+
+void pack(const PlyshlogTable& data, std::vector<char>& buffer, int& position,
+          Dune::MPIHelper::MPICommunicator comm)
+{
+    pack(static_cast<const SimpleTable&>(data), buffer, position, comm);
+    pack(data.getRefPolymerConcentration(), buffer, position, comm);
+    pack(data.getRefSalinity(), buffer, position, comm);
+    pack(data.getRefTemperature(), buffer, position, comm);
+    pack(data.hasRefSalinity(), buffer, position, comm);
+    pack(data.hasRefTemperature(), buffer, position, comm);
+}
+
+void pack(const RocktabTable& data, std::vector<char>& buffer, int& position,
+          Dune::MPIHelper::MPICommunicator comm)
+{
+    pack(static_cast<const SimpleTable&>(data), buffer, position, comm);
+    pack(data.isDirectional(), buffer, position, comm);
 }
 
 /// unpack routines
@@ -4046,7 +3613,7 @@ template<class T, class A>
 void unpack(std::vector<T,A>& data, std::vector<char>& buffer, int& position,
             Dune::MPIHelper::MPICommunicator comm)
 {
-    std::size_t length=0;
+    std::size_t length = 0;
     unpack(length, buffer, position, comm);
     data.resize(length);
 
@@ -4153,11 +3720,11 @@ template<class T>
 void unpack(DynamicState<T>& data, std::vector<char>& buffer, int& position,
             Dune::MPIHelper::MPICommunicator comm)
 {
-    std::vector<T> ddata;
-    size_t initial_range;
-    unpack(ddata, buffer, position, comm);
-    unpack(initial_range, buffer, position, comm);
-    data = DynamicState<T>(ddata, initial_range);
+    std::vector<T> unique;
+    std::vector<int> indices;
+    Opm::Mpi::unpack(unique, buffer, position, comm);
+    Opm::Mpi::unpack(indices, buffer, position, comm);
+    reconstructDynState(unique, indices, data);
 }
 
 template<class T>
@@ -4167,33 +3734,6 @@ void unpack(DynamicVector<T>& data, std::vector<char>& buffer, int& position,
     std::vector<T> ddata;
     unpack(ddata, buffer, position, comm);
     data = DynamicVector<T>(ddata);
-}
-
-template<class Scalar>
-void unpack(EclEpsScalingPointsInfo<Scalar>& data, std::vector<char>& buffer,
-            int& position, Dune::MPIHelper::MPICommunicator comm)
-{
-    unpack(data.Swl, buffer, position, comm);
-    unpack(data.Sgl, buffer, position, comm);
-    unpack(data.Sowl, buffer, position, comm);
-    unpack(data.Sogl, buffer, position, comm);
-    unpack(data.krCriticalEps, buffer, position, comm);
-    unpack(data.Swcr, buffer, position, comm);
-    unpack(data.Sgcr, buffer, position, comm);
-    unpack(data.Sowcr, buffer, position, comm);
-    unpack(data.Sogcr, buffer, position, comm);
-    unpack(data.Swu, buffer, position, comm);
-    unpack(data.Sgu, buffer, position, comm);
-    unpack(data.Sowu, buffer, position, comm);
-    unpack(data.Sogu, buffer, position, comm);
-    unpack(data.maxPcow, buffer, position, comm);
-    unpack(data.maxPcgo, buffer, position, comm);
-    unpack(data.pcowLeverettFactor, buffer, position, comm);
-    unpack(data.pcgoLeverettFactor, buffer, position, comm);
-    unpack(data.maxKrw, buffer, position, comm);
-    unpack(data.maxKrow, buffer, position, comm);
-    unpack(data.maxKrog, buffer, position, comm);
-    unpack(data.maxKrg, buffer, position, comm);
 }
 
 void unpack(char* str, std::size_t length, std::vector<char>& buffer, int& position,
@@ -4261,6 +3801,7 @@ void unpack(data::Well& data, std::vector<char>& buffer, int& position,
     unpack(data.control, buffer, position, comm);
     unpack(data.connections, buffer, position, comm);
     unpack(data.segments, buffer, position, comm);
+    unpack(data.current_control, buffer, position, comm);
 }
 
 void unpack(RestartKey& data, std::vector<char>& buffer, int& position,
@@ -4305,6 +3846,26 @@ void unpack(RestartValue& data, std::vector<char>& buffer, int& position,
     unpack(data.extra, buffer, position, comm);
 }
 
+void unpack(RockConfig& data, std::vector<char>& buffer, int& position,
+            Dune::MPIHelper::MPICommunicator comm)
+{
+    RockConfig rock_config;
+    bool active;
+    std::vector<RockConfig::RockComp> rock_comp;
+    std::string rocknum_property;
+    std::size_t num_rock_tables;
+    bool water_compaction;
+    RockConfig::Hysteresis hyst_mode;
+
+    unpack(active, buffer, position, comm);
+    unpack(rocknum_property, buffer, position, comm);
+    unpack(rock_comp, buffer, position, comm);
+    unpack(num_rock_tables, buffer, position, comm);
+    unpack(water_compaction, buffer, position, comm);
+    unpack(hyst_mode, buffer, position, comm);
+    data = RockConfig(active, rock_comp, rocknum_property, num_rock_tables, water_compaction, hyst_mode);
+}
+
 void unpack(ThresholdPressure& data, std::vector<char>& buffer, int& position,
             Dune::MPIHelper::MPICommunicator comm)
 {
@@ -4317,6 +3878,148 @@ void unpack(ThresholdPressure& data, std::vector<char>& buffer, int& position,
     unpack(pTable, buffer, position, comm);
 
     data = ThresholdPressure(active, restart, thpTable, pTable);
+}
+
+void unpack(AquiferCT::AQUCT_data& data, std::vector<char>& buffer, int& position, Dune::MPIHelper::MPICommunicator comm)
+{
+    int aquiferID;
+    int inftableID, pvttableID;
+    double phi_aq, d0, C_t, r_o, k_a, c1, h, theta, c2;
+    std::pair<bool, double> p0;
+    std::vector<double> td, pi;
+    std::vector<int> cell_id;
+
+    unpack(aquiferID, buffer, position, comm);
+    unpack(inftableID, buffer, position, comm);
+    unpack(pvttableID, buffer, position, comm);
+    unpack(phi_aq, buffer, position, comm);
+    unpack(d0, buffer, position, comm);
+    unpack(C_t, buffer, position, comm);
+    unpack(r_o, buffer, position, comm);
+    unpack(k_a, buffer, position, comm);
+    unpack(c1, buffer, position, comm);
+    unpack(h, buffer, position, comm);
+    unpack(theta, buffer, position, comm);
+    unpack(c2, buffer, position, comm);
+    unpack(p0, buffer, position, comm);
+    unpack(td, buffer, position, comm);
+    unpack(pi, buffer, position, comm);
+    unpack(cell_id, buffer, position, comm);
+
+    data = AquiferCT::AQUCT_data(aquiferID,
+                                 inftableID,
+                                 pvttableID,
+                                 phi_aq,
+                                 d0,
+                                 C_t,
+                                 r_o,
+                                 k_a,
+                                 c1,
+                                 h,
+                                 theta,
+                                 c2,
+                                 p0,
+                                 td,
+                                 pi,
+                                 cell_id);
+}
+
+
+void unpack(WellType& data, std::vector<char>& buffer, int& position, Dune::MPIHelper::MPICommunicator comm)
+{
+    Phase preferred_phase;
+    bool producer;
+    unpack(producer, buffer, position, comm);
+    unpack(preferred_phase, buffer, position, comm);
+    data = WellType( producer, preferred_phase );
+}
+
+
+
+void unpack(DenT& data, std::vector<char>& buffer, int& position, Dune::MPIHelper::MPICommunicator comm)
+{
+    std::vector<DenT::entry> records;
+    unpack(records, buffer, position, comm);
+    data = DenT( records );
+}
+
+
+void unpack(AquiferCT& data, std::vector<char>& buffer, int& position, Dune::MPIHelper::MPICommunicator comm)
+{
+    std::vector<AquiferCT::AQUCT_data> aquiferList;
+    unpack(aquiferList, buffer, position, comm);
+    data = AquiferCT(aquiferList);
+}
+
+void unpack(Aquifetp::AQUFETP_data& data, std::vector<char>& buffer, int& position, Dune::MPIHelper::MPICommunicator comm)
+{
+    int aquiferID;
+    int pvttableID;
+    double  J, C_t, V0, d0;
+    std::pair<bool, double> p0;
+
+    unpack(aquiferID, buffer, position, comm);
+    unpack(pvttableID, buffer, position, comm);
+    unpack(J, buffer, position, comm);
+    unpack(C_t, buffer, position, comm);
+    unpack(V0, buffer, position, comm);
+    unpack(d0, buffer, position, comm);
+    unpack(p0, buffer, position, comm);
+    data = Aquifetp::AQUFETP_data(aquiferID, pvttableID, J, C_t, V0, d0, p0);
+}
+
+void unpack(Aquifetp& data, std::vector<char>& buffer, int& position, Dune::MPIHelper::MPICommunicator comm)
+{
+    std::vector<Aquifetp::AQUFETP_data> aquiferList;
+    unpack(aquiferList, buffer, position, comm);
+    data = Aquifetp(aquiferList);
+}
+
+
+void unpack(Aquancon::AquancCell& data, std::vector<char>& buffer, int& position, Dune::MPIHelper::MPICommunicator comm)
+{
+    int aquiferID;
+    std::size_t globalIndex;
+    std::pair<bool, double> influxCoeff;
+    double influxMult;
+    FaceDir::DirEnum faceDir;
+
+    unpack(aquiferID, buffer, position, comm);
+    unpack(globalIndex, buffer, position, comm);
+    unpack(influxCoeff, buffer, position, comm);
+    unpack(influxMult, buffer, position, comm);
+    unpack(faceDir, buffer, position, comm);
+
+    data = Aquancon::AquancCell(aquiferID, globalIndex, influxCoeff, influxMult, faceDir);
+}
+
+
+void unpack(AquiferConfig& data, std::vector<char>& buffer, int& position, Dune::MPIHelper::MPICommunicator comm) {
+    Aquifetp fetp;
+    AquiferCT ct;
+    Aquancon conn;
+
+    unpack(fetp, buffer, position, comm);
+    unpack(ct, buffer, position, comm);
+    unpack(conn, buffer, position, comm);
+    data = AquiferConfig(fetp, ct, conn);
+}
+
+
+void unpack(Aquancon& data, std::vector<char>& buffer, int& position, Dune::MPIHelper::MPICommunicator comm)
+{
+    std::unordered_map<int, std::vector<Aquancon::AquancCell>> aquiferCells;
+    unpack(aquiferCells, buffer, position, comm);
+    data = Aquancon(aquiferCells);
+}
+
+void unpack(BCConfig& bc, std::vector<char>& buffer, int& position,
+            Dune::MPIHelper::MPICommunicator comm)
+{
+    std::vector<BCConfig::BCFace> faces;
+
+    unpack(faces, buffer, position, comm);
+    bc = BCConfig(faces);
 }
 
 void unpack(NNC& data, std::vector<char>& buffer, int& position,
@@ -4421,7 +4124,7 @@ void unpack(TableContainer& data, std::vector<char>& buffer, int& position,
         unpack(id, buffer, position, comm);
         SimpleTable table;
         unpack(table, buffer, position, comm);
-        data.addTable(id, std::make_shared<const SimpleTable>(table));
+        data.addTable(id, std::make_shared<SimpleTable>(table));
     }
 }
 
@@ -4437,8 +4140,12 @@ void unpack(FoamConfig& data, std::vector<char>& buffer, int& position,
             Dune::MPIHelper::MPICommunicator comm)
 {
     std::vector<FoamData> records;
+    Phase transport_phase;
+    FoamConfig::MobilityModel mobility_model;
     unpack(records, buffer, position, comm);
-    data = FoamConfig(records);
+    unpack(transport_phase, buffer, position, comm);
+    unpack(mobility_model, buffer, position, comm);
+    data = FoamConfig(records, transport_phase, mobility_model);
 }
 
 void unpack(InitConfig& data, std::vector<char>& buffer, int& position,
@@ -4464,13 +4171,17 @@ void unpack(SimulationConfig& data, std::vector<char>& buffer, int& position,
             Dune::MPIHelper::MPICommunicator comm)
 {
     ThresholdPressure thresholdPressure;
+    BCConfig bc;
+    RockConfig rock_config;
     bool useCPR, DISGAS, VAPOIL, isThermal;
     unpack(thresholdPressure, buffer, position, comm);
+    unpack(bc, buffer, position, comm);
+    unpack(rock_config, buffer, position, comm);
     unpack(useCPR, buffer, position, comm);
     unpack(DISGAS, buffer, position, comm);
     unpack(VAPOIL, buffer, position, comm);
     unpack(isThermal, buffer, position, comm);
-    data = SimulationConfig(thresholdPressure, useCPR, DISGAS, VAPOIL, isThermal);
+    data = SimulationConfig(thresholdPressure, bc, rock_config, useCPR, DISGAS, VAPOIL, isThermal);
 }
 
 void unpack(TimeMap& data, std::vector<char>& buffer, int& position,
@@ -4505,7 +4216,6 @@ void unpack(IOConfig& data, std::vector<char>& buffer, int& position,
             Dune::MPIHelper::MPICommunicator comm)
 {
     bool write_init, write_egrid, unifin, unifout, fmtin, fmtout;
-    int firstRestartStep;
     std::string deck_name, output_dir, base_name;
     bool output_enabled, no_sim, ecl_compatible_rst;
 
@@ -4515,7 +4225,6 @@ void unpack(IOConfig& data, std::vector<char>& buffer, int& position,
     unpack(unifout, buffer, position, comm);
     unpack(fmtin, buffer, position, comm);
     unpack(fmtout, buffer, position, comm);
-    unpack(firstRestartStep, buffer, position, comm);
     unpack(deck_name, buffer, position, comm);
     unpack(output_enabled, buffer, position, comm);
     unpack(output_dir, buffer, position, comm);
@@ -4523,7 +4232,7 @@ void unpack(IOConfig& data, std::vector<char>& buffer, int& position,
     unpack(base_name, buffer, position, comm);
     unpack(ecl_compatible_rst, buffer, position, comm);
     data = IOConfig(write_init, write_egrid, unifin, unifout, fmtin, fmtout,
-                    firstRestartStep, deck_name, output_enabled, output_dir,
+                    deck_name, output_enabled, output_dir,
                     no_sim, base_name, ecl_compatible_rst);
 }
 
@@ -4569,6 +4278,8 @@ void unpack(Runspec& data, std::vector<char>& buffer, int& position,
     UDQParams udqparams;
     EclHysterConfig hystPar;
     Actdims actdims;
+    SatFuncControls sfuncctrl;
+
     unpack(phases, buffer, position, comm);
     unpack(tabdims, buffer, position, comm);
     unpack(endScale, buffer, position, comm);
@@ -4577,8 +4288,9 @@ void unpack(Runspec& data, std::vector<char>& buffer, int& position,
     unpack(udqparams, buffer, position, comm);
     unpack(hystPar, buffer, position, comm);
     unpack(actdims, buffer, position, comm);
+    unpack(sfuncctrl, buffer, position, comm);
     data = Runspec(phases, tabdims, endScale, wellDims, wsegDims,
-                   udqparams, hystPar, actdims);
+                   udqparams, hystPar, actdims, sfuncctrl);
 }
 
 template<class PVTType>
@@ -4698,6 +4410,7 @@ void unpack(TableManager& data, std::vector<char>& buffer, int& position,
           Dune::MPIHelper::MPICommunicator comm)
 {
     std::map<std::string, TableContainer> simpleTables;
+    SplitSimpleTables split;
     std::vector<PvtgTable> pvtgTables;
     std::vector<PvtoTable> pvtoTables;
     std::vector<Rock2dTable> rock2dTables;
@@ -4705,11 +4418,17 @@ void unpack(TableManager& data, std::vector<char>& buffer, int& position,
     PvtwTable pvtwTable;
     PvcdoTable pvcdoTable;
     DensityTable densityTable;
+    PlyvmhTable plyvmhTable;
     RockTable rockTable;
     ViscrefTable viscrefTable;
+    PlmixparTable plmixparTable;
+    ShrateTable shrateTable;
+    Stone1exTable stone1exTable;
+    TlmixparTable tlmixparTable;
     WatdentTable watdentTable;
     std::vector<PvtwsaltTable> pvtwsaltTables;
     std::vector<BrineDensityTable> bdensityTables;
+    std::vector<SolventDensityTable> sdensityTables;
     std::map<int, PlymwinjTable> plymwinjTables;
     std::map<int, SkprwatTable> skprwatTables;
     std::map<int, SkprpolyTable> skprpolyTables;
@@ -4720,9 +4439,18 @@ void unpack(TableManager& data, std::vector<char>& buffer, int& position,
     bool hasImptvd;
     bool hasEntpvd;
     bool hasEqlnum;
+    bool hasShrate;
+    DenT oilDenT, gasDenT, watDenT;
+    StandardCond stcond;
+    std::size_t gas_comp_index;
     std::shared_ptr<JFunc> jfunc;
     double rtemp;
+
     unpack(simpleTables, buffer, position, comm);
+    unpack(split.plyshMax, buffer, position, comm);
+    unpack(split.plyshMap, buffer, position, comm);
+    unpack(split.rockMax, buffer, position, comm);
+    unpack(split.rockMap, buffer, position, comm);
     unpack(pvtgTables, buffer, position, comm);
     unpack(pvtoTables, buffer, position, comm);
     unpack(rock2dTables, buffer, position, comm);
@@ -4730,11 +4458,17 @@ void unpack(TableManager& data, std::vector<char>& buffer, int& position,
     unpack(pvtwTable, buffer, position, comm);
     unpack(pvcdoTable, buffer, position, comm);
     unpack(densityTable, buffer, position, comm);
+    unpack(plyvmhTable, buffer, position, comm);
     unpack(rockTable, buffer, position, comm);
+    unpack(plmixparTable, buffer, position, comm);
+    unpack(shrateTable, buffer, position, comm);
+    unpack(stone1exTable, buffer, position, comm);
+    unpack(tlmixparTable, buffer, position, comm);
     unpack(viscrefTable, buffer, position, comm);
     unpack(watdentTable, buffer, position, comm);
     unpack(pvtwsaltTables, buffer, position, comm);
     unpack(bdensityTables, buffer, position, comm);
+    unpack(sdensityTables, buffer, position, comm);
     unpack(plymwinjTables, buffer, position, comm);
     unpack(skprwatTables, buffer, position, comm);
     unpack(skprpolyTables, buffer, position, comm);
@@ -4745,501 +4479,52 @@ void unpack(TableManager& data, std::vector<char>& buffer, int& position,
     unpack(hasImptvd, buffer, position, comm);
     unpack(hasEntpvd, buffer, position, comm);
     unpack(hasEqlnum, buffer, position, comm);
+    unpack(hasShrate, buffer, position, comm);
     bool hasJf;
     unpack(hasJf, buffer, position, comm);
     if (hasJf) {
         jfunc = std::make_shared<JFunc>();
         unpack(*jfunc, buffer, position, comm);
     }
+    unpack(oilDenT, buffer, position, comm);
+    unpack(gasDenT, buffer, position, comm);
+    unpack(watDenT, buffer, position, comm);
+    unpack(stcond, buffer, position, comm);
+    unpack(gas_comp_index, buffer, position, comm);
     unpack(rtemp, buffer, position, comm);
+
+    if (split.plyshMax > 0) {
+        TableContainer container(split.plyshMax);
+        for (const auto& it : split.plyshMap) {
+            container.addTable(it.first, it.second);
+        }
+        simpleTables.insert(std::make_pair("PLYSHLOG", container));
+    }
+    if (split.rockMax > 0) {
+        TableContainer container(split.rockMax);
+        for (const auto& it : split.rockMap) {
+            container.addTable(it.first, it.second);
+        }
+        simpleTables.insert(std::make_pair("ROCKTAB", container));
+    }
+
     data = TableManager(simpleTables, pvtgTables, pvtoTables, rock2dTables,
                         rock2dtrTables, pvtwTable, pvcdoTable, densityTable,
-                        rockTable, viscrefTable, watdentTable, pvtwsaltTables,
-                        bdensityTables, plymwinjTables,
-                        skprwatTables, skprpolyTables, tabdims, regdims, eqldims,
-                        aqudims, hasImptvd, hasEntpvd, hasEqlnum, jfunc, rtemp);
+                        plyvmhTable, rockTable, plmixparTable, shrateTable, stone1exTable,
+                        tlmixparTable, viscrefTable, watdentTable, pvtwsaltTables,
+                        bdensityTables, sdensityTables, plymwinjTables, skprwatTables,
+                        skprpolyTables, tabdims, regdims, eqldims, aqudims, hasImptvd,
+                        hasEntpvd, hasEqlnum, hasShrate, jfunc, oilDenT, gasDenT,
+                        watDenT, stcond, gas_comp_index, rtemp);
 }
-
-template<class Scalar>
-void unpack(Tabulated1DFunction<Scalar>& data, std::vector<char>& buffer,
-            int& position, Dune::MPIHelper::MPICommunicator comm)
-{
-    std::vector<Scalar> xValues, yValues;
-    unpack(xValues, buffer, position, comm);
-    unpack(yValues, buffer, position, comm);
-    data = Tabulated1DFunction<Scalar>(xValues, yValues, false);
-}
-
-template void unpack(Tabulated1DFunction<double>& data, std::vector<char>& buffer,
-                     int& position, Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar>
-void unpack(IntervalTabulated2DFunction<Scalar>& data, std::vector<char>& buffer,
-            int& position, Dune::MPIHelper::MPICommunicator comm)
-{
-    std::vector<Scalar> xPos, yPos;
-    std::vector<std::vector<Scalar>> samples;
-    bool xExtrapolate, yExtrapolate;
-    unpack(xPos, buffer, position, comm);
-    unpack(yPos, buffer, position, comm);
-    unpack(samples, buffer, position, comm);
-    unpack(xExtrapolate, buffer, position, comm);
-    unpack(yExtrapolate, buffer, position, comm);
-    data = IntervalTabulated2DFunction<Scalar>(xPos, yPos, samples,
-                                               xExtrapolate, yExtrapolate);
-}
-
-template void unpack(IntervalTabulated2DFunction<double>& data,
-                     std::vector<char>& buffer,
-                     int& position, Dune::MPIHelper::MPICommunicator comm);
-
-template void unpack(std::vector<IntervalTabulated2DFunction<double>>& data,
-                     std::vector<char>& buffer,
-                     int& position, Dune::MPIHelper::MPICommunicator comm);
-
-template void unpack(std::map<int,IntervalTabulated2DFunction<double>>& data,
-                     std::vector<char>& buffer,
-                     int& position, Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar>
-void unpack(UniformXTabulated2DFunction<Scalar>& data, std::vector<char>& buffer,
-            int& position, Dune::MPIHelper::MPICommunicator comm)
-{
-    std::vector<Scalar> xPos, yPos;
-    std::vector<std::vector<typename UniformXTabulated2DFunction<Scalar>::SamplePoint>> samples;
-    typename UniformXTabulated2DFunction<Scalar>::InterpolationPolicy interpolationGuide;
-    unpack(xPos, buffer, position, comm);
-    unpack(yPos, buffer, position, comm);
-    unpack(samples, buffer, position, comm);
-    unpack(interpolationGuide, buffer, position, comm);
-    data = UniformXTabulated2DFunction<Scalar>(xPos, yPos, samples,
-                                               interpolationGuide);
-}
-
-template void unpack(UniformXTabulated2DFunction<double>& data,
-                     std::vector<char>& buffer,
-                     int& position, Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar>
-void unpack(SolventPvt<Scalar>& data, std::vector<char>& buffer, int& position,
-            Dune::MPIHelper::MPICommunicator comm)
-{
-    std::vector<Scalar> solventReferenceDensity;
-    std::vector<typename SolventPvt<Scalar>::TabulatedOneDFunction> inverseSolventB;
-    std::vector<typename SolventPvt<Scalar>::TabulatedOneDFunction> solventMu;
-    std::vector<typename SolventPvt<Scalar>::TabulatedOneDFunction> inverseSolventBMu;
-    unpack(solventReferenceDensity, buffer, position, comm);
-    unpack(inverseSolventB, buffer, position, comm);
-    unpack(solventMu, buffer, position, comm);
-    unpack(inverseSolventBMu, buffer, position, comm);
-    data = SolventPvt<Scalar>(solventReferenceDensity, inverseSolventB,
-                              solventMu, inverseSolventBMu);
-}
-
-template void unpack(SolventPvt<double>& data,
-                     std::vector<char>& buffer, int& position,
-                     Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar, bool enableThermal>
-void unpack(GasPvtMultiplexer<Scalar,enableThermal>& data,
-            std::vector<char>& buffer, int& position,
-            Dune::MPIHelper::MPICommunicator comm)
-{
-    typename GasPvtMultiplexer<Scalar,enableThermal>::GasPvtApproach approach;
-    unpack(approach, buffer, position, comm);
-    using PvtApproach = GasPvtMultiplexer<Scalar,enableThermal>;
-    void* pvt = nullptr;
-    if (approach == PvtApproach::DryGasPvt) {
-        DryGasPvt<Scalar>* realPvt = new DryGasPvt<Scalar>;
-        unpack(*realPvt, buffer, position, comm);
-        pvt = realPvt;
-    } else if (approach == PvtApproach::WetGasPvt) {
-        WetGasPvt<Scalar>* realPvt = new WetGasPvt<Scalar>;
-        unpack(*realPvt, buffer, position, comm);
-        pvt = realPvt;
-    } else if (approach == PvtApproach::ThermalGasPvt) {
-        GasPvtThermal<Scalar>* realPvt = new GasPvtThermal<Scalar>;
-        unpack(*realPvt, buffer, position, comm);
-        pvt = realPvt;
-    }
-    data = GasPvtMultiplexer<Scalar,enableThermal>(approach, pvt);
-}
-
-template void unpack(GasPvtMultiplexer<double,true>& data,
-                     std::vector<char>& buffer, int& position,
-                     Dune::MPIHelper::MPICommunicator comm);
-template void unpack(GasPvtMultiplexer<double,false>& data,
-                     std::vector<char>& buffer, int& position,
-                     Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar>
-void unpack(DryGasPvt<Scalar>& data, std::vector<char>& buffer, int& position,
-            Dune::MPIHelper::MPICommunicator comm)
-{
-    std::vector<Scalar> gasReferenceDensity;
-    std::vector<typename DryGasPvt<Scalar>::TabulatedOneDFunction> inverseGasB;
-    std::vector<typename DryGasPvt<Scalar>::TabulatedOneDFunction> gasMu;
-    std::vector<typename DryGasPvt<Scalar>::TabulatedOneDFunction> inverseGasBMu;
-    unpack(gasReferenceDensity, buffer, position, comm);
-    unpack(inverseGasB, buffer, position, comm);
-    unpack(gasMu, buffer, position, comm);
-    unpack(inverseGasBMu, buffer, position, comm);
-    data = DryGasPvt<Scalar>(gasReferenceDensity, inverseGasB,
-                                gasMu, inverseGasBMu);
-}
-
-template void unpack(DryGasPvt<double>& data,
-                     std::vector<char>& buffer, int& position,
-                     Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar>
-void unpack(GasPvtThermal<Scalar>& data,
-            std::vector<char>& buffer, int& position,
-            Dune::MPIHelper::MPICommunicator comm)
-{
-    std::vector<typename GasPvtThermal<Scalar>::TabulatedOneDFunction> gasvisctCurves;
-    std::vector<Scalar> gasdentRefTemp, gasdentCT1, gasdentCT2;
-    std::vector<typename GasPvtThermal<Scalar>::TabulatedOneDFunction> internalEnergyCurves;
-    bool enableThermalDensity, enableThermalViscosity, enableInternalEnergy;
-    unpack(gasvisctCurves, buffer, position, comm);
-    unpack(gasdentRefTemp, buffer, position, comm);
-    unpack(gasdentCT1, buffer, position, comm);
-    unpack(gasdentCT2, buffer, position, comm);
-    unpack(internalEnergyCurves, buffer, position, comm);
-    unpack(enableThermalDensity, buffer, position, comm);
-    unpack(enableThermalViscosity, buffer, position, comm);
-    unpack(enableInternalEnergy, buffer, position, comm);
-    bool isothermal;
-    unpack(isothermal, buffer, position, comm);
-    typename GasPvtThermal<Scalar>::IsothermalPvt* pvt = nullptr;
-    if (isothermal) {
-        pvt = new typename GasPvtThermal<Scalar>::IsothermalPvt;
-        unpack(*pvt, buffer, position, comm);
-    }
-    data = GasPvtThermal<Scalar>(pvt, gasvisctCurves, gasdentRefTemp,
-                                 gasdentCT1, gasdentCT2,
-                                 internalEnergyCurves,
-                                 enableThermalDensity,
-                                 enableThermalViscosity,
-                                 enableInternalEnergy);
-}
-
-template void unpack(GasPvtThermal<double>& data,
-                     std::vector<char>& buffer, int& position,
-                     Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar>
-void unpack(WetGasPvt<Scalar>& data, std::vector<char>& buffer, int& position,
-            Dune::MPIHelper::MPICommunicator comm)
-{
-    std::vector<Scalar> gasReferenceDensity, oilReferenceDensity;
-    std::vector<typename WetGasPvt<Scalar>::TabulatedTwoDFunction> inverseGasB;
-    std::vector<typename WetGasPvt<Scalar>::TabulatedOneDFunction> inverseSaturatedGasB;
-    std::vector<typename WetGasPvt<Scalar>::TabulatedTwoDFunction> gasMu;
-    std::vector<typename WetGasPvt<Scalar>::TabulatedTwoDFunction> inverseGasBMu;
-    std::vector<typename WetGasPvt<Scalar>::TabulatedOneDFunction> inverseSaturatedGasBMu;
-    std::vector<typename WetGasPvt<Scalar>::TabulatedOneDFunction> satOilVapFacTable;
-    std::vector<typename WetGasPvt<Scalar>::TabulatedOneDFunction> saturationPressure;
-    Scalar vapPar1;
-    unpack(gasReferenceDensity, buffer, position, comm);
-    unpack(oilReferenceDensity, buffer, position, comm);
-    unpack(inverseGasB, buffer, position, comm);
-    unpack(inverseSaturatedGasB, buffer, position, comm);
-    unpack(gasMu, buffer, position, comm);
-    unpack(inverseGasBMu, buffer, position, comm);
-    unpack(inverseSaturatedGasBMu, buffer, position, comm);
-    unpack(satOilVapFacTable, buffer, position, comm);
-    unpack(saturationPressure, buffer, position, comm);
-    unpack(vapPar1, buffer, position, comm);
-    data = WetGasPvt<Scalar>(gasReferenceDensity, oilReferenceDensity, inverseGasB,
-                             inverseSaturatedGasB, gasMu, inverseGasBMu,
-                             inverseSaturatedGasBMu, satOilVapFacTable,
-                             saturationPressure, vapPar1);
-}
-
-template void unpack(WetGasPvt<double>& data,
-                     std::vector<char>& buffer, int& position,
-                     Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar, bool enableThermal>
-void unpack(OilPvtMultiplexer<Scalar,enableThermal>& data,
-            std::vector<char>& buffer, int& position,
-            Dune::MPIHelper::MPICommunicator comm)
-{
-    typename OilPvtMultiplexer<Scalar,enableThermal>::OilPvtApproach approach;
-    unpack(approach, buffer, position, comm);
-    using PvtApproach = OilPvtMultiplexer<Scalar,enableThermal>;
-    void* pvt = nullptr;
-    if (approach == PvtApproach::ConstantCompressibilityOilPvt) {
-        auto* realPvt = new ConstantCompressibilityOilPvt<Scalar>;
-        unpack(*realPvt, buffer, position, comm);
-        pvt = realPvt;
-    } else if (approach == PvtApproach::DeadOilPvt) {
-        auto* realPvt = new DeadOilPvt<Scalar>;
-        unpack(*realPvt, buffer, position, comm);
-        pvt = realPvt;
-    } else if (approach == PvtApproach::LiveOilPvt) {
-        auto* realPvt = new LiveOilPvt<Scalar>;
-        unpack(*realPvt, buffer, position, comm);
-        pvt = realPvt;
-    } else if (approach == PvtApproach::ThermalOilPvt) {
-        auto* realPvt = new OilPvtThermal<Scalar>;
-        unpack(*realPvt, buffer, position, comm);
-        pvt = realPvt;
-    }
-    data = OilPvtMultiplexer<Scalar,enableThermal>(approach, pvt);
-}
-
-template void unpack(OilPvtMultiplexer<double,true>& data,
-                     std::vector<char>& buffer, int& position,
-                     Dune::MPIHelper::MPICommunicator comm);
-template void unpack(OilPvtMultiplexer<double,false>& data,
-                     std::vector<char>& buffer, int& position,
-                     Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar>
-void unpack(ConstantCompressibilityOilPvt<Scalar>& data,
-            std::vector<char>& buffer, int& position,
-            Dune::MPIHelper::MPICommunicator comm)
-{
-    std::vector<Scalar> oilReferenceDensity, oilReferencePressure,
-                        oilReferenceFormationVolumeFactor,
-                        oilCompressibility, oilViscosity, oilViscosibility;
-
-    unpack(oilReferenceDensity, buffer, position, comm);
-    unpack(oilReferencePressure, buffer, position, comm);
-    unpack(oilReferenceFormationVolumeFactor, buffer, position, comm);
-    unpack(oilCompressibility, buffer, position, comm);
-    unpack(oilViscosity, buffer, position, comm);
-    unpack(oilViscosibility, buffer, position, comm);
-    data = ConstantCompressibilityOilPvt<Scalar>(oilReferenceDensity,
-                                                 oilReferencePressure,
-                                                 oilReferenceFormationVolumeFactor,
-                                                 oilCompressibility,
-                                                 oilViscosity,
-                                                 oilViscosibility);
-}
-
-template void unpack(ConstantCompressibilityOilPvt<double>& data,
-                     std::vector<char>& buffer, int& position,
-                     Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar>
-void unpack(DeadOilPvt<Scalar>& data,
-            std::vector<char>& buffer, int& position,
-            Dune::MPIHelper::MPICommunicator comm)
-{
-    std::vector<Scalar> oilReferenceDensity;
-    using FuncVec = std::vector<typename DeadOilPvt<Scalar>::TabulatedOneDFunction>;
-    FuncVec inverseOilB, oilMu, inverseOilBMu;
-
-    unpack(oilReferenceDensity, buffer, position, comm);
-    unpack(inverseOilB, buffer, position, comm);
-    unpack(oilMu, buffer, position, comm);
-    unpack(inverseOilBMu, buffer, position, comm);
-    data = DeadOilPvt<Scalar>(oilReferenceDensity, inverseOilB,
-                              oilMu, inverseOilBMu);
-}
-
-template void unpack(DeadOilPvt<double>& data,
-                     std::vector<char>& buffer, int& position,
-                     Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar>
-void unpack(LiveOilPvt<Scalar>& data,
-          std::vector<char>& buffer, int& position,
-          Dune::MPIHelper::MPICommunicator comm)
-{
-    std::vector<Scalar> gasReferenceDensity, oilReferenceDensity;
-    using FuncVec = std::vector<typename LiveOilPvt<Scalar>::TabulatedOneDFunction>;
-    using FuncVec2 = std::vector<typename LiveOilPvt<Scalar>::TabulatedTwoDFunction>;
-    FuncVec2 inverseOilBTable, oilMuTable, inverseOilBMuTable;
-    FuncVec saturatedOilMuTable, inverseSaturatedOilBTable,
-            inverseSaturatedOilBMuTable,
-            saturatedGasDissolutionFactorTable, saturationPressure;
-    Scalar vapPar2;
-
-    unpack(gasReferenceDensity, buffer, position, comm);
-    unpack(oilReferenceDensity, buffer, position, comm);
-    unpack(inverseOilBTable, buffer, position, comm);
-    unpack(oilMuTable, buffer, position, comm);
-    unpack(inverseOilBMuTable, buffer, position, comm);
-    unpack(saturatedOilMuTable, buffer, position, comm);
-    unpack(inverseSaturatedOilBTable, buffer, position, comm);
-    unpack(inverseSaturatedOilBMuTable, buffer, position, comm);
-    unpack(saturatedGasDissolutionFactorTable, buffer, position, comm);
-    unpack(saturationPressure, buffer, position, comm);
-    unpack(vapPar2, buffer, position, comm);
-    data = LiveOilPvt<Scalar>(gasReferenceDensity,
-                              oilReferenceDensity,
-                              inverseOilBTable,
-                              oilMuTable,
-                              inverseOilBMuTable,
-                              saturatedOilMuTable,
-                              inverseSaturatedOilBTable,
-                              inverseSaturatedOilBMuTable,
-                              saturatedGasDissolutionFactorTable,
-                              saturationPressure,
-                              vapPar2);
-}
-
-template void unpack(LiveOilPvt<double>& data,
-                     std::vector<char>& buffer, int& position,
-                     Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar>
-void unpack(OilPvtThermal<Scalar>& data,
-            std::vector<char>& buffer, int& position,
-            Dune::MPIHelper::MPICommunicator comm)
-{
-    std::vector<typename OilPvtThermal<Scalar>::TabulatedOneDFunction> oilvisctCurves;
-    std::vector<Scalar> oildentRefTemp, oildentCT1, oildentCT2, viscrefPress, viscrefRs, viscRef;
-    std::vector<typename OilPvtThermal<Scalar>::TabulatedOneDFunction> internalEnergyCurves;
-    bool enableThermalDensity, enableThermalViscosity, enableInternalEnergy;
-    unpack(oilvisctCurves, buffer, position, comm);
-    unpack(viscrefPress, buffer, position, comm);
-    unpack(viscrefRs, buffer, position, comm);
-    unpack(viscRef, buffer, position, comm);
-    unpack(oildentRefTemp, buffer, position, comm);
-    unpack(oildentCT1, buffer, position, comm);
-    unpack(oildentCT2, buffer, position, comm);
-    unpack(internalEnergyCurves, buffer, position, comm);
-    unpack(enableThermalDensity, buffer, position, comm);
-    unpack(enableThermalViscosity, buffer, position, comm);
-    unpack(enableInternalEnergy, buffer, position, comm);
-    bool isothermal;
-    unpack(isothermal, buffer, position, comm);
-    typename OilPvtThermal<Scalar>::IsothermalPvt* pvt = nullptr;
-    if (isothermal) {
-        pvt = new typename OilPvtThermal<Scalar>::IsothermalPvt;
-        unpack(*pvt, buffer, position, comm);
-    }
-    data = OilPvtThermal<Scalar>(pvt, oilvisctCurves,
-                                 viscrefPress, viscrefRs, viscRef,
-                                 oildentRefTemp,
-                                 oildentCT1, oildentCT2,
-                                 internalEnergyCurves,
-                                 enableThermalDensity,
-                                 enableThermalViscosity,
-                                 enableInternalEnergy);
-}
-
-template void unpack(OilPvtThermal<double>& data,
-                     std::vector<char>& buffer, int& position,
-                     Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar, bool enableThermal>
-void unpack(WaterPvtMultiplexer<Scalar,enableThermal>& data,
-            std::vector<char>& buffer, int& position,
-            Dune::MPIHelper::MPICommunicator comm)
-{
-    typename WaterPvtMultiplexer<Scalar,enableThermal>::WaterPvtApproach approach;
-    unpack(approach, buffer, position, comm);
-    using PvtApproach = WaterPvtMultiplexer<Scalar,enableThermal>;
-    void* pvt = nullptr;
-    if (approach == PvtApproach::ConstantCompressibilityWaterPvt) {
-        auto* realPvt = new ConstantCompressibilityWaterPvt<Scalar>;
-        unpack(*realPvt, buffer, position, comm);
-        pvt = realPvt;
-    } else if (approach == PvtApproach::ThermalWaterPvt) {
-        auto* realPvt = new WaterPvtThermal<Scalar>;
-        unpack(*realPvt, buffer, position, comm);
-        pvt = realPvt;
-    }
-    data = WaterPvtMultiplexer<Scalar,enableThermal>(approach, pvt);
-}
-
-template void unpack(WaterPvtMultiplexer<double,true>& data,
-                     std::vector<char>& buffer, int& position,
-                     Dune::MPIHelper::MPICommunicator comm);
-template void unpack(WaterPvtMultiplexer<double,false>& data,
-                     std::vector<char>& buffer, int& position,
-                     Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar>
-void unpack(ConstantCompressibilityWaterPvt<Scalar>& data,
-            std::vector<char>& buffer, int& position,
-            Dune::MPIHelper::MPICommunicator comm)
-{
-    std::vector<Scalar> waterReferenceDensity, waterReferencePressure,
-                        waterReferenceFormationVolumeFactor,
-                        waterCompressibility, waterViscosity, waterViscosibility;
-
-    unpack(waterReferenceDensity, buffer, position, comm);
-    unpack(waterReferencePressure, buffer, position, comm);
-    unpack(waterReferenceFormationVolumeFactor, buffer, position, comm);
-    unpack(waterCompressibility, buffer, position, comm);
-    unpack(waterViscosity, buffer, position, comm);
-    unpack(waterViscosibility, buffer, position, comm);
-    data = ConstantCompressibilityWaterPvt<Scalar>(waterReferenceDensity,
-                                                   waterReferencePressure,
-                                                   waterReferenceFormationVolumeFactor,
-                                                   waterCompressibility,
-                                                   waterViscosity,
-                                                   waterViscosibility);
-}
-
-template void unpack(ConstantCompressibilityWaterPvt<double>& data,
-                     std::vector<char>& buffer, int& position,
-                     Dune::MPIHelper::MPICommunicator comm);
-
-template<class Scalar>
-void unpack(WaterPvtThermal<Scalar>& data,
-            std::vector<char>& buffer, int& position,
-            Dune::MPIHelper::MPICommunicator comm)
-{
-    std::vector<Scalar> viscrefPress, watdentRefTemp, watdentCT1, watdentCT2,
-                        pvtwRefPress, pvtwRefB, pvtwCompressibility,
-                        pvtwViscosity, pvtwViscosibility;
-    std::vector<typename WaterPvtThermal<Scalar>::TabulatedOneDFunction> watvisctCurves;
-    std::vector<typename WaterPvtThermal<Scalar>::TabulatedOneDFunction> internalEnergyCurves;
-    bool enableThermalDensity, enableThermalViscosity, enableInternalEnergy;
-    unpack(viscrefPress, buffer, position, comm);
-    unpack(watdentRefTemp, buffer, position, comm);
-    unpack(watdentCT1, buffer, position, comm);
-    unpack(watdentCT2, buffer, position, comm);
-    unpack(pvtwRefPress, buffer, position, comm);
-    unpack(pvtwRefB, buffer, position, comm);
-    unpack(pvtwCompressibility, buffer, position, comm);
-    unpack(pvtwViscosity, buffer, position, comm);
-    unpack(pvtwViscosibility, buffer, position, comm);
-    unpack(watvisctCurves, buffer, position, comm);
-    unpack(internalEnergyCurves, buffer, position, comm);
-    unpack(enableThermalDensity, buffer, position, comm);
-    unpack(enableThermalViscosity, buffer, position, comm);
-    unpack(enableInternalEnergy, buffer, position, comm);
-    bool isothermal;
-    unpack(isothermal, buffer, position, comm);
-    typename WaterPvtThermal<Scalar>::IsothermalPvt* pvt = nullptr;
-    if (isothermal) {
-        pvt = new typename WaterPvtThermal<Scalar>::IsothermalPvt;
-        using PvtApproach = WaterPvtThermal<Scalar>;
-        if (pvt->approach() != PvtApproach::IsothermalPvt::NoWaterPvt)
-            unpack(*pvt, buffer, position, comm);
-    }
-    data = WaterPvtThermal<Scalar>(pvt, viscrefPress, watdentRefTemp,
-                                   watdentCT1, watdentCT2,
-                                   pvtwRefPress, pvtwRefB,
-                                   pvtwCompressibility,
-                                   pvtwViscosity,
-                                   pvtwViscosibility,
-                                   watvisctCurves,
-                                   internalEnergyCurves,
-                                   enableThermalDensity,
-                                   enableThermalViscosity,
-                                   enableInternalEnergy);
-}
-
-template void unpack(WaterPvtThermal<double>& data,
-                     std::vector<char>& buffer, int& position,
-                     Dune::MPIHelper::MPICommunicator comm);
 
 void unpack(OilVaporizationProperties& data,
           std::vector<char>& buffer, int& position,
           Dune::MPIHelper::MPICommunicator comm)
 {
     OilVaporizationProperties::OilVaporization type;
-    std::vector<double> vap1, vap2, maxDRSDT, maxDRVDT;
+    double vap1, vap2;
+    std::vector<double> maxDRSDT, maxDRVDT;
     std::vector<bool> maxDRSDT_allCells;
     unpack(type, buffer, position, comm);
     unpack(vap1, buffer, position, comm);
@@ -5284,12 +4569,7 @@ void unpack(VFPInjTable& data,
     unpack(floType, buffer, position, comm);
     unpack(floAxis, buffer, position, comm);
     unpack(thpAxis, buffer, position, comm);
-    VFPInjTable::extents extents;
-    extents[0] = thpAxis.size();
-    extents[1] = floAxis.size();
-    table.resize(extents);
-    for (size_t i = 0; i < table.num_elements(); ++i)
-        unpack(*(table.data() + i), buffer, position, comm);
+    unpack(table, buffer, position, comm);
 
     data = VFPInjTable(tableNum, datumDepth, floType,
                        floAxis, thpAxis, table);
@@ -5319,15 +4599,7 @@ void unpack(VFPProdTable& data,
     unpack(wfrAxis, buffer, position, comm);
     unpack(gfrAxis, buffer, position, comm);
     unpack(alqAxis, buffer, position, comm);
-    VFPProdTable::extents extents;
-    extents[0] = thpAxis.size();
-    extents[1] = wfrAxis.size();
-    extents[2] = gfrAxis.size();
-    extents[3] = alqAxis.size();
-    extents[4] = floAxis.size();
-    table.resize(extents);
-    for (size_t i = 0; i < table.num_elements(); ++i)
-      unpack(*(table.data() + i), buffer, position, comm);
+    unpack(table, buffer, position, comm);
 
     data = VFPProdTable(tableNum, datumDepth, floType, wfrType,
                         gfrType, alqType, floAxis, thpAxis,
@@ -5553,7 +4825,7 @@ void unpack(SpiralICD& data,
            widthTransitionRegion, maxViscosityRatio;
     int methodFlowScaling;
     double maxAbsoluteRate;
-    SpiralICD::Status status;
+    ICDStatus status;
     double scalingFactor;
 
     unpack(strength, buffer, position, comm);
@@ -5586,7 +4858,7 @@ void unpack(Valve& data,
     double pipeDiameter;
     double pipeRoughness;
     double pipeCrossArea;
-    Valve::Status status;
+    ICDStatus status;
 
     unpack(conFlowCoefficient, buffer, position, comm);
     unpack(conCrossArea, buffer, position, comm);
@@ -5661,13 +4933,11 @@ void unpack(Dimension& data,
             std::vector<char>& buffer, int& position,
             Dune::MPIHelper::MPICommunicator comm)
 {
-    std::string name;
     double siScaling, siOffset;
 
-    unpack(name, buffer, position, comm);
     unpack(siScaling, buffer, position, comm);
     unpack(siOffset, buffer, position, comm);
-    data = Dimension(name, siScaling, siOffset, false);
+    data = Dimension(siScaling, siOffset);
 }
 
 void unpack(UnitSystem& data,
@@ -5690,26 +4960,13 @@ void unpack(WellSegments& data,
             std::vector<char>& buffer, int& position,
             Dune::MPIHelper::MPICommunicator comm)
 {
-    std::string wellName;
-    double depthTopSegment, lengthTopSegment, volumeTopSegment;
     WellSegments::CompPressureDrop compPressureDrop;
-    WellSegments::LengthDepth lengthDepthType;
-    WellSegments::MultiPhaseModel multiPhaseModel;
     std::vector<Segment> segments;
-    std::map<int,int> segmentNumberIndex;
 
-    unpack(wellName, buffer, position, comm);
-    unpack(depthTopSegment, buffer, position, comm);
-    unpack(lengthTopSegment, buffer, position, comm);
-    unpack(volumeTopSegment, buffer, position, comm);
-    unpack(lengthDepthType, buffer, position, comm);
     unpack(compPressureDrop, buffer, position, comm);
-    unpack(multiPhaseModel, buffer, position, comm);
     unpack(segments, buffer, position, comm);
-    unpack(segmentNumberIndex, buffer, position, comm);
-    data = WellSegments(wellName, depthTopSegment, lengthTopSegment,
-                        volumeTopSegment, lengthDepthType, compPressureDrop,
-                        multiPhaseModel, segments, segmentNumberIndex);
+
+    data = WellSegments(compPressureDrop, segments);
 }
 
 void unpack(Well& data,
@@ -5720,13 +4977,13 @@ void unpack(Well& data,
     std::size_t firstTimeStep, seqIndex;
     int headI, headJ;
     double ref_depth;
-    Phase phase;
+    WellType wtype;
     Connection::Order ordering;
     UnitSystem units;
     double udq_undefined;
     Well::Status status;
     double drainageRadius;
-    bool allowCrossFlow, automaticShutIn, isProducer;
+    bool allowCrossFlow, automaticShutIn;
     Well::WellGuideRate guideRate;
     double efficiencyFactor;
     double solventFraction;
@@ -5748,7 +5005,7 @@ void unpack(Well& data,
     unpack(headI, buffer, position, comm);
     unpack(headJ, buffer, position, comm);
     unpack(ref_depth, buffer, position, comm);
-    unpack(phase, buffer, position, comm);
+    unpack(wtype, buffer, position, comm);
     unpack(ordering, buffer, position, comm);
     unpack(units, buffer, position, comm);
     unpack(udq_undefined, buffer, position, comm);
@@ -5756,7 +5013,6 @@ void unpack(Well& data,
     unpack(drainageRadius, buffer, position, comm);
     unpack(allowCrossFlow, buffer, position, comm);
     unpack(automaticShutIn, buffer, position, comm);
-    unpack(isProducer, buffer, position, comm);
     unpack(guideRate, buffer, position, comm);
     unpack(efficiencyFactor, buffer, position, comm);
     unpack(solventFraction, buffer, position, comm);
@@ -5776,8 +5032,8 @@ void unpack(Well& data,
         unpack(*segments, buffer, position, comm);
     }
     data = Well(name, groupName, firstTimeStep, seqIndex, headI, headJ,
-                ref_depth, phase, ordering, units, udq_undefined, status,
-                drainageRadius, allowCrossFlow, automaticShutIn, isProducer,
+                ref_depth, wtype, ordering, units, udq_undefined, status,
+                drainageRadius, allowCrossFlow, automaticShutIn,
                 guideRate, efficiencyFactor, solventFraction, prediction_mode,
                 econLimits, foamProperties, polymerProperties, brineProperties,
                 tracerProperties, connection, production, injection, segments);
@@ -5794,6 +5050,10 @@ void unpack(IOrderSet<T>& data, std::vector<char>& buffer, int& position,
     data = IOrderSet<T>(index, storage);
 }
 
+template void unpack(std::map<Phase,Group::GroupInjectionProperties>& data,
+            std::vector<char>& buffer, int& position,
+            Dune::MPIHelper::MPICommunicator comm);
+
 void unpack(Group::GroupInjectionProperties& data,
             std::vector<char>& buffer, int& position,
             Dune::MPIHelper::MPICommunicator comm)
@@ -5808,6 +5068,7 @@ void unpack(Group::GroupInjectionProperties& data,
     unpack(data.voidage_group, buffer, position, comm);
     unpack(data.injection_controls, buffer, position, comm);
 }
+
 
 void unpack(Group::GroupProductionProperties& data,
             std::vector<char>& buffer, int& position,
@@ -5836,10 +5097,11 @@ void unpack(Group& data,
     Group::GroupType type;
     double groupEfficiencyFactor;
     bool transferGroupEfficiencyFactor;
+    bool availableForGroupControl;
     int groupNetVFPTable;
     std::string parent;
     IOrderSet<std::string> wells, groups;
-    Group::GroupInjectionProperties injection;
+    std::map<Phase, Group::GroupInjectionProperties> injection;
     Group::GroupProductionProperties production;
 
     unpack(name, buffer, position, comm);
@@ -5850,6 +5112,7 @@ void unpack(Group& data,
     unpack(type, buffer, position, comm);
     unpack(groupEfficiencyFactor, buffer, position, comm);
     unpack(transferGroupEfficiencyFactor, buffer, position, comm);
+    unpack(availableForGroupControl, buffer, position, comm);
     unpack(groupNetVFPTable, buffer, position, comm);
     unpack(parent, buffer, position, comm);
     unpack(wells, buffer, position, comm);
@@ -5859,6 +5122,7 @@ void unpack(Group& data,
     data = Group(name, insert_index, initStep, udqUndefined,
                  units, type, groupEfficiencyFactor,
                  transferGroupEfficiencyFactor,
+                 availableForGroupControl,
                  groupNetVFPTable, parent, wells, groups,
                  injection, production);
 }
@@ -5881,27 +5145,6 @@ void unpack(WListManager& data,
     data = WListManager(lists);
 }
 
-void unpack(UDQFunction& data,
-            std::vector<char>& buffer, int& position,
-            Dune::MPIHelper::MPICommunicator comm)
-{
-    std::string name;
-    UDQTokenType type;
-    unpack(name, buffer, position, comm);
-    unpack(type, buffer, position, comm);
-    data = UDQFunction(name, type);
-}
-
-void unpack(UDQFunctionTable& data,
-            std::vector<char>& buffer, int& position,
-            Dune::MPIHelper::MPICommunicator comm)
-{
-    UDQParams params;
-    UDQFunctionTable::FunctionMap map;
-    unpack(params, buffer, position, comm);
-    unpack(map, buffer, position, comm);
-    data = UDQFunctionTable(params, map);
-}
 
 void unpack(UDQASTNode& data,
             std::vector<char>& buffer, int& position,
@@ -6218,93 +5461,6 @@ void unpack(Deck& data, std::vector<char>& buffer, int& position,
                 activeUnitSystem.get(), dataFile, inputPath, accessCount);
 }
 
-void unpack(Tuning& data, std::vector<char>& buffer, int& position,
-            Dune::MPIHelper::MPICommunicator comm)
-{
-    DynamicState<double> TSINIT;
-    DynamicState<double> TSMAXZ;
-    DynamicState<double> TSMINZ;
-    DynamicState<double> TSMCHP;
-    DynamicState<double> TSFMAX;
-    DynamicState<double> TSFMIN;
-    DynamicState<double> TSFCNV;
-    DynamicState<double> TFDIFF;
-    DynamicState<double> THRUPT;
-    DynamicState<double> TMAXWC;
-    DynamicState<int>    TMAXWC_has_value;
-    DynamicState<double> TRGTTE;
-    DynamicState<double> TRGCNV;
-    DynamicState<double> TRGMBE;
-    DynamicState<double> TRGLCV;
-    DynamicState<double> XXXTTE;
-    DynamicState<double> XXXCNV;
-    DynamicState<double> XXXMBE;
-    DynamicState<double> XXXLCV;
-    DynamicState<double> XXXWFL;
-    DynamicState<double> TRGFIP;
-    DynamicState<double> TRGSFT;
-    DynamicState<int>    TRGSFT_has_value;
-    DynamicState<double> THIONX;
-    DynamicState<int>    TRWGHT;
-    DynamicState<int>    NEWTMX;
-    DynamicState<int>    NEWTMN;
-    DynamicState<int>    LITMAX;
-    DynamicState<int>    LITMIN;
-    DynamicState<int>    MXWSIT;
-    DynamicState<int>    MXWPIT;
-    DynamicState<double> DDPLIM;
-    DynamicState<double> DDSLIM;
-    DynamicState<double> TRGDPR;
-    DynamicState<double> XXXDPR;
-    DynamicState<int>    XXXDPR_has_value;
-    std::map<std::string, bool> ResetValue;
-
-    unpack(TSINIT, buffer, position, comm);
-    unpack(TSMAXZ, buffer, position, comm);
-    unpack(TSMINZ, buffer, position, comm);
-    unpack(TSMCHP, buffer, position, comm);
-    unpack(TSFMAX, buffer, position, comm);
-    unpack(TSFMIN, buffer, position, comm);
-    unpack(TSFCNV, buffer, position, comm);
-    unpack(TFDIFF, buffer, position, comm);
-    unpack(THRUPT, buffer, position, comm);
-    unpack(TMAXWC, buffer, position, comm);
-    unpack(TMAXWC_has_value, buffer, position, comm);
-    unpack(TRGTTE, buffer, position, comm);
-    unpack(TRGCNV, buffer, position, comm);
-    unpack(TRGMBE, buffer, position, comm);
-    unpack(TRGLCV, buffer, position, comm);
-    unpack(XXXTTE, buffer, position, comm);
-    unpack(XXXCNV, buffer, position, comm);
-    unpack(XXXMBE, buffer, position, comm);
-    unpack(XXXLCV, buffer, position, comm);
-    unpack(XXXWFL, buffer, position, comm);
-    unpack(TRGFIP, buffer, position, comm);
-    unpack(TRGSFT, buffer, position, comm);
-    unpack(TRGSFT_has_value, buffer, position, comm);
-    unpack(THIONX, buffer, position, comm);
-    unpack(TRWGHT, buffer, position, comm);
-    unpack(NEWTMX, buffer, position, comm);
-    unpack(NEWTMN, buffer, position, comm);
-    unpack(LITMAX, buffer, position, comm);
-    unpack(LITMIN, buffer, position, comm);
-    unpack(MXWSIT, buffer, position, comm);
-    unpack(MXWPIT, buffer, position, comm);
-    unpack(DDPLIM, buffer, position, comm);
-    unpack(DDSLIM, buffer, position, comm);
-    unpack(TRGDPR, buffer, position, comm);
-    unpack(XXXDPR, buffer, position, comm);
-    unpack(XXXDPR_has_value, buffer, position, comm);
-    unpack(ResetValue, buffer, position, comm);
-
-    data = Tuning(TSINIT, TSMAXZ, TSMINZ, TSMCHP, TSFMAX, TSFMIN, TSFCNV,
-                  TFDIFF, THRUPT, TMAXWC, TMAXWC_has_value, TRGTTE,
-                  TRGCNV, TRGMBE, TRGLCV, XXXTTE, XXXCNV, XXXMBE, XXXLCV,
-                  XXXWFL, TRGFIP, TRGSFT, TRGSFT_has_value, THIONX, TRWGHT,
-                  NEWTMX, NEWTMN, LITMAX, LITMIN, MXWSIT, MXWPIT, DDPLIM,
-                  DDSLIM, TRGDPR, XXXDPR, XXXDPR_has_value, ResetValue);
-}
-
 void unpack(Action::ASTNode& data, std::vector<char>& buffer, int& position,
             Dune::MPIHelper::MPICommunicator comm)
 {
@@ -6392,7 +5548,7 @@ void unpack(Schedule& data, std::vector<char>& buffer, int& position,
     DynamicState<OilVaporizationProperties> oilVapProps;
     Events events;
     DynamicVector<Deck> modifierDeck;
-    Tuning tuning;
+    DynamicState<Tuning> tuning;
     MessageLimits messageLimits;
     Runspec runspec;
     Schedule::VFPProdMap vfpProdTables;
@@ -6408,6 +5564,7 @@ void unpack(Schedule& data, std::vector<char>& buffer, int& position,
     DynamicState<std::shared_ptr<Action::Actions>> actions;
     RFTConfig rftConfig;
     DynamicState<int> nupCol;
+    RestartConfig restartConfig;
     std::map<std::string,Events> wellGroupEvents;
 
     unpack(timeMap, buffer, position, comm);
@@ -6421,25 +5578,26 @@ void unpack(Schedule& data, std::vector<char>& buffer, int& position,
     unpack(runspec, buffer, position, comm);
     unpackDynMap<Map2>(vfpProdTables, buffer, position, comm);
     unpackDynMap<Map2>(vfpInjTables, buffer, position, comm);
-    unpackDynState(wellTestConfig, buffer, position, comm);
-    unpackDynState(wListManager, buffer, position, comm);
-    unpackDynState(udqConfig, buffer, position, comm);
-    unpackDynState(udqActive, buffer, position, comm);
-    unpackDynState(guideRateConfig, buffer, position, comm);
-    unpackDynState(gconSale, buffer, position, comm);
-    unpackDynState(gconSump, buffer, position, comm);
+    unpack(wellTestConfig, buffer, position, comm);
+    unpack(wListManager, buffer, position, comm);
+    unpack(udqConfig, buffer, position, comm);
+    unpack(udqActive, buffer, position, comm);
+    unpack(guideRateConfig, buffer, position, comm);
+    unpack(gconSale, buffer, position, comm);
+    unpack(gconSump, buffer, position, comm);
     unpack(globalWhistCtlMode, buffer, position, comm);
-    unpackDynState(actions, buffer, position, comm);
+    unpack(actions, buffer, position, comm);
 
     unpack(rftConfig, buffer, position, comm);
     unpack(nupCol, buffer, position, comm);
+    unpack(restartConfig, buffer, position, comm);
     unpack(wellGroupEvents, buffer, position, comm);
     data = Schedule(timeMap, staticWells, groups, oilVapProps, events,
                     modifierDeck, tuning, messageLimits, runspec,
                     vfpProdTables, vfpInjTables, wellTestConfig,
                     wListManager, udqConfig, udqActive, guideRateConfig,
                     gconSale, gconSump, globalWhistCtlMode, actions,
-                    rftConfig, nupCol, wellGroupEvents);
+                    rftConfig, nupCol, restartConfig, wellGroupEvents);
 }
 
 void unpack(BrineDensityTable& data, std::vector<char>& buffer, int& position,
@@ -6679,12 +5837,10 @@ void unpack(EclipseConfig& data,
 {
     InitConfig init;
     IOConfig io;
-    RestartConfig restart;
 
     unpack(init, buffer, position, comm);
     unpack(io, buffer, position, comm);
-    unpack(restart, buffer, position, comm);
-    data = EclipseConfig(io, init, restart);
+    data = EclipseConfig(init, io);
 }
 
 void unpack(TransMult& data,
@@ -6739,6 +5895,107 @@ void unpack(FaultCollection& data,
     data = FaultCollection(faults);
 }
 
+void unpack(SolventDensityTable& data, std::vector<char>& buffer, int& position,
+            Dune::MPIHelper::MPICommunicator comm)
+{
+    std::vector<double> tableValues;
+
+    unpack(tableValues, buffer, position, comm);
+    data = SolventDensityTable(tableValues);
+}
+
+void unpack(GridDims& data,
+            std::vector<char>& buffer, int& position,
+            Dune::MPIHelper::MPICommunicator comm)
+{
+    std::array<int,3> NXYZ;
+
+    unpack(NXYZ, buffer, position, comm);
+    data = GridDims(NXYZ);
+}
+
+void unpack(ShrateTable& data, std::vector<char>& buffer, int& position,
+            Dune::MPIHelper::MPICommunicator comm)
+{
+    std::vector<ShrateRecord> pdata;
+    unpack(pdata, buffer, position, comm);
+    data = ShrateTable(pdata);
+}
+
+void unpack(TlmixparTable& data, std::vector<char>& buffer, int& position,
+            Dune::MPIHelper::MPICommunicator comm)
+{
+    std::vector<TlmixparRecord> pdata;
+    unpack(pdata, buffer, position, comm);
+    data = TlmixparTable(pdata);
+}
+
+void unpack(PlmixparTable& data, std::vector<char>& buffer, int& position,
+            Dune::MPIHelper::MPICommunicator comm)
+{
+    std::vector<PlmixparRecord> pdata;
+    unpack(pdata, buffer, position, comm);
+    data = PlmixparTable(pdata);
+}
+
+void unpack(PlyvmhTable& data, std::vector<char>& buffer, int& position,
+            Dune::MPIHelper::MPICommunicator comm)
+{
+    std::vector<PlyvmhRecord> pdata;
+    unpack(pdata, buffer, position, comm);
+    data = PlyvmhTable(pdata);
+}
+
+void unpack(Stone1exTable& data, std::vector<char>& buffer, int& position,
+            Dune::MPIHelper::MPICommunicator comm)
+{
+    std::vector<Stone1exRecord> pdata;
+    unpack(pdata, buffer, position, comm);
+    data = Stone1exTable(pdata);
+}
+
+void unpack(PlyshlogTable& data, std::vector<char>& buffer, int& position,
+            Dune::MPIHelper::MPICommunicator comm)
+{
+    TableSchema schema;
+    OrderedMap<std::string, TableColumn> columns;
+    bool jfunc;
+    double refPolymerConcentration;
+    double refSalinity;
+    double refTemperature;
+    bool hasRefSalinity;
+    bool hasRefTemperature;
+
+    unpack(schema, buffer, position, comm);
+    unpack(columns, buffer, position, comm);
+    unpack(jfunc, buffer, position, comm);
+    unpack(refPolymerConcentration, buffer, position, comm);
+    unpack(refSalinity, buffer, position, comm);
+    unpack(refTemperature, buffer, position, comm);
+    unpack(hasRefSalinity, buffer, position, comm);
+    unpack(hasRefTemperature, buffer, position, comm);
+
+    data = PlyshlogTable(schema, columns, jfunc,
+                         refPolymerConcentration, refSalinity,
+                         refTemperature, hasRefSalinity, hasRefTemperature);
+}
+
+void unpack(RocktabTable& data, std::vector<char>& buffer, int& position,
+            Dune::MPIHelper::MPICommunicator comm)
+{
+    TableSchema schema;
+    OrderedMap<std::string, TableColumn> columns;
+    bool jfunc;
+    bool isDirectional;
+
+    unpack(schema, buffer, position, comm);
+    unpack(columns, buffer, position, comm);
+    unpack(jfunc, buffer, position, comm);
+    unpack(isDirectional, buffer, position, comm);
+
+    data = RocktabTable(schema, columns, jfunc, isDirectional);
+}
+
 #define INSTANTIATE_PACK_VECTOR(...) \
 template std::size_t packSize(const std::vector<__VA_ARGS__>& data, \
                               Dune::MPIHelper::MPICommunicator comm); \
@@ -6754,9 +6011,7 @@ INSTANTIATE_PACK_VECTOR(std::vector<double>)
 INSTANTIATE_PACK_VECTOR(bool)
 INSTANTIATE_PACK_VECTOR(char)
 INSTANTIATE_PACK_VECTOR(int)
-INSTANTIATE_PACK_VECTOR(Opm::Tabulated1DFunction<double>)
 INSTANTIATE_PACK_VECTOR(std::array<double, 3>)
-INSTANTIATE_PACK_VECTOR(EclEpsScalingPointsInfo<double>)
 #undef INSTANTIATE_PACK_VECTOR
 
 #define INSTANTIATE_PACK_SHARED_PTR(...) \
@@ -6769,9 +6024,6 @@ template void unpack(std::shared_ptr<__VA_ARGS__>& data, \
                      std::vector<char>& buffer, int& position, \
                      Dune::MPIHelper::MPICommunicator comm);
 
-INSTANTIATE_PACK_SHARED_PTR(Opm::GasPvtMultiplexer<double, true>)
-INSTANTIATE_PACK_SHARED_PTR(Opm::OilPvtMultiplexer<double, true>)
-INSTANTIATE_PACK_SHARED_PTR(Opm::WaterPvtMultiplexer<double, true>)
 INSTANTIATE_PACK_SHARED_PTR(SpiralICD)
 #undef INSTANTIATE_PACK_SHARED_PTR
 
@@ -6792,9 +6044,6 @@ INSTANTIATE_PACK(int)
 INSTANTIATE_PACK(std::array<short,3>)
 INSTANTIATE_PACK(std::array<bool,3>)
 INSTANTIATE_PACK(unsigned char)
-INSTANTIATE_PACK(EclEpsScalingPointsInfo<double>)
-INSTANTIATE_PACK(EclTwoPhaseApproach)
-INSTANTIATE_PACK(EclMultiplexerApproach)
 #undef INSTANTIATE_PACK
 
 } // end namespace Mpi

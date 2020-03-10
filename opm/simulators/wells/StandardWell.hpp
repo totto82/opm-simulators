@@ -34,11 +34,12 @@
 #include <opm/models/blackoil/blackoilbrinemodules.hh>
 
 #include <opm/material/densead/DynamicEvaluation.hpp>
+#include <opm/parser/eclipse/EclipseState/Schedule/ScheduleTypes.hpp>
 
 #include <dune/common/dynvector.hh>
 #include <dune/common/dynmatrix.hh>
 
-#include <boost/optional.hpp>
+#include <optional>
 
 namespace Opm
 {
@@ -404,7 +405,7 @@ namespace Opm
         void assembleControlEq(const WellState& well_state, const Opm::Schedule& schedule, const SummaryState& summaryState, Opm::DeferredLogger& deferred_logger);
 
         void assembleGroupProductionControl(const Group& group, const WellState& well_state, const Opm::Schedule& schedule, const SummaryState& summaryState, EvalWell& control_eq, double efficincyFactor, Opm::DeferredLogger& deferred_logger);
-        void assembleGroupInjectionControl(const Group& group, const WellState& well_state, const Opm::Schedule& schedule, const SummaryState& summaryState,  const Well::InjectorType& injectorType, EvalWell& control_eq, double efficincyFactor, Opm::DeferredLogger& deferred_logger);
+        void assembleGroupInjectionControl(const Group& group, const WellState& well_state, const Opm::Schedule& schedule, const SummaryState& summaryState,  const InjectorType& injectorType, EvalWell& control_eq, double efficincyFactor, Opm::DeferredLogger& deferred_logger);
 
         // handle the non reasonable fractions due to numerical overshoot
         void processFractions() const;
@@ -509,13 +510,13 @@ namespace Opm
                                         DeferredLogger& deferred_logger);
 
 
-        boost::optional<double> computeBhpAtThpLimitProd(const Simulator& ebos_simulator,
-                                                         const SummaryState& summary_state,
-                                                         DeferredLogger& deferred_logger) const;
+        std::optional<double> computeBhpAtThpLimitProd(const Simulator& ebos_simulator,
+                                                       const SummaryState& summary_state,
+                                                       DeferredLogger& deferred_logger) const;
 
-        boost::optional<double> computeBhpAtThpLimitInj(const Simulator& ebos_simulator,
-                                                        const SummaryState& summary_state,
-                                                        DeferredLogger& deferred_logger) const;
+        std::optional<double> computeBhpAtThpLimitInj(const Simulator& ebos_simulator,
+                                                      const SummaryState& summary_state,
+                                                      DeferredLogger& deferred_logger) const;
 
     };
 

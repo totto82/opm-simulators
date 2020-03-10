@@ -40,6 +40,8 @@
 #include <opm/common/OpmLog/LogUtil.hpp>
 #endif
 
+#include <opm/parser/eclipse/Utility/String.hpp>
+
 BEGIN_PROPERTIES
 
 // forward declaration of property tags
@@ -68,9 +70,9 @@ enum class FileOutputMode {
 
 static void ensureOutputDirExists(const std::string& cmdline_output_dir)
 {
-    if (!boost::filesystem::is_directory(cmdline_output_dir)) {
+    if (!Opm::filesystem::is_directory(cmdline_output_dir)) {
         try {
-            boost::filesystem::create_directories(cmdline_output_dir);
+            Opm::filesystem::create_directories(cmdline_output_dir);
         }
         catch (...) {
             throw std::runtime_error("Creation of output directory '" + cmdline_output_dir + "' failed\n");
@@ -86,18 +88,18 @@ static FileOutputMode setupLogging(int mpi_rank_, const std::string& deck_filena
     }
 
     // create logFile
-    using boost::filesystem::path;
+    using Opm::filesystem::path;
     path fpath(deck_filename);
     std::string baseName;
     std::ostringstream debugFileStream;
     std::ostringstream logFileStream;
 
     // Strip extension "." or ".DATA"
-    std::string extension = boost::to_upper_copy(fpath.extension().string());
+    std::string extension = uppercase(fpath.extension().string());
     if (extension == ".DATA" || extension == ".") {
-        baseName = boost::to_upper_copy(fpath.stem().string());
+        baseName = uppercase(fpath.stem().string());
     } else {
-        baseName = boost::to_upper_copy(fpath.filename().string());
+        baseName = uppercase(fpath.filename().string());
     }
 
     std::string output_dir = cmdline_output_dir;

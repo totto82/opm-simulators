@@ -86,6 +86,7 @@
 #include <opm/material/common/Valgrind.hpp>
 #include <opm/parser/eclipse/Deck/Deck.hpp>
 #include <opm/parser/eclipse/EclipseState/EclipseState.hpp>
+#include <opm/parser/eclipse/EclipseState/SimulationConfig/RockConfig.hpp>
 #include <opm/parser/eclipse/EclipseState/Tables/Eqldims.hpp>
 #include <opm/parser/eclipse/EclipseState/Schedule/Schedule.hpp>
 #include <opm/parser/eclipse/EclipseState/Schedule/Action/ActionContext.hpp>
@@ -446,6 +447,7 @@ class EclProblem : public GET_PROP_TYPE(TypeTag, BaseProblem)
     typedef BlackOilSolventModule<TypeTag> SolventModule;
     typedef BlackOilPolymerModule<TypeTag> PolymerModule;
     typedef BlackOilFoamModule<TypeTag> FoamModule;
+    typedef BlackOilBrineModule<TypeTag> BrineModule;
 
     typedef typename EclEquilInitializer<TypeTag>::ScalarFluidState InitialFluidState;
 
@@ -606,17 +608,10 @@ public:
         this->model().addOutputModule(new VtkEclTracerModule<TypeTag>(simulator));
         // Tell the black-oil extensions to initialize their internal data structures
         const auto& vanguard = simulator.vanguard();
-        const auto& comm = this->gridView().comm();
-        if (comm.rank() == 0) {
-            SolventModule::initFromDeck(vanguard.deck(), vanguard.eclState());
-            PolymerModule::initFromDeck(vanguard.deck(), vanguard.eclState());
-            FoamModule::initFromDeck(vanguard.deck(), vanguard.eclState());
-        }
-
-        EclMpiSerializer ser(comm);
-        ser.staticBroadcast<SolventModule>();
-        ser.staticBroadcast<PolymerModule>();
-        ser.staticBroadcast<FoamModule>();
+        SolventModule::initFromState(vanguard.eclState(), vanguard.schedule());
+        PolymerModule::initFromState(vanguard.eclState());
+        FoamModule::initFromState(vanguard.eclState());
+        BrineModule::initFromState(vanguard.eclState());
 
         // create the ECL writer
         eclWriter_.reset(new EclWriterType(simulator));
@@ -674,12 +669,12 @@ public:
         if (enableTuning_) {
             // if support for the TUNING keyword is enabled, we get the initial time
             // steping parameters from it instead of from command line parameters
-            const auto& tuning = schedule.getTuning();
-            initialTimeStepSize_ = tuning.getTSINIT(0);
-            maxTimeStepAfterWellEvent_ = tuning.getTMAXWC(0);
-            maxTimeStepSize_ = tuning.getTSMAXZ(0);
-            restartShrinkFactor_ = 1./tuning.getTSFCNV(0);
-            minTimeStepSize_ = tuning.getTSMINZ(0);
+            const auto& tuning = schedule.getTuning(0);
+            initialTimeStepSize_ = tuning.TSINIT;
+            maxTimeStepAfterWellEvent_ = tuning.TMAXWC;
+            maxTimeStepSize_ = tuning.TSMAXZ;
+            restartShrinkFactor_ = 1./tuning.TSFCNV;
+            minTimeStepSize_ = tuning.TSMINZ;
         }
 
         initFluidSystem_();
@@ -811,7 +806,7 @@ public:
             eclState.applyModifierDeck(miniDeck);
 
             // re-compute all quantities which may possibly be affected.
-            transmissibilities_.update();
+            transmissibilities_.update(true);
             referencePorosity_[1] = referencePorosity_[0];
             updateReferencePorosity_();
             updatePffDofData_();
@@ -838,12 +833,12 @@ public:
         bool tuningEvent = false;
         if (episodeIdx > 0 && enableTuning_ && events.hasEvent(Opm::ScheduleEvents::TUNING_CHANGE, episodeIdx))
         {
-            const auto& tuning = schedule.getTuning();
-            initialTimeStepSize_ = tuning.getTSINIT(episodeIdx);
-            maxTimeStepAfterWellEvent_ = tuning.getTMAXWC(episodeIdx);
-            maxTimeStepSize_ = tuning.getTSMAXZ(episodeIdx);
-            restartShrinkFactor_ = 1./tuning.getTSFCNV(episodeIdx);
-            minTimeStepSize_ = tuning.getTSMINZ(episodeIdx);
+            const auto& tuning = schedule.getTuning(episodeIdx);
+            initialTimeStepSize_ = tuning.TSINIT;
+            maxTimeStepAfterWellEvent_ = tuning.TMAXWC;
+            maxTimeStepSize_ = tuning.TSMAXZ;
+            restartShrinkFactor_ = 1./tuning.TSFCNV;
+            minTimeStepSize_ = tuning.TSMINZ;
             tuningEvent = true;
         }
 
@@ -1053,6 +1048,12 @@ public:
         bool isSubStep = !EWOMS_GET_PARAM(TypeTag, bool, EnableWriteAllSolutions) && !this->simulator().episodeWillBeOver();
         if (enableEclOutput_)
             eclWriter_->writeOutput(isSubStep);
+    }
+
+    void finalizeOutput() {
+        // this will write all pending output to disk
+        // to avoid corruption of output files
+        eclWriter_.reset();
     }
 
 
@@ -2162,71 +2163,34 @@ private:
     {
         const auto& simulator = this->simulator();
         const auto& vanguard = simulator.vanguard();
-        const auto& deck = vanguard.deck();
-        auto& eclState = vanguard.eclState();
+        const auto& eclState = vanguard.eclState();
+        const auto& rock_config = eclState.getSimulationConfig().rock_config();
 
         // read the rock compressibility parameters
-        if (deck.hasKeyword("ROCK")) {
-            const auto& rockKeyword = deck.getKeyword("ROCK");
-            rockParams_.resize(rockKeyword.size());
-            for (size_t rockRecordIdx = 0; rockRecordIdx < rockKeyword.size(); ++ rockRecordIdx) {
-                const auto& rockRecord = rockKeyword.getRecord(rockRecordIdx);
-                rockParams_[rockRecordIdx].referencePressure =
-                        rockRecord.getItem("PREF").getSIDouble(0);
-                rockParams_[rockRecordIdx].compressibility =
-                        rockRecord.getItem("COMPRESSIBILITY").getSIDouble(0);
-            }
+        {
+            const auto& comp = rock_config.comp();
+            rockParams_.clear();
+            for (const auto& c : comp)
+                rockParams_.push_back( { c.pref, c.compressibility } );
         }
 
         // read the parameters for water-induced rock compaction
         readRockCompactionParameters_();
 
-        // check the kind of region which is supposed to be used by checking the ROCKOPTS
-        // keyword. note that for some funny reason, the ROCK keyword uses PVTNUM by
-        // default, *not* ROCKNUM!
-        std::string propName = "PVTNUM";
-        if (deck.hasKeyword("ROCKOPTS")) {
-            const auto& rockoptsKeyword = deck.getKeyword("ROCKOPTS");
-            std::string rockTableType =
-                rockoptsKeyword.getRecord(0).getItem("TABLE_TYPE").getTrimmedString(0);
-            if (rockTableType == "PVTNUM")
-                propName = "PVTNUM";
-            else if (rockTableType == "SATNUM")
-                propName = "SATNUM";
-            else if (rockTableType == "ROCKNUM")
-                propName = "ROCKNUM";
-            else {
-                throw std::runtime_error("Unknown table type '"+rockTableType
-                                         +" for the ROCKOPTS keyword given");
-            }
-        }
-
-        // If ROCKCOMP is used and ROCKNUM is specified ROCK2D ROCK2DTR ROCKTAB etc. uses ROCKNUM
-        // to give the correct table index.
-        if (deck.hasKeyword("ROCKCOMP") && eclState.fieldProps().has_int("ROCKNUM"))
-            propName = "ROCKNUM";
-
-        if (eclState.fieldProps().has_int(propName)) {
-            const auto& tmp = eclState.fieldProps().get_global_int(propName);
-            unsigned numElem = vanguard.gridView().size(0);
-            rockTableIdx_.resize(numElem);
+        unsigned numElem = vanguard.gridView().size(0);
+        rockTableIdx_.resize(numElem);
+        if (eclState.fieldProps().has_int(rock_config.rocknum_property())) {
+            const auto& num = eclState.fieldProps().get_int(rock_config.rocknum_property());
             for (size_t elemIdx = 0; elemIdx < numElem; ++ elemIdx) {
-                unsigned cartElemIdx = vanguard.cartesianIndex(elemIdx);
-
-                // reminder: Eclipse uses FORTRAN-style indices
-                rockTableIdx_[elemIdx] = tmp[cartElemIdx] - 1;
+                rockTableIdx_[elemIdx] = num[elemIdx] - 1;
             }
         }
 
         // Store overburden pressure pr element
         const auto& overburdTables = eclState.getTableManager().getOverburdTables();
         if (!overburdTables.empty()) {
-            unsigned numElem = vanguard.gridView().size(0);
             overburdenPressure_.resize(numElem,0.0);
-
-            const auto& rockcomp = deck.getKeyword("ROCKCOMP");
-            const auto& rockcompRecord = rockcomp.getRecord(0);
-            size_t numRocktabTables = rockcompRecord.getItem("NTROCC").template get< int >(0);
+            size_t numRocktabTables = rock_config.num_rock_tables();
 
             if (overburdTables.size() != numRocktabTables)
                 throw std::runtime_error(std::to_string(numRocktabTables) +" OVERBURD tables is expected, but " + std::to_string(overburdTables.size()) +" is provided");
@@ -2251,47 +2215,36 @@ private:
     void readRockCompactionParameters_()
     {
         const auto& vanguard = this->simulator().vanguard();
-        const auto& deck = vanguard.deck();
         const auto& eclState = vanguard.eclState();
+        const auto& rock_config = eclState.getSimulationConfig().rock_config();
 
-        if (!deck.hasKeyword("ROCKCOMP"))
+        if (!rock_config.active())
             return; // deck does not enable rock compaction
 
-        const auto& rockcomp = deck.getKeyword("ROCKCOMP");
-        //for (size_t rockRecordIdx = 0; rockRecordIdx < rockcomp.size(); ++ rockRecordIdx) {
-        assert(rockcomp.size() == 1);
-        const auto& rockcompRecord = rockcomp.getRecord(0);
-        const auto& option = rockcompRecord.getItem("HYSTERESIS").getTrimmedString(0);
-        if (option == "REVERS") {
-            // interpolate the porv volume multiplier using the pressure in the cell
-        }
-        else if (option == "IRREVERS") {
+        unsigned numElem = vanguard.gridView().size(0);
+        switch (rock_config.hysteresis_mode()) {
+        case RockConfig::Hysteresis::REVERS:
+            break;
+        case RockConfig::Hysteresis::IRREVERS:
             // interpolate the porv volume multiplier using the minimum pressure in the cell
             // i.e. don't allow re-inflation.
-            unsigned numElem = vanguard.gridView().size(0);
             minOilPressure_.resize(numElem, 1e99);
+            break;
+        default:
+            throw std::runtime_error("Not support ROCKOMP hysteresis option ");
         }
-        else if (option == "NO")
-            // rock compaction turned on but disabled by ROCKCOMP option
-            return;
-        else
-            throw std::runtime_error("ROCKCOMP option " + option + " not supported for item 1");
 
-        size_t numRocktabTables = rockcompRecord.getItem("NTROCC").template get<int>(0);
-        const auto& waterCompactionItem = rockcompRecord.getItem("WATER_COMPACTION").getTrimmedString(0);
-        bool waterCompaction = false;
-        if (waterCompactionItem == "YES") {
-            waterCompaction = true;
-            unsigned numElem = vanguard.gridView().size(0);
-            maxWaterSaturation_.resize(numElem, 0.0);
-        }
-        else
-            throw std::runtime_error("ROCKCOMP option " + waterCompactionItem + " not supported for item 3. Only YES is supported");
+        size_t numRocktabTables = rock_config.num_rock_tables();
+        bool waterCompaction = rock_config.water_compaction();
+
+        if (!waterCompaction)
+            throw std::runtime_error("Only water compatction allowed");
 
         if (waterCompaction) {
             const auto& rock2dTables = eclState.getTableManager().getRock2dTables();
             const auto& rock2dtrTables = eclState.getTableManager().getRock2dtrTables();
             const auto& rockwnodTables = eclState.getTableManager().getRockwnodTables();
+            maxWaterSaturation_.resize(numElem, 0.0);
 
             if (rock2dTables.size() != numRocktabTables)
                 throw std::runtime_error("Water compation option is selected in ROCKCOMP." + std::to_string(numRocktabTables)
@@ -2343,9 +2296,7 @@ private:
     {
         const auto& simulator = this->simulator();
         const auto& vanguard = simulator.vanguard();
-        const auto& deck = vanguard.deck();
         const auto& eclState = vanguard.eclState();
-        const auto& comm = vanguard.gridView().comm();
 
         // the PVT and saturation region numbers
         updatePvtnum_();
@@ -2364,19 +2315,9 @@ private:
 
         ////////////////////////////////
         // fluid-matrix interactions (saturation functions; relperm/capillary pressure)
-        size_t numDof = this->model().numGridDof();
-        std::vector<int> compressedToCartesianElemIdx(numDof);
-        for (unsigned elemIdx = 0; elemIdx < numDof; ++elemIdx)
-            compressedToCartesianElemIdx[elemIdx] = vanguard.cartesianIndex(elemIdx);
-
         materialLawManager_ = std::make_shared<EclMaterialLawManager>();
-        if (comm.rank() == 0)
-            materialLawManager_->initFromDeck(deck, eclState);
-
-        EclMpiSerializer ser(comm);
-        ser.broadcast(*materialLawManager_);
-
-        materialLawManager_->initParamsForElements(eclState, compressedToCartesianElemIdx);
+        materialLawManager_->initFromState(eclState);
+        materialLawManager_->initParamsForElements(eclState, this->model().numGridDof());
         ////////////////////////////////
     }
 
@@ -2387,17 +2328,11 @@ private:
 
         const auto& simulator = this->simulator();
         const auto& vanguard = simulator.vanguard();
-        const auto& deck = vanguard.deck();
         const auto& eclState = vanguard.eclState();
 
         // fluid-matrix interactions (saturation functions; relperm/capillary pressure)
-        size_t numDof = this->model().numGridDof();
-        std::vector<int> compressedToCartesianElemIdx(numDof);
-        for (unsigned elemIdx = 0; elemIdx < numDof; ++elemIdx)
-            compressedToCartesianElemIdx[elemIdx] = vanguard.cartesianIndex(elemIdx);
-
         thermalLawManager_ = std::make_shared<EclThermalLawManager>();
-        thermalLawManager_->initFromDeck(deck, eclState, compressedToCartesianElemIdx);
+        thermalLawManager_->initParamsForElements(eclState, this->model().numGridDof());
     }
 
     void updateReferencePorosity_()
@@ -2405,7 +2340,6 @@ private:
         const auto& simulator = this->simulator();
         const auto& vanguard = simulator.vanguard();
         const auto& eclState = vanguard.eclState();
-        const auto& eclGrid = eclState.getInputGrid();
 
         size_t numDof = this->model().numGridDof();
 
@@ -2414,36 +2348,9 @@ private:
         const auto& fp = eclState.fieldProps();
         const std::vector<double> porvData = fp.porv(true);
         const std::vector<int> actnumData = fp.actnum();
-        int nx = eclGrid.getNX();
-        int ny = eclGrid.getNY();
         for (size_t dofIdx = 0; dofIdx < numDof; ++ dofIdx) {
             unsigned cartElemIdx = vanguard.cartesianIndex(dofIdx);
             Scalar poreVolume = porvData[cartElemIdx];
-
-            // sum up the pore volume of the active cell and all inactive ones above it
-            // which were disabled due to their pore volume being too small. If energy is
-            // conserved, cells are not disabled due to a too small pore volume because
-            // such cells still store and conduct energy.
-            if (!enableEnergy && eclGrid.getMinpvMode() == Opm::MinpvMode::ModeEnum::OpmFIL) {
-                const std::vector<Scalar>& minPvVector = eclGrid.getMinpvVector();
-                for (int aboveElemCartIdx = static_cast<int>(cartElemIdx) - nx*ny;
-                     aboveElemCartIdx >= 0;
-                     aboveElemCartIdx -= nx*ny)
-                {
-                    if (porvData[aboveElemCartIdx] >= minPvVector[aboveElemCartIdx])
-                        // the cartesian element above exhibits a pore volume which larger or
-                        // equal to the minimum one
-                        break;
-
-                    Scalar aboveElemVolume = eclGrid.getCellVolume(aboveElemCartIdx);
-                    if (actnumData[aboveElemCartIdx] == 0 && aboveElemVolume > 1e-3)
-                        // stop at explicitly disabled elements, but only if their volume is
-                        // greater than 10^-3 m^3
-                        break;
-
-                    poreVolume += porvData[aboveElemCartIdx];
-                }
-            }
 
             // we define the porosity as the accumulated pore volume divided by the
             // geometric volume of the element. Note that -- in pathetic cases -- it can
@@ -2457,15 +2364,10 @@ private:
     void initFluidSystem_()
     {
         const auto& simulator = this->simulator();
-        const auto& deck = simulator.vanguard().deck();
         const auto& eclState = simulator.vanguard().eclState();
-        const auto& comm = simulator.gridView().comm();
+        const auto& schedule = simulator.vanguard().schedule();
 
-        if (comm.rank() == 0)
-            FluidSystem::initFromDeck(deck, eclState);
-
-        EclMpiSerializer ser(comm);
-        ser.staticBroadcast<FluidSystem>();
+        FluidSystem::initFromState(eclState, schedule);
    }
 
     void readInitialCondition_()
@@ -2695,9 +2597,6 @@ private:
 
         initialFluidStates_.resize(numDof);
 
-        const auto& cartSize = simulator.vanguard().cartesianDimensions();
-        size_t numCartesianCells = cartSize[0] * cartSize[1] * cartSize[2];
-
         std::vector<double> waterSaturationData;
         std::vector<double> gasSaturationData;
         std::vector<double> pressureData;
@@ -2706,50 +2605,35 @@ private:
         std::vector<double> tempiData;
 
         if (FluidSystem::phaseIsActive(waterPhaseIdx))
-            waterSaturationData = fp.get_global_double("SWAT");
+            waterSaturationData = fp.get_double("SWAT");
         else
-            waterSaturationData.resize(numCartesianCells);
+            waterSaturationData.resize(numDof);
 
         if (FluidSystem::phaseIsActive(gasPhaseIdx))
-            gasSaturationData = fp.get_global_double("SGAS");
+            gasSaturationData = fp.get_double("SGAS");
         else
-            gasSaturationData.resize(numCartesianCells);
+            gasSaturationData.resize(numDof);
 
-        pressureData = fp.get_global_double("PRESSURE");
+        pressureData = fp.get_double("PRESSURE");
         if (FluidSystem::enableDissolvedGas())
-            rsData = fp.get_global_double("RS");
+            rsData = fp.get_double("RS");
 
         if (FluidSystem::enableVaporizedOil())
-            rvData = fp.get_global_double("RV");
+            rvData = fp.get_double("RV");
 
         // initial reservoir temperature
-        tempiData = fp.get_global_double("TEMPI");
-
-
-        // make sure that the size of the data arrays is correct
-#ifndef NDEBUG
-        assert(waterSaturationData.size() == numCartesianCells);
-        assert(gasSaturationData.size() == numCartesianCells);
-        assert(pressureData.size() == numCartesianCells);
-        if (FluidSystem::enableDissolvedGas())
-            assert(rsData.size() == numCartesianCells);
-        if (FluidSystem::enableVaporizedOil())
-            assert(rvData.size() == numCartesianCells);
-#endif
+        tempiData = fp.get_double("TEMPI");
 
         // calculate the initial fluid states
         for (size_t dofIdx = 0; dofIdx < numDof; ++dofIdx) {
             auto& dofFluidState = initialFluidStates_[dofIdx];
 
             dofFluidState.setPvtRegionIndex(pvtRegionIndex(dofIdx));
-            size_t cartesianDofIdx = vanguard.cartesianIndex(dofIdx);
-            assert(0 <= cartesianDofIdx);
-            assert(cartesianDofIdx <= numCartesianCells);
 
             //////
             // set temperature
             //////
-            Scalar temperatureLoc = tempiData[cartesianDofIdx];
+            Scalar temperatureLoc = tempiData[dofIdx];
             if (!std::isfinite(temperatureLoc) || temperatureLoc <= 0)
                 temperatureLoc = FluidSystem::surfaceTemperature;
             dofFluidState.setTemperature(temperatureLoc);
@@ -2759,20 +2643,20 @@ private:
             //////
             if (FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx))
                 dofFluidState.setSaturation(FluidSystem::waterPhaseIdx,
-                                            waterSaturationData[cartesianDofIdx]);
+                                            waterSaturationData[dofIdx]);
             if (FluidSystem::phaseIsActive(FluidSystem::gasPhaseIdx))
                 dofFluidState.setSaturation(FluidSystem::gasPhaseIdx,
-                                            gasSaturationData[cartesianDofIdx]);
+                                            gasSaturationData[dofIdx]);
             if (FluidSystem::phaseIsActive(FluidSystem::oilPhaseIdx))
                 dofFluidState.setSaturation(FluidSystem::oilPhaseIdx,
                                             1.0
-                                            - waterSaturationData[cartesianDofIdx]
-                                            - gasSaturationData[cartesianDofIdx]);
+                                            - waterSaturationData[dofIdx]
+                                            - gasSaturationData[dofIdx]);
 
             //////
             // set phase pressures
             //////
-            Scalar oilPressure = pressureData[cartesianDofIdx];
+            Scalar oilPressure = pressureData[dofIdx];
 
             // this assumes that capillary pressures only depend on the phase saturations
             // and possibly on temperature. (this is always the case for ECL problems.)
@@ -2789,12 +2673,12 @@ private:
             }
 
             if (FluidSystem::enableDissolvedGas())
-                dofFluidState.setRs(rsData[cartesianDofIdx]);
+                dofFluidState.setRs(rsData[dofIdx]);
             else if (Indices::gasEnabled && Indices::oilEnabled)
                 dofFluidState.setRs(0.0);
 
             if (FluidSystem::enableVaporizedOil())
-                dofFluidState.setRv(rvData[cartesianDofIdx]);
+                dofFluidState.setRv(rvData[dofIdx]);
             else if (Indices::gasEnabled && Indices::oilEnabled)
                 dofFluidState.setRv(0.0);
 
@@ -2822,46 +2706,25 @@ private:
         const auto& eclState = vanguard.eclState();
         size_t numDof = this->model().numGridDof();
 
-
         if (enableSolvent) {
-            std::vector<double> solventSaturationData(eclState.getInputGrid().getCartesianSize(), 0.0);
             if (eclState.fieldProps().has_double("SSOL"))
-                solventSaturationData = eclState.fieldProps().get_global_double("SSOL");
-
-            solventSaturation_.resize(numDof, 0.0);
-            for (size_t dofIdx = 0; dofIdx < numDof; ++dofIdx) {
-                size_t cartesianDofIdx = vanguard.cartesianIndex(dofIdx);
-                assert(0 <= cartesianDofIdx);
-                assert(cartesianDofIdx <= solventSaturationData.size());
-                solventSaturation_[dofIdx] = solventSaturationData[cartesianDofIdx];
-            }
+                solventSaturation_ = eclState.fieldProps().get_double("SSOL");
+            else
+                solventSaturation_.resize(numDof, 0.0);
         }
 
         if (enablePolymer) {
-            std::vector<double> polyConcentrationData(eclState.getInputGrid().getCartesianSize(), 0.0);
             if (eclState.fieldProps().has_double("SPOLY"))
-                polyConcentrationData = eclState.fieldProps().get_global_double("SPOLY");
-
-            polymerConcentration_.resize(numDof, 0.0);
-            for (size_t dofIdx = 0; dofIdx < numDof; ++dofIdx) {
-                size_t cartesianDofIdx = vanguard.cartesianIndex(dofIdx);
-                assert(0 <= cartesianDofIdx);
-                assert(cartesianDofIdx <= polyConcentrationData.size());
-                polymerConcentration_[dofIdx] = polyConcentrationData[cartesianDofIdx];
-            }
+                polymerConcentration_ = eclState.fieldProps().get_double("SPOLY");
+            else
+                polymerConcentration_.resize(numDof, 0.0);
         }
 
         if (enablePolymerMolarWeight) {
-            std::vector<double> polyMoleWeightData(eclState.getInputGrid().getCartesianSize(), 0.0);
             if (eclState.fieldProps().has_double("SPOLYMW"))
-                polyMoleWeightData = eclState.fieldProps().get_global_double("SPOLYMW");
-            polymerMoleWeight_.resize(numDof, 0.0);
-            for (size_t dofIdx = 0; dofIdx < numDof; ++dofIdx) {
-                const size_t cartesianDofIdx = vanguard.cartesianIndex(dofIdx);
-                assert(0 <= cartesianDofIdx);
-                assert(cartesianDofIdx <= polyMoleWeightData.size());
-                polymerMoleWeight_[dofIdx] = polyMoleWeightData[cartesianDofIdx];
-            }
+                polymerMoleWeight_ = eclState.fieldProps().get_double("SPOLYMW");
+            else
+                polymerMoleWeight_.resize(numDof, 0.0);
         }
     }
 
@@ -2912,32 +2775,22 @@ private:
         }
     }
 
-
-    static bool has_int_prop(const EclipseState& eclState, const std::string& prop) {
-        return eclState.fieldProps().has_int(prop);
-    }
-
-    static std::vector<int> get_int_prop(const EclipseState& eclState, const std::string& prop) {
-        return eclState.fieldProps().get_global_int(prop);
-    }
-
     template<class T>
     void updateNum(const std::string& name, std::vector<T>& numbers)
     {
         const auto& simulator = this->simulator();
         const auto& eclState = simulator.vanguard().eclState();
 
-        if (!has_int_prop(eclState, name))
+        if (!eclState.fieldProps().has_int(name))
             return;
 
-        const auto& numData = get_int_prop(eclState, name);
+        const auto& numData = eclState.fieldProps().get_int(name);
         const auto& vanguard = simulator.vanguard();
 
         unsigned numElems = vanguard.gridView().size(/*codim=*/0);
         numbers.resize(numElems);
         for (unsigned elemIdx = 0; elemIdx < numElems; ++elemIdx) {
-            unsigned cartElemIdx = vanguard.cartesianIndex(elemIdx);
-            numbers[elemIdx] = static_cast<T>(std::max(numData[cartElemIdx], 1) - 1);
+            numbers[elemIdx] = static_cast<T>(numData[elemIdx]) - 1;
         }
     }
 
@@ -2996,13 +2849,13 @@ private:
         nonTrivialBoundaryConditions_ = false;
         const auto& simulator = this->simulator();
         const auto& vanguard = simulator.vanguard();
-
-        if (vanguard.deck().hasKeyword("BC")) {
+        const auto& bcconfig = vanguard.eclState().getSimulationConfig().bcconfig();
+        if (bcconfig.size() > 0) {
             nonTrivialBoundaryConditions_ = true;
 
             size_t numCartDof = vanguard.cartesianSize();
             unsigned numElems = vanguard.gridView().size(/*codim=*/0);
-            std::vector<int> cartesianToCompressedElemIdx(numCartDof);
+            std::vector<int> cartesianToCompressedElemIdx(numCartDof, -1);
 
             for (unsigned elemIdx = 0; elemIdx < numElems; ++elemIdx)
                 cartesianToCompressedElemIdx[vanguard.cartesianIndex(elemIdx)] = elemIdx;
@@ -3020,115 +2873,113 @@ private:
             freebcZ_.resize(numElems, false);
             freebcZMinus_.resize(numElems, false);
 
-            const auto& bcs = vanguard.deck().getKeywordList("BC");
-            for (size_t listIdx = 0; listIdx < bcs.size(); ++listIdx) {
-                const auto& bc = *bcs[listIdx];
+            for (const auto& bcface : bcconfig) {
+                const auto& type = bcface.bctype;
+                if (type == BCType::RATE) {
+                    int compIdx = 0; // default initialize to avoid -Wmaybe-uninitialized warning
 
-                for (size_t record = 0; record < bc.size(); ++record) {
-
-                    std::string type = bc.getRecord(record).getItem("TYPE").getTrimmedString(0);
-                    std::string compName = bc.getRecord(record).getItem("COMPONENT").getTrimmedString(0);
-                    int compIdx = -999;
-
-                    if (compName == "OIL")
+                    switch (bcface.component) {
+                    case BCComponent::OIL:
                         compIdx = oilCompIdx;
-                    else if (compName == "GAS")
+                        break;
+                    case BCComponent::GAS:
                         compIdx = gasCompIdx;
-                    else if (compName == "WATER")
+                        break;
+                    case BCComponent::WATER:
                         compIdx = waterCompIdx;
-                    else if (compName == "SOLVENT")
-                    {
+                        break;
+                    case BCComponent::SOLVENT:
                         if (!enableSolvent)
                             throw std::logic_error("solvent is disabled and you're trying to add solvent to BC");
 
                         compIdx = Indices::solventSaturationIdx;
-                    }
-                    else if (compName == "POLYMER")
-                    {
+                        break;
+                    case BCComponent::POLYMER:
                         if (!enablePolymer)
                             throw std::logic_error("polymer is disabled and you're trying to add polymer to BC");
 
                         compIdx = Indices::polymerConcentrationIdx;
+                        break;
+                    case BCComponent::NONE:
+                        throw std::logic_error("you need to specify the component when RATE type is set in BC");
+                        break;
                     }
-                    else if (compName == "NONE")
-                    {
-                        if ( type == "RATE")
-                            throw std::logic_error("you need to specify the component when RATE type is set in BC");
+
+                    std::vector<RateVector>* data = nullptr;
+                    switch (bcface.dir) {
+                    case FaceDir::XMinus:
+                        data = &massratebcXMinus_;
+                        break;
+                    case FaceDir::XPlus:
+                        data = &massratebcX_;
+                        break;
+                    case FaceDir::YMinus:
+                        data = &massratebcYMinus_;
+                        break;
+                    case FaceDir::YPlus:
+                        data = &massratebcY_;
+                        break;
+                    case FaceDir::ZMinus:
+                        data = &massratebcZMinus_;
+                        break;
+                    case FaceDir::ZPlus:
+                        data = &massratebcZ_;
+                        break;
                     }
-                    else
-                        throw std::logic_error("invalid component name for BC");
 
-                    int i1 = bc.getRecord(record).getItem("I1").template get< int >(0) - 1;
-                    int i2 = bc.getRecord(record).getItem("I2").template get< int >(0) - 1;
-                    int j1 = bc.getRecord(record).getItem("J1").template get< int >(0) - 1;
-                    int j2 = bc.getRecord(record).getItem("J2").template get< int >(0) - 1;
-                    int k1 = bc.getRecord(record).getItem("K1").template get< int >(0) - 1;
-                    int k2 = bc.getRecord(record).getItem("K2").template get< int >(0) - 1;
-                    std::string direction = bc.getRecord(record).getItem("DIRECTION").getTrimmedString(0);
-
-                    if (type == "RATE") {
-                        assert(compIdx >= 0);
-                        std::vector<RateVector>* data = 0;
-                        if (direction == "X-")
-                            data = &massratebcXMinus_;
-                        else if (direction == "X")
-                            data = &massratebcX_;
-                        else if (direction == "Y-")
-                            data = &massratebcYMinus_;
-                        else if (direction == "Y")
-                            data = &massratebcY_;
-                        else if (direction == "Z-")
-                            data = &massratebcZMinus_;
-                        else if (direction == "Z")
-                            data = &massratebcZ_;
-                        else
-                            throw std::logic_error("invalid direction for BC");
-
-                        const Evaluation rate = bc.getRecord(record).getItem("RATE").getSIDouble(0);
-                        for (int i = i1; i <= i2; ++i) {
-                            for (int j = j1; j <= j2; ++j) {
-                                for (int k = k1; k <= k2; ++k) {
-                                    std::array<int, 3> tmp = {i,j,k};
-                                    size_t elemIdx = cartesianToCompressedElemIdx[vanguard.cartesianIndex(tmp)];
+                    const Evaluation rate = bcface.rate;
+                    for (int i = bcface.i1; i <= bcface.i2; ++i) {
+                        for (int j = bcface.j1; j <= bcface.j2; ++j) {
+                            for (int k = bcface.k1; k <= bcface.k2; ++k) {
+                                std::array<int, 3> tmp = {i,j,k};
+                                auto elemIdx = cartesianToCompressedElemIdx[vanguard.cartesianIndex(tmp)];
+                                if (elemIdx >= 0)
                                     (*data)[elemIdx][compIdx] = rate;
-                                }
                             }
                         }
-                    } else if (type == "FREE") {
-                        std::vector<bool>* data = 0;
-                        if (direction == "X-")
-                            data = &freebcXMinus_;
-                        else if (direction == "X")
-                            data = &freebcX_;
-                        else if (direction == "Y-")
-                            data = &freebcYMinus_;
-                        else if (direction == "Y")
-                            data = &freebcY_;
-                        else if (direction == "Z-")
-                            data = &freebcZMinus_;
-                        else if (direction == "Z")
-                            data = &freebcZ_;
-                        else
-                            throw std::logic_error("invalid direction for BC");
-
-                        for (int i = i1; i <= i2; ++i) {
-                            for (int j = j1; j <= j2; ++j) {
-                                for (int k = k1; k <= k2; ++k) {
-                                    std::array<int, 3> tmp = {i,j,k};
-                                    size_t elemIdx = cartesianToCompressedElemIdx[vanguard.cartesianIndex(tmp)];
-                                    (*data)[elemIdx] = true;
-                                }
-                            }
-                        }
-                        // TODO: either the real initial solution needs to be computed or read from the restart file
-                        const auto& eclState = simulator.vanguard().eclState();
-                        const auto& initconfig = eclState.getInitConfig();
-                        if (initconfig.restartRequested()) {
-                            throw std::logic_error("restart is not compatible with using free boundary conditions");
-                        }
-                    } else {
-                        throw std::logic_error("invalid type for BC. Use FREE or RATE");
                     }
+                } else if (type == BCType::FREE) {
+                    std::vector<bool>* data = nullptr;
+                    switch (bcface.dir) {
+                    case FaceDir::XMinus:
+                        data = &freebcXMinus_;
+                        break;
+                    case FaceDir::XPlus:
+                        data = &freebcX_;
+                        break;
+                    case FaceDir::YMinus:
+                        data = &freebcYMinus_;
+                        break;
+                    case FaceDir::YPlus:
+                        data = &freebcY_;
+                        break;
+                    case FaceDir::ZMinus:
+                        data = &freebcZMinus_;
+                        break;
+                    case FaceDir::ZPlus:
+                        data = &freebcZ_;
+                        break;
+                    }
+
+                    for (int i = bcface.i1; i <= bcface.i2; ++i) {
+                        for (int j = bcface.j1; j <= bcface.j2; ++j) {
+                            for (int k = bcface.k1; k <= bcface.k2; ++k) {
+                                std::array<int, 3> tmp = {i,j,k};
+                                auto elemIdx = cartesianToCompressedElemIdx[vanguard.cartesianIndex(tmp)];
+                                if (elemIdx >= 0)
+                                    (*data)[elemIdx] = true;
+                            }
+                        }
+                    }
+
+                    // TODO: either the real initial solution needs to be computed or read from the restart file
+                    const auto& eclState = simulator.vanguard().eclState();
+                    const auto& initconfig = eclState.getInitConfig();
+                    if (initconfig.restartRequested()) {
+                        throw std::logic_error("restart is not compatible with using free boundary conditions");
+                    }
+                } else {
+                    throw std::logic_error("invalid type for BC. Use FREE or RATE");
                 }
             }
         }

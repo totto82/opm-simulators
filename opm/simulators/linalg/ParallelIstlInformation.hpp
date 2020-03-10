@@ -24,7 +24,7 @@
 
 #include <opm/grid/UnstructuredGrid.h>
 #include <opm/common/ErrorMacros.hpp>
-#include <boost/any.hpp>
+#include <any>
 #include <exception>
 
 #include <algorithm>
@@ -580,12 +580,17 @@ private:
     ///
     /// To be used with ParallelISTLInformation::computeReduction.
     template<class T>
-    MaskToMinOperator<std::pointer_to_binary_function<const T&,const T&,const T&> >
-    makeGlobalMaxFunctor()
+    auto makeGlobalMaxFunctor()
     {
-        return MaskToMinOperator<std::pointer_to_binary_function<const T&,const T&,const T&> >
-            (std::pointer_to_binary_function<const T&,const T&,const T&>
-             ((const T&(*)(const T&, const T&))std::max<T>));
+        struct MaxOp
+        {
+            using result_type = T;
+            const result_type& operator()(const T& t1, const T& t2)
+            {
+                return std::max(t1, t2);
+            }
+        };
+        return MaskToMinOperator(MaxOp());
     }
 
     namespace detail
@@ -630,12 +635,18 @@ private:
     ///
     /// To be used with ParallelISTLInformation::computeReduction.
     template<class T>
-    MaskToMaxOperator<std::pointer_to_binary_function<const T&,const T&,const T&> >
+    auto
     makeGlobalMinFunctor()
     {
-        return MaskToMaxOperator<std::pointer_to_binary_function<const T&,const T&,const T&> >
-            (std::pointer_to_binary_function<const T&,const T&,const T&>
-             ((const T&(*)(const T&, const T&))std::min<T>));
+        struct MinOp
+        {
+            using result_type = T;
+            const result_type& operator()(const T& t1, const T& t2)
+            {
+                return std::min(t1, t2);
+            }
+        };
+        return MaskToMaxOperator(MinOp());
     }
     template<class T>
     InnerProductFunctor<T>
@@ -660,7 +671,7 @@ namespace Opm
 /// then this will ecapsulate an instance of ParallelISTLInformation.
 /// \param grid The grid to inspect.
 
-inline void extractParallelGridInformationToISTL(boost::any& anyComm, const UnstructuredGrid& grid)
+inline void extractParallelGridInformationToISTL(std::any& anyComm, const UnstructuredGrid& grid)
 {
     (void)anyComm; (void)grid;
 }

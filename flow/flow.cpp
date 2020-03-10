@@ -20,7 +20,11 @@
 */
 #include "config.h"
 
+#include <ebos/eclmpiserializer.hh>
+
 #include <flow/flow_ebos_blackoil.hpp>
+
+#ifndef FLOW_BLACKOIL_ONLY
 #include <flow/flow_ebos_gasoil.hpp>
 #include <flow/flow_ebos_oilwater.hpp>
 #include <flow/flow_ebos_solvent.hpp>
@@ -30,10 +34,12 @@
 #include <flow/flow_ebos_energy.hpp>
 #include <flow/flow_ebos_oilwater_polymer.hpp>
 #include <flow/flow_ebos_oilwater_polymer_injectivity.hpp>
+#endif
 
 #include <opm/simulators/flow/SimulatorFullyImplicitBlackoilEbos.hpp>
 #include <opm/simulators/flow/FlowMainEbos.hpp>
 #include <opm/simulators/utils/moduleVersion.hpp>
+#include <opm/simulators/utils/ParallelEclipseState.hpp>
 #include <opm/models/utils/propertysystem.hh>
 #include <opm/models/utils/parametersystem.hh>
 #include <opm/simulators/flow/MissingFeatures.hpp>
@@ -42,6 +48,9 @@
 #include <opm/common/OpmLog/OpmLog.hpp>
 #include <opm/common/OpmLog/EclipsePRTLog.hpp>
 #include <opm/common/OpmLog/LogUtil.hpp>
+
+#include <opm/io/eclipse/rst/state.hpp>
+#include <opm/io/eclipse/ERst.hpp>
 
 #include <opm/parser/eclipse/Deck/Deck.hpp>
 #include <opm/parser/eclipse/Parser/Parser.hpp>
@@ -72,8 +81,8 @@ END_PROPERTIES
 
 namespace detail
 {
-    boost::filesystem::path simulationCaseName( const std::string& casename ) {
-        namespace fs = boost::filesystem;
+    Opm::filesystem::path simulationCaseName( const std::string& casename ) {
+        namespace fs = Opm::filesystem;
 
         const auto exists = []( const fs::path& f ) -> bool {
             if( !fs::exists( f ) ) return false;
@@ -132,9 +141,9 @@ enum class FileOutputMode {
 
 void ensureOutputDirExists(const std::string& cmdline_output_dir)
 {
-    if (!boost::filesystem::is_directory(cmdline_output_dir)) {
+    if (!Opm::filesystem::is_directory(cmdline_output_dir)) {
         try {
-            boost::filesystem::create_directories(cmdline_output_dir);
+            Opm::filesystem::create_directories(cmdline_output_dir);
         }
         catch (...) {
             throw std::runtime_error("Creation of output directory '" + cmdline_output_dir + "' failed\n");
@@ -151,7 +160,7 @@ FileOutputMode setupLogging(int mpi_rank_, const std::string& deck_filename, con
     }
 
     // create logFile
-    using boost::filesystem::path;
+    using Opm::filesystem::path;
     path fpath(deck_filename);
     std::string baseName;
     std::ostringstream debugFileStream;
@@ -341,28 +350,57 @@ int main(int argc, char** argv)
 
             Opm::FlowMainEbos<PreTypeTag>::printPRTHeader(outputCout);
 
-            deck.reset( new Opm::Deck( parser.parseFile(deckFilename , parseContext, errorGuard)));
-            Opm::MissingFeatures::checkKeywords(*deck, parseContext, errorGuard);
-            if ( outputCout )
-                Opm::checkDeck(*deck, parser, parseContext, errorGuard);
-
-            eclipseState.reset( new Opm::EclipseState(*deck, parseContext, errorGuard ));
+#ifdef HAVE_MPI
+            Opm::ParallelEclipseState* parState;
+#endif
             if (mpiRank == 0) {
-                schedule.reset(new Opm::Schedule(*deck, *eclipseState, parseContext, errorGuard));
+                deck.reset( new Opm::Deck( parser.parseFile(deckFilename , parseContext, errorGuard)));
+                Opm::MissingFeatures::checkKeywords(*deck, parseContext, errorGuard);
+                if ( outputCout )
+                    Opm::checkDeck(*deck, parser, parseContext, errorGuard);
+
+#ifdef HAVE_MPI
+                parState = new Opm::ParallelEclipseState(*deck);
+                eclipseState.reset(parState);
+#else
+                eclipseState.reset(new Opm::EclipseState(*deck));
+#endif
+                /*
+                  For the time being initializing wells and groups from the
+                  restart file is not possible, but work is underways and it is
+                  included here as a switch.
+                */
+                const bool init_from_restart_file = !EWOMS_GET_PARAM(PreTypeTag, bool, SchedRestart);
+                const auto& init_config = eclipseState->getInitConfig();
+                if (init_config.restartRequested() && init_from_restart_file) {
+                    throw std::logic_error("Sorry - the ability to initialize wells and groups from the restart file is currently not ready");
+
+                    int report_step = init_config.getRestartStep();
+                    const auto& rst_filename = eclipseState->getIOConfig().getRestartFileName( init_config.getRestartRootName(), report_step, false );
+                    Opm::EclIO::ERst rst_file(rst_filename);
+                    const auto& rst_state = Opm::RestartIO::RstState::load(rst_file, report_step);
+                    schedule.reset(new Opm::Schedule(*deck, *eclipseState, parseContext, errorGuard, &rst_state) );
+                } else
+                    schedule.reset(new Opm::Schedule(*deck, *eclipseState, parseContext, errorGuard));
+
                 setupMessageLimiter(schedule->getMessageLimits(), "STDOUT_LOGGER");
                 summaryConfig.reset( new Opm::SummaryConfig(*deck, *schedule, eclipseState->getTableManager(), parseContext, errorGuard));
 #ifdef HAVE_MPI
-                Opm::Mpi::packAndSend(*summaryConfig, mpiHelper.getCollectiveCommunication());
-                Opm::Mpi::packAndSend(*schedule, mpiHelper.getCollectiveCommunication());
+                Opm::Mpi::packAndSend(*summaryConfig, Dune::MPIHelper::getCollectiveCommunication());
+                Opm::Mpi::packAndSend(*schedule, Dune::MPIHelper::getCollectiveCommunication());
 #endif
             }
 #ifdef HAVE_MPI
             else {
                 summaryConfig.reset(new Opm::SummaryConfig);
                 schedule.reset(new Opm::Schedule);
+                parState = new Opm::ParallelEclipseState;
                 Opm::Mpi::receiveAndUnpack(*summaryConfig, mpiHelper.getCollectiveCommunication());
                 Opm::Mpi::receiveAndUnpack(*schedule, mpiHelper.getCollectiveCommunication());
+                eclipseState.reset(parState);
             }
+            Opm::EclMpiSerializer ser(mpiHelper.getCollectiveCommunication());
+            ser.broadcast(*parState);
 #endif
 
             Opm::checkConsistentArrayDimensions(*eclipseState, *schedule, parseContext, errorGuard);
@@ -381,18 +419,20 @@ int main(int argc, char** argv)
         // TODO: make sure that no illegal combinations like thermal and twophase are
         //       requested.
 
+        if ( false ) {}
+#ifndef FLOW_BLACKOIL_ONLY
         // Twophase cases
-        if( phases.size() == 2 ) {
+        else if( phases.size() == 2 ) {
             // oil-gas
             if (phases.active( Opm::Phase::GAS ))
             {
-                Opm::flowEbosGasOilSetDeck(externalSetupTimer.elapsed(), *deck, *eclipseState, *schedule, *summaryConfig);
+                Opm::flowEbosGasOilSetDeck(externalSetupTimer.elapsed(), deck.get(), *eclipseState, *schedule, *summaryConfig);
                 return Opm::flowEbosGasOilMain(argc, argv, outputCout, outputFiles);
             }
             // oil-water
             else if ( phases.active( Opm::Phase::WATER ) )
             {
-                Opm::flowEbosOilWaterSetDeck(externalSetupTimer.elapsed(), *deck, *eclipseState, *schedule, *summaryConfig);
+                Opm::flowEbosOilWaterSetDeck(externalSetupTimer.elapsed(), deck.get(), *eclipseState, *schedule, *summaryConfig);
                 return Opm::flowEbosOilWaterMain(argc, argv, outputCout, outputFiles);
             }
             else {
@@ -420,36 +460,37 @@ int main(int argc, char** argv)
             }
 
             if ( phases.size() == 3 ) { // oil water polymer case
-                Opm::flowEbosOilWaterPolymerSetDeck(externalSetupTimer.elapsed(), *deck, *eclipseState, *schedule, *summaryConfig);
+                Opm::flowEbosOilWaterPolymerSetDeck(externalSetupTimer.elapsed(), deck.get(), *eclipseState, *schedule, *summaryConfig);
                 return Opm::flowEbosOilWaterPolymerMain(argc, argv, outputCout, outputFiles);
             } else {
-                Opm::flowEbosPolymerSetDeck(externalSetupTimer.elapsed(), *deck, *eclipseState, *schedule, *summaryConfig);
+                Opm::flowEbosPolymerSetDeck(externalSetupTimer.elapsed(), deck.get(), *eclipseState, *schedule, *summaryConfig);
                 return Opm::flowEbosPolymerMain(argc, argv, outputCout, outputFiles);
             }
         }
         // Foam case
         else if ( phases.active( Opm::Phase::FOAM ) ) {
-            Opm::flowEbosFoamSetDeck(externalSetupTimer.elapsed(), *deck, *eclipseState, *schedule, *summaryConfig);
+            Opm::flowEbosFoamSetDeck(externalSetupTimer.elapsed(), deck.get(), *eclipseState, *schedule, *summaryConfig);
             return Opm::flowEbosFoamMain(argc, argv, outputCout, outputFiles);
         }
         // Brine case
         else if ( phases.active( Opm::Phase::BRINE ) ) {
-            Opm::flowEbosBrineSetDeck(externalSetupTimer.elapsed(), *deck, *eclipseState, *schedule, *summaryConfig);
+            Opm::flowEbosBrineSetDeck(externalSetupTimer.elapsed(), deck.get(), *eclipseState, *schedule, *summaryConfig);
             return Opm::flowEbosBrineMain(argc, argv, outputCout, outputFiles);
         }
         // Solvent case
         else if ( phases.active( Opm::Phase::SOLVENT ) ) {
-            Opm::flowEbosSolventSetDeck(externalSetupTimer.elapsed(), *deck, *eclipseState, *schedule, *summaryConfig);
+            Opm::flowEbosSolventSetDeck(externalSetupTimer.elapsed(), deck.get(), *eclipseState, *schedule, *summaryConfig);
             return Opm::flowEbosSolventMain(argc, argv, outputCout, outputFiles);
         }
         // Energy case
         else if (eclipseState->getSimulationConfig().isThermal()) {
-            Opm::flowEbosEnergySetDeck(externalSetupTimer.elapsed(), *deck, *eclipseState, *schedule, *summaryConfig);
+            Opm::flowEbosEnergySetDeck(externalSetupTimer.elapsed(), deck.get(), *eclipseState, *schedule, *summaryConfig);
             return Opm::flowEbosEnergyMain(argc, argv, outputCout, outputFiles);
         }
+#endif // FLOW_BLACKOIL_ONLY
         // Blackoil case
         else if( phases.size() == 3 ) {
-            Opm::flowEbosBlackoilSetDeck(externalSetupTimer.elapsed(), *deck, *eclipseState, *schedule, *summaryConfig);
+            Opm::flowEbosBlackoilSetDeck(externalSetupTimer.elapsed(), deck.get(), *eclipseState, *schedule, *summaryConfig);
             return Opm::flowEbosBlackoilMain(argc, argv, outputCout, outputFiles);
         }
         else

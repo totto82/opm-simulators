@@ -146,7 +146,7 @@ public:
         bool enableTUNING = EWOMS_GET_PARAM(TypeTag, bool, EnableTuning);
         if (enableAdaptive) {
             if (enableTUNING) {
-                adaptiveTimeStepping.reset(new TimeStepper(schedule().getTuning(), timer.currentStepNum(), terminalOutput_));
+                adaptiveTimeStepping.reset(new TimeStepper(schedule().getTuning(timer.currentStepNum()), terminalOutput_));
             }
             else {
                 adaptiveTimeStepping.reset(new TimeStepper(terminalOutput_));
@@ -216,7 +216,7 @@ public:
             if (adaptiveTimeStepping) {
                 if (enableTUNING) {
                     if (events.hasEvent(ScheduleEvents::TUNING_CHANGE,timer.currentStepNum())) {
-                        adaptiveTimeStepping->updateTUNING(schedule().getTuning(), timer.currentStepNum());
+                        adaptiveTimeStepping->updateTUNING(schedule().getTuning(timer.currentStepNum()));
                     }
                 }
 
@@ -275,6 +275,15 @@ public:
                 OpmLog::debug(msg);
             }
 
+        }
+
+        // make sure all output is written to disk before run is finished
+        {
+            Dune::Timer finalOutputTimer;
+            finalOutputTimer.start();
+
+            ebosSimulator_.problem().finalizeOutput();
+            report.output_write_time += finalOutputTimer.stop();
         }
 
         // Stop timer and create timing report

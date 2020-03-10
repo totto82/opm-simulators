@@ -25,15 +25,21 @@
 #include <boost/test/unit_test.hpp>
 
 #include <opm/common/OpmLog/Location.hpp>
-#include <opm/material/fluidmatrixinteractions/EclEpsScalingPoints.hpp>
-#include <opm/material/fluidsystems/blackoilpvt/DryGasPvt.hpp>
-#include <opm/material/fluidsystems/blackoilpvt/SolventPvt.hpp>
-#include <opm/material/fluidsystems/blackoilpvt/WetGasPvt.hpp>
 #include <opm/parser/eclipse/Deck/Deck.hpp>
 #include <opm/parser/eclipse/Deck/DeckItem.hpp>
+#include <opm/parser/eclipse/EclipseState/Aquancon.hpp>
+#include <opm/parser/eclipse/EclipseState/AquiferCT.hpp>
+#include <opm/parser/eclipse/EclipseState/Aquifetp.hpp>
+#include <opm/parser/eclipse/EclipseState/EclipseConfig.hpp>
 #include <opm/parser/eclipse/EclipseState/Runspec.hpp>
 #include <opm/parser/eclipse/EclipseState/Edit/EDITNNC.hpp>
+#include <opm/parser/eclipse/EclipseState/Grid/FaceDir.hpp>
+#include <opm/parser/eclipse/EclipseState/Grid/Fault.hpp>
+#include <opm/parser/eclipse/EclipseState/Grid/FaultCollection.hpp>
+#include <opm/parser/eclipse/EclipseState/Grid/FaultFace.hpp>
+#include <opm/parser/eclipse/EclipseState/Grid/MULTREGTScanner.hpp>
 #include <opm/parser/eclipse/EclipseState/Grid/NNC.hpp>
+#include <opm/parser/eclipse/EclipseState/Grid/TransMult.hpp>
 #include <opm/parser/eclipse/EclipseState/InitConfig/Equil.hpp>
 #include <opm/parser/eclipse/EclipseState/InitConfig/FoamConfig.hpp>
 #include <opm/parser/eclipse/EclipseState/InitConfig/InitConfig.hpp>
@@ -49,11 +55,13 @@
 #include <opm/parser/eclipse/EclipseState/Schedule/Group/Group.hpp>
 #include <opm/parser/eclipse/EclipseState/Schedule/Group/GuideRateModel.hpp>
 #include <opm/parser/eclipse/EclipseState/Schedule/MessageLimits.hpp>
+#include <opm/parser/eclipse/EclipseState/Schedule/MSW/icd.hpp>
 #include <opm/parser/eclipse/EclipseState/Schedule/MSW/SpiralICD.hpp>
 #include <opm/parser/eclipse/EclipseState/Schedule/MSW/Valve.hpp>
 #include <opm/parser/eclipse/EclipseState/Schedule/OilVaporizationProperties.hpp>
 #include <opm/parser/eclipse/EclipseState/Schedule/RFTConfig.hpp>
 #include <opm/parser/eclipse/EclipseState/Schedule/Schedule.hpp>
+#include <opm/parser/eclipse/EclipseState/Schedule/ScheduleTypes.hpp>
 #include <opm/parser/eclipse/EclipseState/Schedule/TimeMap.hpp>
 #include <opm/parser/eclipse/EclipseState/Schedule/Tuning.hpp>
 #include <opm/parser/eclipse/EclipseState/Schedule/UDQ/UDQActive.hpp>
@@ -73,6 +81,8 @@
 #include <opm/parser/eclipse/EclipseState/Schedule/Well/Well.hpp>
 #include <opm/parser/eclipse/EclipseState/Schedule/Well/WList.hpp>
 #include <opm/parser/eclipse/EclipseState/Schedule/Well/WListManager.hpp>
+#include <opm/parser/eclipse/EclipseState/SimulationConfig/BCConfig.hpp>
+#include <opm/parser/eclipse/EclipseState/SimulationConfig/RockConfig.hpp>
 #include <opm/parser/eclipse/EclipseState/SimulationConfig/SimulationConfig.hpp>
 #include <opm/parser/eclipse/EclipseState/SimulationConfig/ThresholdPressure.hpp>
 #include <opm/parser/eclipse/EclipseState/SummaryConfig/SummaryConfig.hpp>
@@ -80,13 +90,16 @@
 #include <opm/parser/eclipse/EclipseState/Tables/ColumnSchema.hpp>
 #include <opm/parser/eclipse/EclipseState/Tables/Eqldims.hpp>
 #include <opm/parser/eclipse/EclipseState/Tables/FlatTable.hpp>
+#include <opm/parser/eclipse/EclipseState/Tables/DenT.hpp>
 #include <opm/parser/eclipse/EclipseState/Tables/JFunc.hpp>
 #include <opm/parser/eclipse/EclipseState/Tables/PlymwinjTable.hpp>
+#include <opm/parser/eclipse/EclipseState/Tables/PlyshlogTable.hpp>
 #include <opm/parser/eclipse/EclipseState/Tables/PvtgTable.hpp>
 #include <opm/parser/eclipse/EclipseState/Tables/PvtoTable.hpp>
 #include <opm/parser/eclipse/EclipseState/Tables/Regdims.hpp>
 #include <opm/parser/eclipse/EclipseState/Tables/Rock2dTable.hpp>
 #include <opm/parser/eclipse/EclipseState/Tables/Rock2dtrTable.hpp>
+#include <opm/parser/eclipse/EclipseState/Tables/RocktabTable.hpp>
 #include <opm/parser/eclipse/EclipseState/Tables/SimpleTable.hpp>
 #include <opm/parser/eclipse/EclipseState/Tables/SkprpolyTable.hpp>
 #include <opm/parser/eclipse/EclipseState/Tables/SkprwatTable.hpp>
@@ -162,6 +175,15 @@ Opm::data::Segment getSegment()
 }
 
 
+Opm::data::CurrentControl getCurrentControl()
+{
+    Opm::data::CurrentControl curr;
+    curr.isProducer = true;
+    curr.prod = ::Opm::Well::ProducerCMode::CRAT;
+    return curr;
+}
+
+
 Opm::data::Well getWell()
 {
     Opm::data::Well well1;
@@ -172,6 +194,7 @@ Opm::data::Well getWell()
     well1.control = 4;
     well1.connections.push_back(getConnection());
     well1.segments.insert({0, getSegment()});
+    well1.current_control = getCurrentControl();
     return well1;
 }
 
@@ -180,6 +203,18 @@ Opm::ThresholdPressure getThresholdPressure()
 {
     return Opm::ThresholdPressure(false, true, {{true, 1.0}, {false, 2.0}},
                                   {{{1,2},{false,3.0}},{{2,3},{true,4.0}}});
+}
+
+
+Opm::RockConfig getRockConfig()
+{
+    return Opm::RockConfig(true, {{100, 0.25}, {200, 0.30}}, "ROCKNUM", 10, false, Opm::RockConfig::Hysteresis::HYSTER);
+}
+
+
+Opm::BCConfig getBCConfig()
+{
+    return Opm::BCConfig({{10,11,12,13,14,15,Opm::BCType::RATE,Opm::FaceDir::XPlus, Opm::BCComponent::GAS, 100.0}});
 }
 
 
@@ -201,6 +236,14 @@ Opm::TableColumn getTableColumn()
 }
 
 
+Opm::DenT getDenT()
+{
+    std::vector<Opm::DenT::entry> records;
+    records.emplace_back(1,2,3);
+    records.emplace_back(4,5,6);
+    return Opm::DenT(records);
+}
+
 Opm::SimpleTable getSimpleTable()
 {
     Opm::OrderedMap<std::string, Opm::TableColumn> data;
@@ -221,10 +264,29 @@ Opm::FoamData getFoamData()
 }
 
 
+Opm::FoamConfig getFoamConfig()
+{
+    return Opm::FoamConfig({getFoamData(), getFoamData()},
+                           Opm::Phase::GAS,
+                           Opm::FoamConfig::MobilityModel::TAB);
+}
+
+
 Opm::TimeMap getTimeMap()
 {
     return Opm::TimeMap({123});
 }
+
+
+Opm::RestartConfig getRestartConfig()
+{
+    Opm::DynamicState<Opm::RestartSchedule> rsched({Opm::RestartSchedule(1, 2, 3)}, 2);
+    Opm::DynamicState<std::map<std::string,int>> rkw({{{"test",3}}}, 3);
+    Opm::IOConfig io(true, false, true, false, false, true, "test1", true,
+                     "test2", true, "test3", false);
+    return Opm::RestartConfig(getTimeMap(), 1, true, rsched, rkw, {false, true});
+}
+
 
 Opm::PvtgTable getPvtgTable()
 {
@@ -256,8 +318,8 @@ Opm::TableContainer getTableContainer()
     data.insert({"test3", getTableColumn()});
     Opm::SimpleTable tab1(getTableSchema(), data, true);
     Opm::TableContainer result(2);
-    result.addTable(0, std::make_shared<const Opm::SimpleTable>(tab1));
-    result.addTable(1, std::make_shared<const Opm::SimpleTable>(tab1));
+    result.addTable(0, std::make_shared<Opm::SimpleTable>(tab1));
+    result.addTable(1, std::make_shared<Opm::SimpleTable>(tab1));
     return result;
 }
 
@@ -266,9 +328,9 @@ Opm::Well getFullWell()
 {
     Opm::UnitSystem unitSystem;
     return Opm::Well("test1", "test2", 1, 2, 3, 4, 5.0,
-                     Opm::Phase::WATER, Opm::Connection::Order::DEPTH,
+                     Opm::WellType(Opm::Phase::WATER), Opm::Connection::Order::DEPTH,
                      unitSystem, 6.0, Opm::Well::Status::SHUT,
-                     7.0, true, true, false,
+                     7.0, true, false,
                      Opm::Well::WellGuideRate{true, 1.0, Opm::Well::GuideRateTarget::COMB, 2.0},
                      8.0, 9.0, false,
                      std::make_shared<Opm::WellEconProductionLimits>(),
@@ -286,13 +348,9 @@ Opm::Well getFullWell()
 Opm::VFPInjTable getVFPInjTable()
 {
     Opm::VFPInjTable::array_type table;
-    Opm::VFPInjTable::extents shape;
-    shape[0] = 3;
-    shape[1] = 2;
-    table.resize(shape);
-    double foo = 1.0;
-    for (size_t i = 0; i < table.num_elements(); ++i)
-        *(table.data() + i) = foo++;
+    table.resize(3*2);
+    std::iota(table.begin(), table.end(), 1.0);
+
     return Opm::VFPInjTable(1, 2.0, Opm::VFPInjTable::FLO_WAT, {1.0, 2.0},
                             {3.0, 4.0, 5.0}, table);
 }
@@ -301,16 +359,9 @@ Opm::VFPInjTable getVFPInjTable()
 Opm::VFPProdTable getVFPProdTable()
 {
     Opm::VFPProdTable::array_type table;
-    Opm::VFPProdTable::extents shape;
-    shape[0] = 1;
-    shape[1] = 2;
-    shape[2] = 3;
-    shape[3] = 4;
-    shape[4] = 5;
-    table.resize(shape);
-    double foo = 1.0;
-    for (size_t i = 0; i < table.num_elements(); ++i)
-        *(table.data() + i) = foo++;
+    table.resize(1*2*3*4*5);
+    std::iota(table.begin(), table.end(), 1.0);
+
     return Opm::VFPProdTable(1, 2.0, Opm::VFPProdTable::FLO_OIL,
                              Opm::VFPProdTable::WFR_WOR,
                              Opm::VFPProdTable::GFR_GLR,
@@ -379,15 +430,15 @@ Opm::DeckRecord getDeckRecord()
                        Opm::type_tag::string, "test5",
                        {Opm::value::status::deck_value},
                        true,
-                       {Opm::Dimension("DimensionLess", 7.0, 8.0)},
-                       {Opm::Dimension("Metric", 10.0, 11.0)});
+                       {Opm::Dimension(7.0, 8.0)},
+                       {Opm::Dimension(10.0, 11.0)});
 
     Opm::DeckItem item2({1.0}, {2}, {"test3"}, {Opm::UDAValue(4)},
                        Opm::type_tag::string, "test6",
                        {Opm::value::status::deck_value},
                        true,
-                       {Opm::Dimension("DimensionLess", 7.0, 8.0)},
-                       {Opm::Dimension("Metric", 10.0, 11.0)});
+                       {Opm::Dimension(7.0, 8.0)},
+                       {Opm::Dimension(10.0, 11.0)});
 
     return Opm::DeckRecord({item1, item2});
 }
@@ -395,43 +446,10 @@ Opm::DeckRecord getDeckRecord()
 
 Opm::Tuning getTuning()
 {
-    return Opm::Tuning(Opm::DynamicState<double>(std::vector<double>{1.0}, 1),  //TSINIT
-                       Opm::DynamicState<double>(std::vector<double>{2.0}, 1),  //TSMAXZ
-                       Opm::DynamicState<double>(std::vector<double>{3.0}, 1),  //TSMINZ
-                       Opm::DynamicState<double>(std::vector<double>{4.0}, 1),  //TSMCHP
-                       Opm::DynamicState<double>(std::vector<double>{5.0}, 1),  //TSFMAX
-                       Opm::DynamicState<double>(std::vector<double>{6.0}, 1),  //TSFMIN
-                       Opm::DynamicState<double>(std::vector<double>{7.0}, 1),  //TSFCNV
-                       Opm::DynamicState<double>(std::vector<double>{8.0}, 1),  //TFDIFF
-                       Opm::DynamicState<double>(std::vector<double>{9.0}, 1),  //THRUPT
-                       Opm::DynamicState<double>(std::vector<double>{10.0}, 1), //TMAXWC
-                       Opm::DynamicState<int>(std::vector<int>{1}, 1),       //TMAXWC_has_value
-                       Opm::DynamicState<double>(std::vector<double>{11.0}, 1), //TRGTTE
-                       Opm::DynamicState<double>(std::vector<double>{12.0}, 1), //TRGCNV
-                       Opm::DynamicState<double>(std::vector<double>{13.0}, 1), //TRGMBE
-                       Opm::DynamicState<double>(std::vector<double>{14.0}, 1), //TRGLCV
-                       Opm::DynamicState<double>(std::vector<double>{15.0}, 1), //XXXTTE
-                       Opm::DynamicState<double>(std::vector<double>{16.0}, 1), //XXXCNV
-                       Opm::DynamicState<double>(std::vector<double>{17.0}, 1), //XXXMBE
-                       Opm::DynamicState<double>(std::vector<double>{18.0}, 1), //XXXLCV
-                       Opm::DynamicState<double>(std::vector<double>{19.0}, 1), //XXXWFL
-                       Opm::DynamicState<double>(std::vector<double>{20.0}, 1), ///TRGFIP
-                       Opm::DynamicState<double>(std::vector<double>{21.0}, 1), //TRGSFT
-                       Opm::DynamicState<int>(std::vector<int>{2}, 1),       //TRGSFT_has_value
-                       Opm::DynamicState<double>(std::vector<double>{22.0}, 1), // THIONX
-                       Opm::DynamicState<int>(std::vector<int>{3}, 1),       //TRWGHT
-                       Opm::DynamicState<int>(std::vector<int>{4}, 1),       //NEWTMX
-                       Opm::DynamicState<int>(std::vector<int>{5}, 1),       //NEWTMN
-                       Opm::DynamicState<int>(std::vector<int>{6}, 1),       //LITMAX
-                       Opm::DynamicState<int>(std::vector<int>{7}, 1),       //LITMIN
-                       Opm::DynamicState<int>(std::vector<int>{8}, 1),       //MXWSIT
-                       Opm::DynamicState<int>(std::vector<int>{9}, 1),       //MXWPIT
-                       Opm::DynamicState<double>(std::vector<double>{23.0}, 1), //DDPLIM
-                       Opm::DynamicState<double>(std::vector<double>{24.0}, 1), //DDSLIM
-                       Opm::DynamicState<double>(std::vector<double>{25.0}, 1), //TGRDPR
-                       Opm::DynamicState<double>(std::vector<double>{26.0}, 1), //XXXDPR
-                       Opm::DynamicState<int>(std::vector<int>{10}, 1),      //XXDPR_has_value
-                       std::map<std::string,bool>{{"test", false}}); // resetValue
+    return Opm::Tuning{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, true,
+                       11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0,
+                       20.0, 21.0, false, 22.0, 3, 4, 5, 6, 7, 8, 9, 23.0, 24.0,
+                       25.0, 26.0, true};
 }
 
 
@@ -461,6 +479,49 @@ Opm::Action::ActionX getActionX()
                                                   true, false)},
                                 ast, {getCondition()}, 4, 5);
 }
+
+
+Opm::AquiferCT getAquiferCT() {
+    Opm::AquiferCT::AQUCT_data data;
+    data.aquiferID = 1;
+    data.inftableID = 2;
+    data.pvttableID = 3;
+    data.phi_aq = 100;
+    data.d0 = 1;
+    data.C_t = 10;
+    data.r_o = 1.5;
+    data.k_a = 100;
+    data.c1 = 0.78;
+    data.h = 1;
+    data.c2 = 45;
+    data.p0 = std::make_pair(true, 98);
+    data.td = {1,2,3};
+    data.pi = {4,5,6};
+    data.cell_id = {0,10,100};
+
+    return Opm::AquiferCT( { data } );
+}
+
+Opm::Aquifetp getAquifetp() {
+    Opm::Aquifetp::AQUFETP_data data;
+
+    data.aquiferID = 1;
+    data.pvttableID = 3;
+    data.C_t = 10;
+    data.p0 = std::make_pair(true, 98);
+    data.V0 = 0;
+    data.d0 = 0;
+
+    return Opm::Aquifetp( { data } );
+}
+
+
+
+Opm::Aquancon getAquancon() {
+    Opm::Aquancon::AquancCell cell(1, 100, std::make_pair(false, 0), 100, Opm::FaceDir::XPlus);
+    return Opm::Aquancon( std::unordered_map<int, std::vector<Opm::Aquancon::AquancCell>>{{1, {cell}}});
+}
+
 #endif
 
 
@@ -483,13 +544,17 @@ std::tuple<T,int,int> PackUnpack(const T& in)
 }
 
 
+#define DO_CHECKS(TYPE_NAME) \
+    BOOST_CHECK_MESSAGE(std::get<1>(val2) == std::get<2>(val2), "Packed size differ from unpack size for " #TYPE_NAME);  \
+    BOOST_CHECK_MESSAGE(val1 == std::get<0>(val2), "Deserialized " #TYPE_NAME " differ");
+
+
 BOOST_AUTO_TEST_CASE(Solution)
 {
 #if HAVE_MPI
-    Opm::data::Solution sol1 = getSolution();
-    auto sol2 = PackUnpack(sol1);
-    BOOST_CHECK(std::get<1>(sol2) == std::get<2>(sol2));
-    BOOST_CHECK(sol1 == std::get<0>(sol2));
+    Opm::data::Solution val1 = getSolution();
+    auto val2 = PackUnpack(val1);
+    DO_CHECKS(data::Solution)
 #endif
 }
 
@@ -497,10 +562,9 @@ BOOST_AUTO_TEST_CASE(Solution)
 BOOST_AUTO_TEST_CASE(Rates)
 {
 #if HAVE_MPI
-    Opm::data::Rates rat1 = getRates();
-    auto rat2 = PackUnpack(rat1);
-    BOOST_CHECK(std::get<1>(rat2) == std::get<2>(rat2));
-    BOOST_CHECK(rat1 == std::get<0>(rat2));
+    Opm::data::Rates val1 = getRates();
+    auto val2 = PackUnpack(val1);
+    DO_CHECKS(data::Rates)
 #endif
 }
 
@@ -508,10 +572,20 @@ BOOST_AUTO_TEST_CASE(Rates)
 BOOST_AUTO_TEST_CASE(dataConnection)
 {
 #if HAVE_MPI
-    Opm::data::Connection con1 = getConnection();
-    auto con2 = PackUnpack(con1);
-    BOOST_CHECK(std::get<1>(con2) == std::get<2>(con2));
-    BOOST_CHECK(con1 == std::get<0>(con2));
+    Opm::data::Connection val1 = getConnection();
+    auto val2 = PackUnpack(val1);
+    DO_CHECKS(data::Connection)
+#endif
+}
+
+
+BOOST_AUTO_TEST_CASE(dataCurrentControl)
+{
+#if HAVE_MPI
+    Opm::data::CurrentControl cur1 = getCurrentControl();
+    auto cur2 = PackUnpack(cur1);
+    BOOST_CHECK(std::get<1>(cur2) == std::get<2>(cur2));
+    BOOST_CHECK(cur1 == std::get<0>(cur2));
 #endif
 }
 
@@ -519,10 +593,9 @@ BOOST_AUTO_TEST_CASE(dataConnection)
 BOOST_AUTO_TEST_CASE(dataSegment)
 {
 #if HAVE_MPI
-    Opm::data::Segment seg1 = getSegment();
-    auto seg2 = PackUnpack(seg1);
-    BOOST_CHECK(std::get<1>(seg2) == std::get<2>(seg2));
-    BOOST_CHECK(seg1 == std::get<0>(seg2));
+    Opm::data::Segment val1 = getSegment();
+    auto val2 = PackUnpack(val1);
+    DO_CHECKS(data::Segment)
 #endif
 }
 
@@ -530,10 +603,9 @@ BOOST_AUTO_TEST_CASE(dataSegment)
 BOOST_AUTO_TEST_CASE(dataWell)
 {
 #if HAVE_MPI
-    Opm::data::Well well1 = getWell();
-    auto well2 = PackUnpack(well1);
-    BOOST_CHECK(std::get<1>(well2) == std::get<2>(well2));
-    BOOST_CHECK(well1 == std::get<0>(well2));
+    Opm::data::Well val1 = getWell();
+    auto val2 = PackUnpack(val1);
+    DO_CHECKS(data::Well)
 #endif
 }
 
@@ -541,11 +613,10 @@ BOOST_AUTO_TEST_CASE(dataWell)
 BOOST_AUTO_TEST_CASE(WellRates)
 {
 #if HAVE_MPI
-    Opm::data::WellRates wells1;
-    wells1.insert({"test_well", getWell()});
-    auto wells2 = PackUnpack(wells1);
-    BOOST_CHECK(std::get<1>(wells2) == std::get<2>(wells2));
-    BOOST_CHECK(wells1 == std::get<0>(wells2));
+    Opm::data::WellRates val1;
+    val1.insert({"test_well", getWell()});
+    auto val2 = PackUnpack(val1);
+    DO_CHECKS(data::WellRates)
 #endif
 }
 
@@ -553,13 +624,12 @@ BOOST_AUTO_TEST_CASE(WellRates)
 BOOST_AUTO_TEST_CASE(CellData)
 {
 #if HAVE_MPI
-    Opm::data::CellData data1;
-    data1.dim = Opm::UnitSystem::measure::length;
-    data1.data = {1.0, 2.0, 3.0};
-    data1.target = Opm::data::TargetType::RESTART_SOLUTION;
-    auto data2 = PackUnpack(data1);
-    BOOST_CHECK(std::get<1>(data2) == std::get<2>(data2));
-    BOOST_CHECK(data1 == std::get<0>(data2));
+    Opm::data::CellData val1;
+    val1.dim = Opm::UnitSystem::measure::length;
+    val1.data = {1.0, 2.0, 3.0};
+    val1.target = Opm::data::TargetType::RESTART_SOLUTION;
+    auto val2 = PackUnpack(val1);
+    DO_CHECKS(data::cellData)
 #endif
 }
 
@@ -567,10 +637,9 @@ BOOST_AUTO_TEST_CASE(CellData)
 BOOST_AUTO_TEST_CASE(RestartKey)
 {
 #if HAVE_MPI
-    Opm::RestartKey key1("key", Opm::UnitSystem::measure::length, true);
-    auto key2 = PackUnpack(key1);
-    BOOST_CHECK(std::get<1>(key2) == std::get<2>(key2));
-    BOOST_CHECK(key1 == std::get<0>(key2));
+    Opm::RestartKey val1("key", Opm::UnitSystem::measure::length, true);
+    auto val2 = PackUnpack(val1);
+    DO_CHECKS(RestartKey)
 #endif
 }
 
@@ -582,8 +651,7 @@ BOOST_AUTO_TEST_CASE(RestartValue)
     wells1.insert({"test_well", getWell()});
     Opm::RestartValue val1(getSolution(), wells1);
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(RestartValue)
 #endif
 }
 
@@ -593,8 +661,16 @@ BOOST_AUTO_TEST_CASE(ThresholdPressure)
 #if HAVE_MPI
     Opm::ThresholdPressure val1 = getThresholdPressure();
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(ThresholdPressure)
+#endif
+}
+
+BOOST_AUTO_TEST_CASE(RockConfig)
+{
+#if HAVE_MPI
+    Opm::RockConfig val1 = getRockConfig();
+    auto val2 = PackUnpack(val1);
+    DO_CHECKS(RockConfig)
 #endif
 }
 
@@ -604,8 +680,7 @@ BOOST_AUTO_TEST_CASE(EDITNNC)
 #if HAVE_MPI
     Opm::EDITNNC val1({{1,2,1.0},{2,3,2.0}});
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(EDITNNC)
 #endif
 }
 
@@ -615,8 +690,7 @@ BOOST_AUTO_TEST_CASE(NNC)
 #if HAVE_MPI
     Opm::NNC val1({{1,2,1.0},{2,3,2.0}});
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(NNC)
 #endif
 }
 
@@ -626,8 +700,7 @@ BOOST_AUTO_TEST_CASE(Rock2dTable)
 #if HAVE_MPI
     Opm::Rock2dTable val1({{1.0,2.0},{3.0,4.0}}, {1.0, 2.0, 3.0});
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(Rock2dTable)
 #endif
 }
 
@@ -637,8 +710,7 @@ BOOST_AUTO_TEST_CASE(Rock2dtrTable)
 #if HAVE_MPI
     Opm::Rock2dtrTable val1({{1.0,2.0},{3.0,4.0}}, {1.0, 2.0, 3.0});
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(Rock2dtrTable)
 #endif
 }
 
@@ -649,12 +721,10 @@ BOOST_AUTO_TEST_CASE(ColumnSchema)
     Opm::ColumnSchema val1("test1", Opm::Table::INCREASING,
                            Opm::Table::DEFAULT_LINEAR);
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
-    Opm::ColumnSchema val3("test2", Opm::Table::DECREASING, 1.0);
-    val2 = PackUnpack(val3);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val3 == std::get<0>(val2));
+    DO_CHECKS(ColumnSchema)
+    val1 = Opm::ColumnSchema("test2", Opm::Table::DECREASING, 1.0);
+    val2 = PackUnpack(val1);
+    DO_CHECKS(ColumnSchema)
 #endif
 }
 
@@ -664,8 +734,7 @@ BOOST_AUTO_TEST_CASE(TableSchema)
 #if HAVE_MPI
     Opm::TableSchema val1 = getTableSchema();
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(TableSchema)
 #endif
 }
 
@@ -675,8 +744,7 @@ BOOST_AUTO_TEST_CASE(TableColumn)
 #if HAVE_MPI
     Opm::TableColumn val1 = getTableColumn();
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(TableColumn)
 #endif
 }
 
@@ -686,8 +754,7 @@ BOOST_AUTO_TEST_CASE(SimpleTable)
 #if HAVE_MPI
     Opm::SimpleTable val1 = getSimpleTable();
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(SimpleTable)
 #endif
 }
 
@@ -699,11 +766,10 @@ BOOST_AUTO_TEST_CASE(TableContainer)
     data.insert({"test3", getTableColumn()});
     Opm::SimpleTable tab1(getTableSchema(), data, true);
     Opm::TableContainer val1(2);
-    val1.addTable(0, std::make_shared<const Opm::SimpleTable>(tab1));
-    val1.addTable(1, std::make_shared<const Opm::SimpleTable>(tab1));
+    val1.addTable(0, std::make_shared<Opm::SimpleTable>(tab1));
+    val1.addTable(1, std::make_shared<Opm::SimpleTable>(tab1));
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(TableContainer)
 #endif
 }
 
@@ -713,8 +779,7 @@ BOOST_AUTO_TEST_CASE(EquilRecord)
 #if HAVE_MPI
     Opm::EquilRecord val1 = getEquilRecord();
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(EquilRecord)
 #endif
 }
 
@@ -724,8 +789,7 @@ BOOST_AUTO_TEST_CASE(Equil)
 #if HAVE_MPI
     Opm::Equil val1({getEquilRecord(), getEquilRecord()});
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(Equil)
 #endif
 }
 
@@ -735,8 +799,7 @@ BOOST_AUTO_TEST_CASE(FoamData)
 #if HAVE_MPI
     Opm::FoamData val1 = getFoamData();
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(FoamData)
 #endif
 }
 
@@ -744,10 +807,9 @@ BOOST_AUTO_TEST_CASE(FoamData)
 BOOST_AUTO_TEST_CASE(FoamConfig)
 {
 #if HAVE_MPI
-    Opm::FoamConfig val1({getFoamData(), getFoamData()});
+    Opm::FoamConfig val1 = getFoamConfig();
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(FoamConfig)
 #endif
 }
 
@@ -756,11 +818,10 @@ BOOST_AUTO_TEST_CASE(InitConfig)
 {
 #if HAVE_MPI
     Opm::InitConfig val1(Opm::Equil({getEquilRecord(), getEquilRecord()}),
-                         Opm::FoamConfig({getFoamData(), getFoamData()}),
+                         getFoamConfig(),
                          true, true, true, 20, "test1");
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(InitConfig)
 #endif
 }
 
@@ -768,10 +829,19 @@ BOOST_AUTO_TEST_CASE(InitConfig)
 BOOST_AUTO_TEST_CASE(SimulationConfig)
 {
 #if HAVE_MPI
-    Opm::SimulationConfig val1(getThresholdPressure(), false, true, false, true);
+    Opm::SimulationConfig val1(getThresholdPressure(), getBCConfig(), getRockConfig(), false, true, false, true);
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(SimulationConfig)
+#endif
+}
+
+
+BOOST_AUTO_TEST_CASE(BCConfig)
+{
+#if HAVE_MPI
+    Opm::BCConfig val1({{10,11,12,13,14,15,Opm::BCType::RATE, Opm::FaceDir::XPlus, Opm::BCComponent::GAS, 100}});
+    auto val2 = PackUnpack(val1);
+    DO_CHECKS(BCConfig)
 #endif
 }
 
@@ -781,8 +851,7 @@ BOOST_AUTO_TEST_CASE(RestartSchedule)
 #if HAVE_MPI
     Opm::RestartSchedule val1(1, 2, 3);
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(RestartSchedule)
 #endif
 }
 
@@ -793,8 +862,7 @@ BOOST_AUTO_TEST_CASE(TimeMap)
 #if HAVE_MPI
     Opm::TimeMap val1 = getTimeMap();
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(TimeMap)
 #endif
 }
 
@@ -804,10 +872,11 @@ BOOST_AUTO_TEST_CASE(RestartConfig)
 #if HAVE_MPI
     Opm::DynamicState<Opm::RestartSchedule> rsched({Opm::RestartSchedule(1, 2, 3)}, 2);
     Opm::DynamicState<std::map<std::string,int>> rkw({{{"test",3}}}, 3);
+    Opm::IOConfig io(true, false, true, false, false, true, "test1", true,
+                     "test2", true, "test3", false);
     Opm::RestartConfig val1(getTimeMap(), 1, true, rsched, rkw, {false, true});
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(RestartConfig)
 #endif
 }
 
@@ -815,11 +884,10 @@ BOOST_AUTO_TEST_CASE(RestartConfig)
 BOOST_AUTO_TEST_CASE(IOConfig)
 {
 #if HAVE_MPI
-    Opm::IOConfig val1(true, false, true, false, false, true, 1, "test1", true,
+    Opm::IOConfig val1(true, false, true, false, false, true, "test1", true,
                        "test2", true, "test3", false);
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(IOConfig)
 #endif
 }
 
@@ -829,8 +897,7 @@ BOOST_AUTO_TEST_CASE(Phases)
 #if HAVE_MPI
     Opm::Phases val1(true, true, true, false, true, false, true, false);
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(Phases)
 #endif
 }
 
@@ -840,8 +907,7 @@ BOOST_AUTO_TEST_CASE(Tabdims)
 #if HAVE_MPI
     Opm::Tabdims val1(1,2,3,4,5,6);
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(Tabdims)
 #endif
 }
 
@@ -851,8 +917,7 @@ BOOST_AUTO_TEST_CASE(EndpointScaling)
 #if HAVE_MPI
     Opm::EndpointScaling val1(std::bitset<4>(13));
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(EndpointScaling)
 #endif
 }
 
@@ -862,8 +927,7 @@ BOOST_AUTO_TEST_CASE(Welldims)
 #if HAVE_MPI
     Opm::Welldims val1(1,2,3,4);
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(Welldims)
 #endif
 }
 
@@ -873,8 +937,7 @@ BOOST_AUTO_TEST_CASE(WellSegmentDims)
 #if HAVE_MPI
     Opm::WellSegmentDims val1(1,2,3);
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(WellSegmentDims)
 #endif
 }
 
@@ -884,8 +947,7 @@ BOOST_AUTO_TEST_CASE(UDQParams)
 #if HAVE_MPI
     Opm::UDQParams val1(true, 1, 2.0, 3.0, 4.0);
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(UDQParams)
 #endif
 }
 
@@ -895,8 +957,7 @@ BOOST_AUTO_TEST_CASE(EclHysterConfig)
 #if HAVE_MPI
     Opm::EclHysterConfig val1(true, 1, 2);
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(EclHysterConfig)
 #endif
 }
 
@@ -906,8 +967,7 @@ BOOST_AUTO_TEST_CASE(Actdims)
 #if HAVE_MPI
     Opm::Actdims val1(1,2,3,4);
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(Actdims)
 #endif
 }
 
@@ -922,11 +982,11 @@ BOOST_AUTO_TEST_CASE(Runspec)
                       Opm::WellSegmentDims(1,2,3),
                       Opm::UDQParams(true, 1, 2.0, 3.0, 4.0),
                       Opm::EclHysterConfig(true, 1, 2),
-                      Opm::Actdims(1,2,3,4));
+                      Opm::Actdims(1,2,3,4),
+                      Opm::SatFuncControls(5.0e-7, Opm::SatFuncControls::ThreePhaseOilKrModel::Stone2));
 
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(Runspec)
 #endif
 }
 
@@ -936,8 +996,7 @@ BOOST_AUTO_TEST_CASE(PvtgTable)
 #if HAVE_MPI
     Opm::PvtgTable val1 = getPvtgTable();
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(PvtgTable)
 #endif
 }
 
@@ -947,8 +1006,7 @@ BOOST_AUTO_TEST_CASE(PvtoTable)
 #if HAVE_MPI
     Opm::PvtoTable val1 = getPvtoTable();
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(PvtoTable)
 #endif
 }
 
@@ -959,8 +1017,7 @@ BOOST_AUTO_TEST_CASE(JFunc)
     Opm::JFunc val1(Opm::JFunc::Flag::BOTH, 1.0, 2.0,
                     3.0, 4.0, Opm::JFunc::Direction::XY);
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(JFunc)
 #endif
 }
 
@@ -970,8 +1027,7 @@ BOOST_AUTO_TEST_CASE(PVTWRecord)
 #if HAVE_MPI
     Opm::PVTWRecord val1{1.0, 2.0, 3.0, 4.0, 5.0};
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(PVTWRecord)
 #endif
 }
 
@@ -981,8 +1037,7 @@ BOOST_AUTO_TEST_CASE(PvtwTable)
 #if HAVE_MPI
     Opm::PvtwTable val1({Opm::PVTWRecord{1.0, 2.0, 3.0, 4.0, 5.0}});
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(PvtwTable)
 #endif
 }
 
@@ -992,8 +1047,7 @@ BOOST_AUTO_TEST_CASE(PVCDORecord)
 #if HAVE_MPI
     Opm::PVTWRecord val1{1.0, 2.0, 3.0, 4.0, 5.0};
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(PVTWRecord)
 #endif
 }
 
@@ -1003,8 +1057,7 @@ BOOST_AUTO_TEST_CASE(PvcdoTable)
 #if HAVE_MPI
     Opm::PvcdoTable val1({Opm::PVCDORecord{1.0, 2.0, 3.0, 4.0, 5.0}});
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(PvcdoTable)
 #endif
 }
 
@@ -1014,8 +1067,7 @@ BOOST_AUTO_TEST_CASE(DENSITYRecord)
 #if HAVE_MPI
     Opm::DENSITYRecord val1{1.0, 2.0, 3.0};
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(DENSITYRecord)
 #endif
 }
 
@@ -1025,8 +1077,7 @@ BOOST_AUTO_TEST_CASE(DensityTable)
 #if HAVE_MPI
     Opm::DensityTable val1({Opm::DENSITYRecord{1.0, 2.0, 3.0}});
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(DensityTable)
 #endif
 }
 
@@ -1036,8 +1087,7 @@ BOOST_AUTO_TEST_CASE(VISCREFRecord)
 #if HAVE_MPI
     Opm::VISCREFRecord val1{1.0, 2.0};
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(VISCREFRecord)
 #endif
 }
 
@@ -1047,8 +1097,7 @@ BOOST_AUTO_TEST_CASE(ViscrefTable)
 #if HAVE_MPI
     Opm::ViscrefTable val1({Opm::VISCREFRecord{1.0, 2.0}});
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(ViscrefTable)
 #endif
 }
 
@@ -1058,8 +1107,7 @@ BOOST_AUTO_TEST_CASE(WATDENTRecord)
 #if HAVE_MPI
     Opm::WATDENTRecord val1{1.0, 2.0, 3.0};
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(WATDENTRecord)
 #endif
 }
 
@@ -1069,8 +1117,7 @@ BOOST_AUTO_TEST_CASE(WatdentTable)
 #if HAVE_MPI
     Opm::WatdentTable val1({Opm::WATDENTRecord{1.0, 2.0, 3.0}});
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(WatdentTable)
 #endif
 }
 
@@ -1080,8 +1127,7 @@ BOOST_AUTO_TEST_CASE(PlymwinjTable)
 #if HAVE_MPI
     Opm::PlymwinjTable val1({1.0}, {2.0}, 1, {{1.0}, {2.0}});
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(PlymwinjTable)
 #endif
 }
 
@@ -1091,8 +1137,7 @@ BOOST_AUTO_TEST_CASE(SkprpolyTable)
 #if HAVE_MPI
     Opm::SkprpolyTable val1({1.0}, {2.0}, 1, {{1.0}, {2.0}}, 3.0);
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(SkprpolyTable)
 #endif
 }
 
@@ -1102,8 +1147,7 @@ BOOST_AUTO_TEST_CASE(SkprwatTable)
 #if HAVE_MPI
     Opm::SkprwatTable val1({1.0}, {2.0}, 1, {{1.0}, {2.0}});
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(SkprwatTable)
 #endif
 }
 
@@ -1113,8 +1157,7 @@ BOOST_AUTO_TEST_CASE(Regdims)
 #if HAVE_MPI
     Opm::Regdims val1(1,2,3,4,5);
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(Regdims)
 #endif
 }
 
@@ -1124,8 +1167,7 @@ BOOST_AUTO_TEST_CASE(Eqldims)
 #if HAVE_MPI
     Opm::Eqldims val1(1,2,3,4,5);
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(Eqldims)
 #endif
 }
 
@@ -1135,8 +1177,7 @@ BOOST_AUTO_TEST_CASE(Aqudims)
 #if HAVE_MPI
     Opm::Aqudims val1(1,2,3,4,5,6,7,8);
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(Aqudims)
 #endif
 }
 
@@ -1146,8 +1187,7 @@ BOOST_AUTO_TEST_CASE(ROCKRecord)
 #if HAVE_MPI
     Opm::ROCKRecord val1{1.0,2.0};
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(ROCKRecord)
 #endif
 }
 
@@ -1157,8 +1197,7 @@ BOOST_AUTO_TEST_CASE(RockTable)
 #if HAVE_MPI
     Opm::RockTable val1({Opm::ROCKRecord{1.0,2.0}});
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(RockTable)
 #endif
 }
 
@@ -1177,11 +1216,17 @@ BOOST_AUTO_TEST_CASE(TableManager)
                            Opm::PvtwTable({Opm::PVTWRecord{1.0, 2.0, 3.0, 4.0, 5.0}}),
                            Opm::PvcdoTable({Opm::PVCDORecord{1.0, 2.0, 3.0, 4.0, 5.0}}),
                            Opm::DensityTable({Opm::DENSITYRecord{1.0, 2.0, 3.0}}),
+                           Opm::PlyvmhTable({Opm::PlyvmhRecord{1.0, 2.0, 3.0, 4.0}}),
                            Opm::RockTable({Opm::ROCKRecord{1.0,2.0}}),
+                           Opm::PlmixparTable({Opm::PlmixparRecord{1.0}}),
+                           Opm::ShrateTable({Opm::ShrateRecord{1.0}}),
+                           Opm::Stone1exTable({Opm::Stone1exRecord{1.0}}),
+                           Opm::TlmixparTable({Opm::TlmixparRecord{1.0, 2.0}}),
                            Opm::ViscrefTable({Opm::VISCREFRecord{1.0, 2.0}}),
                            Opm::WatdentTable({Opm::WATDENTRecord{1.0, 2.0, 3.0}}),
                            {{1.0, 2.0, {1.0, 2.0, 3.0}}},
                            {{{1.0, 2.0, 3.0}}},
+                           {{{4.0, 5.0, 6.0}}},
                            {{1, Opm::PlymwinjTable({1.0}, {2.0}, 1, {{1.0}, {2.0}})}},
                            {{2, Opm::SkprwatTable({1.0}, {2.0}, 1, {{1.0}, {2.0}})}},
                            {{3, Opm::SkprpolyTable({1.0}, {2.0}, 1, {{1.0}, {2.0}}, 3.0)}},
@@ -1192,207 +1237,16 @@ BOOST_AUTO_TEST_CASE(TableManager)
                            true,
                            true,
                            true,
+                           true,
                            jfunc,
+                           getDenT(),
+                           getDenT(),
+                           getDenT(),
+                           {7.0, 8.0},
+                           77,
                            1.0);
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
-#endif
-}
-
-
-BOOST_AUTO_TEST_CASE(TabulatedOneDFunction)
-{
-#ifdef HAVE_MPI
-    Opm::Tabulated1DFunction<double> val1(2, std::vector<double>{1.0, 2.0},
-                                             std::vector<double>{3.0, 4.0});
-    auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
-#endif
-}
-
-
-BOOST_AUTO_TEST_CASE(IntervalTabulatedTwoDFunction)
-{
-#ifdef HAVE_MPI
-    std::vector<double> xPos{1.0, 2.0};
-    std::vector<double> yPos{3.0, 4.0};
-    std::vector<std::vector<double>> samples{{1.0, 2.0}, {3.0, 4.0}};
-    Opm::IntervalTabulated2DFunction<double> val1(xPos, yPos, samples, true, true);
-    auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
-#endif
-}
-
-
-BOOST_AUTO_TEST_CASE(UniformXTabulatedTwoDFunction)
-{
-#ifdef HAVE_MPI
-    std::vector<double> xPos{1.0, 2.0};
-    std::vector<double> yPos{3.0, 4.0};
-    using SampleType = std::vector<std::vector<std::tuple<double,double,double>>>;
-    SampleType samples{{std::make_tuple(1.0, 2.0, 3.0)},
-                       {std::make_tuple(4.0, 5.0, 6.0)}};
-    using FFuncType = Opm::UniformXTabulated2DFunction<double>;
-    FFuncType val1(xPos, yPos, samples, FFuncType::Vertical);
-    auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
-#endif
-}
-
-
-BOOST_AUTO_TEST_CASE(SolventPvt)
-{
-#ifdef HAVE_MPI
-    Opm::Tabulated1DFunction<double> func(2, std::vector<double>{1.0, 2.0},
-                                             std::vector<double>{3.0, 4.0});
-    Opm::SolventPvt<double> val1({1.0, 2.0}, {func}, {func}, {func});
-    auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
-#endif
-}
-
-
-BOOST_AUTO_TEST_CASE(DryGasPvt)
-{
-#ifdef HAVE_MPI
-    Opm::Tabulated1DFunction<double> func(2, std::vector<double>{1.0, 2.0},
-                                             std::vector<double>{3.0, 4.0});
-    Opm::DryGasPvt<double> val1({1.0, 2.0}, {func}, {func}, {func});
-    auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
-#endif
-}
-
-
-BOOST_AUTO_TEST_CASE(GasPvtThermal)
-{
-#ifdef HAVE_MPI
-    Opm::Tabulated1DFunction<double> func(2, std::vector<double>{1.0, 2.0},
-                                             std::vector<double>{3.0, 4.0});
-    Opm::GasPvtThermal<double>::IsothermalPvt* pvt = new Opm::GasPvtThermal<double>::IsothermalPvt;
-    Opm::GasPvtThermal<double> val1(pvt, {func}, {1.0, 2.0}, {3.0, 4.0}, {5.0, 6.0},
-                                    {func}, true, true, false);
-    auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
-#endif
-}
-
-
-BOOST_AUTO_TEST_CASE(WetGasPvt)
-{
-#ifdef HAVE_MPI
-    Opm::Tabulated1DFunction<double> func(2, std::vector<double>{1.0, 2.0},
-                                             std::vector<double>{3.0, 4.0});
-    std::vector<double> xPos{1.0, 2.0};
-    std::vector<double> yPos{3.0, 4.0};
-    using FFuncType = Opm::UniformXTabulated2DFunction<double>;
-    using Samples = std::vector<std::vector<FFuncType::SamplePoint>>;
-    Samples samples({{std::make_tuple(1.0, 2.0, 3.0), std::make_tuple(3.0, 4.0, 5.0)}});
-    FFuncType func2(xPos, yPos, samples, FFuncType::Vertical);
-    Opm::WetGasPvt<double> val1({1.0, 2.0}, {3.0, 4.0},
-                                {func2}, {func}, {func2},
-                                {func2}, {func}, {func}, {func}, 5.0);
-    auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
-#endif
-}
-
-
-BOOST_AUTO_TEST_CASE(ConstantCompressibilityOilPvt)
-{
-#ifdef HAVE_MPI
-    Opm::ConstantCompressibilityOilPvt<double> val1({1.0, 2.0}, {3.0, 4.0}, {5.0, 6.0},
-                                                    {7.0, 8.0}, {9.0, 10.0}, {11.0, 12.0});
-    auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
-#endif
-}
-
-
-BOOST_AUTO_TEST_CASE(DeadOilPvt)
-{
-#ifdef HAVE_MPI
-    Opm::Tabulated1DFunction<double> func(2, std::vector<double>{1.0, 2.0},
-                                             std::vector<double>{3.0, 4.0});
-    Opm::DeadOilPvt<double> val1({1.0, 2.0}, {func}, {func}, {func});
-    auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
-#endif
-}
-
-
-BOOST_AUTO_TEST_CASE(LiveOilPvt)
-{
-#ifdef HAVE_MPI
-    Opm::Tabulated1DFunction<double> func(2, std::vector<double>{1.0, 2.0},
-                                             std::vector<double>{3.0, 4.0});
-    std::vector<double> xPos{1.0, 2.0};
-    std::vector<double> yPos{3.0, 4.0};
-    using FFuncType = Opm::UniformXTabulated2DFunction<double>;
-    using Samples = std::vector<std::vector<FFuncType::SamplePoint>>;
-    Samples samples({{std::make_tuple(1.0, 2.0, 3.0), std::make_tuple(3.0, 4.0, 5.0)}});
-    FFuncType func2(xPos, yPos, samples, FFuncType::Vertical);
-    Opm::LiveOilPvt<double> val1({1.0, 2.0}, {3.0, 4.0},
-                                 {func2}, {func2}, {func2},
-                                 {func}, {func}, {func}, {func}, {func}, 5.0);
-    auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
-#endif
-}
-
-
-BOOST_AUTO_TEST_CASE(OilPvtThermal)
-{
-#ifdef HAVE_MPI
-    Opm::Tabulated1DFunction<double> func(2, std::vector<double>{1.0, 2.0},
-                                             std::vector<double>{3.0, 4.0});
-    Opm::OilPvtThermal<double>::IsothermalPvt* pvt = new Opm::OilPvtThermal<double>::IsothermalPvt;
-    Opm::OilPvtThermal<double> val1(pvt, {func}, {1.0, 2.0}, {3.0, 4.0}, {5.0, 6.0},
-                                    {7.0, 8.0}, {9.0, 10.0}, {11.0, 12.0},
-                                    {func}, true, true, false);
-    auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
-#endif
-}
-
-
-BOOST_AUTO_TEST_CASE(ConstantCompressibilityWaterPvt)
-{
-#ifdef HAVE_MPI
-    Opm::ConstantCompressibilityWaterPvt<double> val1({1.0, 2.0}, {3.0, 4.0}, {5.0, 6.0},
-                                                      {7.0, 8.0}, {9.0, 10.0}, {11.0, 12.0});
-    auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
-#endif
-}
-
-
-BOOST_AUTO_TEST_CASE(WaterPvtThermal)
-{
-#ifdef HAVE_MPI
-    Opm::Tabulated1DFunction<double> func(2, std::vector<double>{1.0, 2.0},
-                                             std::vector<double>{3.0, 4.0});
-    Opm::WaterPvtThermal<double>::IsothermalPvt* pvt = new Opm::WaterPvtThermal<double>::IsothermalPvt;
-    Opm::WaterPvtThermal<double> val1(pvt, {1.0, 2.0}, {3.0, 4.0}, {5.0, 6.0},
-                                      {7.0, 8.0}, {9.0, 10.0}, {11.0, 12.0},
-                                      {13.0, 14.0}, {15.0, 16.0}, {17.0, 18.0},
-                                      {func}, {func}, true, true, false);
-    auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(TableManager)
 #endif
 }
 
@@ -1402,17 +1256,15 @@ BOOST_AUTO_TEST_CASE(OilVaporizationProperties)
 #ifdef HAVE_MPI
     using VapType = Opm::OilVaporizationProperties::OilVaporization;
     Opm::OilVaporizationProperties val1(VapType::VAPPARS,
-                                        {1.0, 2.0}, {3.0, 4.0}, {5.0, 6.0},
+                                        1.0, 2.0, {5.0, 6.0},
                                         {false, true}, {7.0, 8.0});
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(OilVaporizationProperties)
     val1 = Opm::OilVaporizationProperties(VapType::DRDT,
-                                          {1.0, 2.0}, {3.0, 4.0}, {5.0, 6.0},
+                                          1.0, 2.0, {5.0, 6.0},
                                           {false, true}, {7.0, 8.0});
     val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(OilVaporizationProperties)
 #endif
 }
 
@@ -1422,8 +1274,7 @@ BOOST_AUTO_TEST_CASE(Events)
 #ifdef HAVE_MPI
     Opm::Events val1(Opm::DynamicVector<uint64_t>({1,2,3,4,5}));
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(Events)
 #endif
 }
 
@@ -1433,8 +1284,7 @@ BOOST_AUTO_TEST_CASE(MLimits)
 #ifdef HAVE_MPI
     Opm::MLimits val1{1,2,3,4,5,6,7,8,9,10,11,12};
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(MLimits)
 #endif
 }
 
@@ -1445,8 +1295,7 @@ BOOST_AUTO_TEST_CASE(MessageLimits)
     std::vector<Opm::MLimits> limits{Opm::MLimits{1,2,3,4,5,6,7,8,9,10,11,12}};
     Opm::MessageLimits val1(Opm::DynamicState<Opm::MLimits>(limits,2));
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(MessageLimits)
 #endif
 }
 
@@ -1456,8 +1305,7 @@ BOOST_AUTO_TEST_CASE(VFPInjTable)
 #ifdef HAVE_MPI
     Opm::VFPInjTable val1 = getVFPInjTable();
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(VFPInjTable)
 #endif
 }
 
@@ -1467,8 +1315,7 @@ BOOST_AUTO_TEST_CASE(VFPProdTable)
 #ifdef HAVE_MPI
     Opm::VFPProdTable val1 = getVFPProdTable();
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(VFPProdTable)
 #endif
 }
 
@@ -1479,8 +1326,7 @@ BOOST_AUTO_TEST_CASE(WTESTWell)
     Opm::WellTestConfig::WTESTWell val1{"test", Opm::WellTestConfig::ECONOMIC,
                                          1.0, 2, 3.0, 4};
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(WellTestConfig::WTESTWell)
 #endif
 }
 
@@ -1492,8 +1338,7 @@ BOOST_AUTO_TEST_CASE(WellTestConfig)
                                          1.0, 2, 3.0, 4};
     Opm::WellTestConfig val1({tw, tw, tw});
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(WellTestConfig)
 #endif
 }
 
@@ -1503,8 +1348,7 @@ BOOST_AUTO_TEST_CASE(WellPolymerProperties)
 #ifdef HAVE_MPI
     Opm::WellPolymerProperties val1{1.0, 2.0, 3, 4, 5};
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(WellPolymerProperties)
 #endif
 }
 
@@ -1514,8 +1358,7 @@ BOOST_AUTO_TEST_CASE(WellFoamProperties)
 #ifdef HAVE_MPI
     Opm::WellFoamProperties val1{1.0};
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(WellFoamProperties)
 #endif
 }
 
@@ -1525,8 +1368,7 @@ BOOST_AUTO_TEST_CASE(WellTracerProperties)
 #ifdef HAVE_MPI
     Opm::WellTracerProperties val1({{"test", 1.0}, {"test2", 2.0}});
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(WellTracerProperties)
 #endif
 }
 
@@ -1536,12 +1378,10 @@ BOOST_AUTO_TEST_CASE(UDAValue)
 #ifdef HAVE_MPI
     Opm::UDAValue val1("test");
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(UDAValue)
     val1 = Opm::UDAValue(1.0);
-    auto val22 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val22) == std::get<2>(val22));
-    BOOST_CHECK(val1 == std::get<0>(val22));
+    val2 = PackUnpack(val1);
+    DO_CHECKS(UDAValue)
 #endif
 }
 
@@ -1556,8 +1396,7 @@ BOOST_AUTO_TEST_CASE(Connection)
                          12, 13.0, 14.0, true,
                          15, 16, 17.0);
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(Connection)
 #endif
 }
 
@@ -1575,11 +1414,10 @@ BOOST_AUTO_TEST_CASE(WellInjectionProperties)
                                             7,
                                             true,
                                             8,
-                                            Opm::Well::InjectorType::OIL,
+                                            Opm::InjectorType::OIL,
                                             Opm::Well::InjectorCMode::BHP);
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(Well::WellInjectionProperties)
 #endif
 }
 
@@ -1595,8 +1433,7 @@ BOOST_AUTO_TEST_CASE(WellEconProductionLimits)
                                        Opm::WellEconProductionLimits::EconWorkover::WELL,
                                        7.0, 8.0, 9.0, 10.0);
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(WellEconProductionLimits)
 #endif
 }
 
@@ -1606,8 +1443,7 @@ BOOST_AUTO_TEST_CASE(WellGuideRate)
 #ifdef HAVE_MPI
     Opm::Well::WellGuideRate val1{true, 1.0, Opm::Well::GuideRateTarget::COMB, 2.0};
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(Well::WellGuideRate)
 #endif
 }
 
@@ -1623,8 +1459,7 @@ BOOST_AUTO_TEST_CASE(WellConnections)
                          15, 16, 17.0);
     Opm::WellConnections val1(1, 2, 3, {conn, conn});
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(WellConnections)
 #endif
 }
 
@@ -1648,8 +1483,7 @@ BOOST_AUTO_TEST_CASE(WellProductionProperties)
                                              Opm::Well::ProducerCMode::CRAT,
                                              Opm::Well::ProducerCMode::BHP, 11);
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(Well::WellProductionProperties)
 #endif
 }
 
@@ -1658,10 +1492,9 @@ BOOST_AUTO_TEST_CASE(SpiralICD)
 {
 #ifdef HAVE_MPI
     Opm::SpiralICD val1(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8, 9.0,
-                        Opm::SpiralICD::Status::OPEN, 10.0);
+                        Opm::ICDStatus::OPEN, 10.0);
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(SpiralICD)
 #endif
 }
 
@@ -1669,10 +1502,9 @@ BOOST_AUTO_TEST_CASE(SpiralICD)
 BOOST_AUTO_TEST_CASE(Valve)
 {
 #ifdef HAVE_MPI
-    Opm::Valve val1(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, Opm::Valve::Status::OPEN);
+    Opm::Valve val1(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, Opm::ICDStatus::OPEN);
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(Valve)
 #endif
 }
 
@@ -1685,8 +1517,7 @@ BOOST_AUTO_TEST_CASE(Segment)
                       std::make_shared<Opm::SpiralICD>(),
                       std::make_shared<Opm::Valve>());
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(Segment)
 #endif
 }
 
@@ -1694,10 +1525,9 @@ BOOST_AUTO_TEST_CASE(Segment)
 BOOST_AUTO_TEST_CASE(Dimension)
 {
 #ifdef HAVE_MPI
-    Opm::Dimension val1("test", 1.0, 2.0);
+    Opm::Dimension val1(1.0, 2.0);
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(Dimension)
 #endif
 }
 
@@ -1707,8 +1537,7 @@ BOOST_AUTO_TEST_CASE(UnitSystem)
 #ifdef HAVE_MPI
     Opm::UnitSystem val1(Opm::UnitSystem::UnitType::UNIT_TYPE_METRIC);
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(UnitSystem)
 #endif
 }
 
@@ -1720,15 +1549,11 @@ BOOST_AUTO_TEST_CASE(WellSegments)
                      Opm::Segment::SegmentType::SICD,
                      std::make_shared<Opm::SpiralICD>(),
                      std::make_shared<Opm::Valve>());
-    Opm::WellSegments val1("test", 1.0, 2.0, 3.0,
-                           Opm::WellSegments::LengthDepth::ABS,
-                           Opm::WellSegments::CompPressureDrop::HF_,
-                           Opm::WellSegments::MultiPhaseModel::DF,
-                           {seg, seg}, {{1,2},{3,4}});
+    Opm::WellSegments val1(Opm::WellSegments::CompPressureDrop::HF_,
+                           {seg, seg});
 
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(WellSegments)
 #endif
 }
 
@@ -1738,8 +1563,7 @@ BOOST_AUTO_TEST_CASE(Well)
 #ifdef HAVE_MPI
     Opm::Well val1 = getFullWell();
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(Well)
 #endif
 }
 
@@ -1756,8 +1580,7 @@ BOOST_AUTO_TEST_CASE(GroupInjectionProperties)
                                               "test1", "test2", 5};
 
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(Group::GroupInjectionProperties)
 #endif
 }
 
@@ -1775,8 +1598,7 @@ BOOST_AUTO_TEST_CASE(GroupProductionProperties)
                                                6.0, 7};
 
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(Group::GroupProductionProperties)
 #endif
 }
 
@@ -1785,17 +1607,18 @@ BOOST_AUTO_TEST_CASE(Group)
 {
 #ifdef HAVE_MPI
     Opm::UnitSystem unitSystem;
+
+    std::map<Opm::Phase, Opm::Group::GroupInjectionProperties> injection;
     Opm::Group val1("test1", 1, 2, 3.0, unitSystem,
                     Opm::Group::GroupType::PRODUCTION,
-                    4.0, true, 5, "test2",
+                    4.0, true, false, 5, "test2",
                     Opm::IOrderSet<std::string>({"test3", "test4"}, {"test3","test4"}),
                     Opm::IOrderSet<std::string>({"test5", "test6"}, {"test5","test6"}),
-                    Opm::Group::GroupInjectionProperties(),
+                    injection,
                     Opm::Group::GroupProductionProperties());
 
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(Group)
 #endif
 }
 
@@ -1805,8 +1628,7 @@ BOOST_AUTO_TEST_CASE(WList)
 #ifdef HAVE_MPI
     Opm::WList val1({"test1", "test2", "test3"});
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(WList)
 #endif
 }
 
@@ -1818,32 +1640,7 @@ BOOST_AUTO_TEST_CASE(WListManager)
     std::map<std::string,Opm::WList> data{{"test", wl}, {"test2", wl}};
     Opm::WListManager val1(data);
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
-#endif
-}
-
-
-BOOST_AUTO_TEST_CASE(UDQFunction)
-{
-#ifdef HAVE_MPI
-    Opm::UDQFunction val1("test", Opm::UDQTokenType::binary_op_add);
-    auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
-#endif
-}
-
-
-BOOST_AUTO_TEST_CASE(UDQFunctionTable)
-{
-#ifdef HAVE_MPI
-    Opm::UDQFunctionTable::FunctionMap map{{"test",
-                                            std::make_shared<Opm::UDQFunction>()}};
-    Opm::UDQFunctionTable val1(Opm::UDQParams(true, 1, 2.0, 3.0, 4.0), map);
-    auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(WListManager)
 #endif
 }
 
@@ -1860,8 +1657,7 @@ BOOST_AUTO_TEST_CASE(UDQASTNode)
                          Opm::UDQTokenType::error,
                          "test", 1.0, {"test3"}, n1, n1);
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(UDQASTNode)
 #endif
 }
 
@@ -1875,8 +1671,7 @@ BOOST_AUTO_TEST_CASE(UDQDefine)
     Opm::UDQDefine val1("test", std::make_shared<Opm::UDQASTNode>(n1),
                         Opm::UDQVarType::NONE, "test2");
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(UDQDefine)
 #endif
 }
 
@@ -1888,8 +1683,7 @@ BOOST_AUTO_TEST_CASE(UDQAssign)
                         {Opm::UDQAssign::AssignRecord{{"test1"}, 1.0},
                          Opm::UDQAssign::AssignRecord{{"test2"}, 2.0}});
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(UDQAssign)
 #endif
 }
 
@@ -1899,8 +1693,7 @@ BOOST_AUTO_TEST_CASE(UDQIndex)
 #ifdef HAVE_MPI
     Opm::UDQIndex val1(1, 2, Opm::UDQAction::ASSIGN, Opm::UDQVarType::WELL_VAR);
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(UDQIndex)
 #endif
 }
 
@@ -1910,8 +1703,7 @@ BOOST_AUTO_TEST_CASE(UDQConfig)
 #ifdef HAVE_MPI
     Opm::UDQConfig val1 = getUDQConfig();
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(UDQConfig)
 #endif
 }
 
@@ -1922,8 +1714,7 @@ BOOST_AUTO_TEST_CASE(UDQActiveInputRecord)
     Opm::UDQActive::InputRecord val1(1, "test1", "test2",
                                      Opm::UDAControl::WCONPROD_ORAT);
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(UDQActive::InputRecord)
 #endif
 }
 
@@ -1934,8 +1725,7 @@ BOOST_AUTO_TEST_CASE(UDQActiveRecord)
     Opm::UDQActive::Record val1("test1", 1, 2, "test2",
                                 Opm::UDAControl::WCONPROD_ORAT);
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(UDQActive::Record)
 #endif
 }
 
@@ -1949,10 +1739,53 @@ BOOST_AUTO_TEST_CASE(UDQActive)
                                                   Opm::UDAControl::WCONPROD_ORAT)},
                         {{"test1", 1}}, {{"test2", 2}});
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(UDQActive)
 #endif
 }
+
+
+BOOST_AUTO_TEST_CASE(AquiferCT)
+{
+#ifdef HAVE_MPI
+    Opm::AquiferCT val1 = getAquiferCT();
+    auto val2 = PackUnpack(val1);
+    DO_CHECKS(AquiferCT);
+#endif
+}
+
+
+BOOST_AUTO_TEST_CASE(Aquifetp)
+{
+#ifdef HAVE_MPI
+    Opm::Aquifetp val1 = getAquifetp();
+    auto val2 = PackUnpack(val1);
+    DO_CHECKS(Aquifetp);
+#endif
+}
+
+
+BOOST_AUTO_TEST_CASE(Aquancon)
+{
+#ifdef HAVE_MPI
+    Opm::Aquancon val1 = getAquancon();
+    auto val2 = PackUnpack(val1);
+    DO_CHECKS(Aquancon);
+#endif
+}
+
+BOOST_AUTO_TEST_CASE(AquferConfig)
+{
+#ifdef HAVE_MPI
+    Opm::Aquifetp fetp = getAquifetp();
+    Opm::AquiferCT ct = getAquiferCT();
+    Opm::Aquancon conn = getAquancon();
+    Opm::AquiferConfig val1(fetp, ct, conn);
+    auto val2 = PackUnpack(val1);
+    DO_CHECKS(AquiferConfig);
+#endif
+}
+
+
 
 
 BOOST_AUTO_TEST_CASE(GuideRateModel)
@@ -1960,8 +1793,7 @@ BOOST_AUTO_TEST_CASE(GuideRateModel)
 #ifdef HAVE_MPI
     Opm::GuideRateModel val1 = getGuideRateModel();
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(GuideRateModel)
 #endif
 }
 
@@ -1971,8 +1803,7 @@ BOOST_AUTO_TEST_CASE(GuideRateConfigGroup)
 #ifdef HAVE_MPI
     Opm::GuideRateConfig::GroupTarget val1 = getGuideRateConfigGroup();
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(GuideRateConfig::GroupTarget)
 #endif
 }
 
@@ -1982,8 +1813,7 @@ BOOST_AUTO_TEST_CASE(GuideRateConfigWell)
 #ifdef HAVE_MPI
     Opm::GuideRateConfig::WellTarget val1 = getGuideRateConfigWell();
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(GuideRateConfig::WellTarget)
 #endif
 }
 
@@ -1996,8 +1826,7 @@ BOOST_AUTO_TEST_CASE(GuideRateConfig)
                               {{"test1", getGuideRateConfigWell()}},
                               {{"test2", getGuideRateConfigGroup()}});
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(GuideRateConfig)
 #endif
 }
 
@@ -2011,8 +1840,7 @@ BOOST_AUTO_TEST_CASE(GConSaleGroup)
                                       Opm::GConSale::MaxProcedure::PLUG,
                                       4.0, Opm::UnitSystem()};
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(GConSale::GCONSALEGroup)
 #endif
 }
 
@@ -2027,8 +1855,7 @@ BOOST_AUTO_TEST_CASE(GConSale)
                                        4.0, Opm::UnitSystem()};
     Opm::GConSale val1({{"test1", group}, {"test2", group}});
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(GConSale)
 #endif
 }
 
@@ -2041,8 +1868,7 @@ BOOST_AUTO_TEST_CASE(GConSumpGroup)
                                       "test",
                                       3.0, Opm::UnitSystem()};
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(GConSump::GCONSUMPGroup)
 #endif
 }
 
@@ -2056,8 +1882,7 @@ BOOST_AUTO_TEST_CASE(GConSump)
                                        3.0, Opm::UnitSystem()};
     Opm::GConSump val1({{"test1", group}, {"test2", group}});
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(GConSump)
 #endif
 }
 
@@ -2073,8 +1898,7 @@ BOOST_AUTO_TEST_CASE(RFTConfig)
                         {{"test1", {{{Opm::RFTConfig::RFT::TIMESTEP, 3}}, 4}}},
                         {{"test2", {{{Opm::RFTConfig::PLT::REPT, 5}}, 6}}});
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(RFTConfig)
 #endif
 }
 
@@ -2086,12 +1910,11 @@ BOOST_AUTO_TEST_CASE(DeckItem)
                        Opm::type_tag::string, "test5",
                        {Opm::value::status::deck_value},
                        true,
-                       {Opm::Dimension("DimensionLess", 7.0, 8.0)},
-                       {Opm::Dimension("Metric", 10.0, 11.0)});
+                       {Opm::Dimension(7.0, 8.0)},
+                       {Opm::Dimension(10.0, 11.0)});
 
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(DeckItem)
 #endif
 }
 
@@ -2101,8 +1924,7 @@ BOOST_AUTO_TEST_CASE(DeckRecord)
 #ifdef HAVE_MPI
     Opm::DeckRecord val1 = getDeckRecord();
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(DeckRecord)
 #endif
 }
 
@@ -2112,8 +1934,7 @@ BOOST_AUTO_TEST_CASE(Location)
 #ifdef HAVE_MPI
     Opm::Location val1{"test", 1};
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(Location)
 #endif
 }
 
@@ -2124,8 +1945,7 @@ BOOST_AUTO_TEST_CASE(DeckKeyword)
     Opm::DeckKeyword val1("test", {"test",1},
                           {getDeckRecord(), getDeckRecord()}, true, false);
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(DeckKeyword)
 #endif
 }
 
@@ -2139,8 +1959,7 @@ BOOST_AUTO_TEST_CASE(Deck)
                    Opm::UnitSystem(), unitSys.get(),
                    "test2", "test3", 2);
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(Deck)
 #endif
 }
 
@@ -2150,8 +1969,7 @@ BOOST_AUTO_TEST_CASE(Tuning)
 #ifdef HAVE_MPI
     Opm::Tuning val1 = getTuning();
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(Tuning)
 #endif
 }
 
@@ -2162,8 +1980,7 @@ BOOST_AUTO_TEST_CASE(ASTNode)
     Opm::Action::ASTNode child(number, FuncType::field, "test3", {"test2"}, 2.0, {});
     Opm::Action::ASTNode val1(number, FuncType::field, "test1", {"test2"}, 1.0, {child});
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(Action::ASTNode)
 #endif
 }
 
@@ -2176,8 +1993,7 @@ BOOST_AUTO_TEST_CASE(AST)
                                         "test1", {"test2"}, 1.0, {}));
     Opm::Action::AST val1(node);
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(Action::AST)
 #endif
 }
 
@@ -2189,8 +2005,7 @@ BOOST_AUTO_TEST_CASE(Quantity)
     val1.quantity = "test1";
     val1.args = {"test2", "test3"};
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(Action::Quantity)
 #endif
 }
 
@@ -2200,8 +2015,7 @@ BOOST_AUTO_TEST_CASE(Condition)
 #ifdef HAVE_MPI
     Opm::Action::Condition val1 = getCondition();
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(Action::Condition)
 #endif
 }
 
@@ -2211,8 +2025,7 @@ BOOST_AUTO_TEST_CASE(ActionX)
 #ifdef HAVE_MPI
     Opm::Action::ActionX val1 = getActionX();
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(Action::ActionX)
 #endif
 }
 
@@ -2222,8 +2035,7 @@ BOOST_AUTO_TEST_CASE(Actions)
 #ifdef HAVE_MPI
     Opm::Action::Actions val1({getActionX()});
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(Action::Actions)
 #endif
 }
 
@@ -2235,16 +2047,17 @@ BOOST_AUTO_TEST_CASE(Schedule)
     Opm::Schedule::WellMap wells;
     wells.insert({"test", {{std::make_shared<Opm::Well>(getFullWell())},1}});
     Opm::Schedule::GroupMap groups;
+    std::map<Opm::Phase, Opm::Group::GroupInjectionProperties> injection;
     groups.insert({"test", {{std::make_shared<Opm::Group>("test1", 1, 2, 3.0, unitSystem,
                                                           Opm::Group::GroupType::PRODUCTION,
-                                                          4.0, true, 5, "test2",
+                                                          4.0, true, false, 5, "test2",
                                                           Opm::IOrderSet<std::string>({"test3", "test4"}, {"test3","test4"}),
                                                           Opm::IOrderSet<std::string>({"test5", "test6"}, {"test5","test6"}),
-                                                          Opm::Group::GroupInjectionProperties(),
+                                                          injection,
                                                           Opm::Group::GroupProductionProperties())},1}});
     using VapType = Opm::OilVaporizationProperties::OilVaporization;
     Opm::DynamicState<Opm::OilVaporizationProperties> oilvap{{Opm::OilVaporizationProperties(VapType::VAPPARS,
-                                                                                   {1.0, 2.0}, {3.0, 4.0}, {5.0, 6.0},
+                                                                                   1.0, 2.0, {5.0, 6.0},
                                                                                    {false, true}, {7.0, 8.0})},1};
     Opm::Events events(Opm::DynamicVector<uint64_t>({1,2,3,4,5}));
     std::unique_ptr<Opm::UnitSystem> unitSys(new Opm::UnitSystem);
@@ -2262,7 +2075,8 @@ BOOST_AUTO_TEST_CASE(Schedule)
                          Opm::WellSegmentDims(1,2,3),
                          Opm::UDQParams(true, 1, 2.0, 3.0, 4.0),
                          Opm::EclHysterConfig(true, 1, 2),
-                         Opm::Actdims(1,2,3,4));
+                         Opm::Actdims(1,2,3,4),
+                         Opm::SatFuncControls(5.6e-7, Opm::SatFuncControls::ThreePhaseOilKrModel::Stone1));
     Opm::Schedule::VFPProdMap vfpProd {{1, {{std::make_shared<Opm::VFPProdTable>(getVFPProdTable())},1}}};
     Opm::Schedule::VFPInjMap vfpIn{{1, {{std::make_shared<Opm::VFPInjTable>(getVFPInjTable())},1}}};
     Opm::WellTestConfig::WTESTWell tw{"test", Opm::WellTestConfig::ECONOMIC,
@@ -2313,7 +2127,7 @@ BOOST_AUTO_TEST_CASE(Schedule)
                        oilvap,
                        events,
                        modifierDeck,
-                       getTuning(),
+                       Opm::DynamicState<Opm::Tuning>({getTuning()}, 1),
                        messageLimits,
                        runspec,
                        vfpProd,
@@ -2329,11 +2143,11 @@ BOOST_AUTO_TEST_CASE(Schedule)
                        {{std::make_shared<Opm::Action::Actions>(acnts)}, 1},
                        rftc,
                        {std::vector<int>{1}, 1},
+                       getRestartConfig(),
                        {{"test", events}});
 
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(Schedule)
 #endif
 }
 
@@ -2342,8 +2156,7 @@ BOOST_AUTO_TEST_CASE(BrineDensityTable)
 #ifdef HAVE_MPI
     Opm::BrineDensityTable val1({1.0, 2.0, 3.0});
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(BrineDensityTable)
 #endif
 }
 
@@ -2358,8 +2171,7 @@ BOOST_AUTO_TEST_CASE(SummaryNode)
                                  .isUserDefined(true);
 
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(SummaryNode)
 #endif
 }
 
@@ -2376,8 +2188,7 @@ BOOST_AUTO_TEST_CASE(SummaryConfig)
     Opm::SummaryConfig val1({node}, {"test1", "test2"}, {"test3", "test4"});
 
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(SummaryConfig)
 #endif
 }
 
@@ -2387,8 +2198,7 @@ BOOST_AUTO_TEST_CASE(PvtwsaltTable)
 #ifdef HAVE_MPI
     Opm::PvtwsaltTable val1(1.0, 2.0, {3.0, 4.0, 5.0});
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(PvtwsaltTable)
 #endif
 }
 
@@ -2398,8 +2208,7 @@ BOOST_AUTO_TEST_CASE(WellBrineProperties)
 #ifdef HAVE_MPI
     Opm::WellBrineProperties val1{1.0};
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(WellBrineProperties)
 #endif
 }
 
@@ -2409,8 +2218,7 @@ BOOST_AUTO_TEST_CASE(MULTREGTRecord)
 #ifdef HAVE_MPI
     Opm::MULTREGTRecord val1{1, 2, 3.0, 4, Opm::MULTREGT::ALL, "test"};
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(MULTREGTRecord)
 #endif
 }
 
@@ -2429,8 +2237,7 @@ BOOST_AUTO_TEST_CASE(MULTREGTScanner)
                               "test4");
 
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(MULTREGTScanner)
 #endif
 }
 
@@ -2438,19 +2245,15 @@ BOOST_AUTO_TEST_CASE(MULTREGTScanner)
 BOOST_AUTO_TEST_CASE(EclipseConfig)
 {
 #ifdef HAVE_MPI
-    Opm::IOConfig io(true, false, true, false, false, true, 1, "test1", true,
+    Opm::IOConfig io(true, false, true, false, false, true, "test1", true,
                      "test2", true, "test3", false);
     Opm::InitConfig init(Opm::Equil({getEquilRecord(), getEquilRecord()}),
-                         Opm::FoamConfig({getFoamData(), getFoamData()}),
+                         getFoamConfig(),
                          true, true, true, 20, "test1");
-    Opm::DynamicState<Opm::RestartSchedule> rsched({Opm::RestartSchedule(1, 2, 3)}, 2);
-    Opm::DynamicState<std::map<std::string,int>> rkw({{{"test",3}}}, 3);
-    Opm::RestartConfig restart(getTimeMap(), 1, true, rsched, rkw, {false, true});
-    Opm::EclipseConfig val1{io, init, restart};
+    Opm::EclipseConfig val1{init, io};
 
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(EclipseConfig)
 #endif
 }
 
@@ -2473,8 +2276,7 @@ BOOST_AUTO_TEST_CASE(TransMult)
                         {{Opm::FaceDir::ZPlus, "test1"}},
                         scanner);
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(TransMult)
 #endif
 }
 
@@ -2484,8 +2286,7 @@ BOOST_AUTO_TEST_CASE(FaultFace)
 #ifdef HAVE_MPI
     Opm::FaultFace val1({1,2,3,4,5,6}, Opm::FaceDir::YPlus);
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(FaultFace)
 #endif
 }
 
@@ -2495,11 +2296,27 @@ BOOST_AUTO_TEST_CASE(Fault)
 #ifdef HAVE_MPI
     Opm::Fault val1("test", 1.0, {{{1,2,3,4,5,6}, Opm::FaceDir::YPlus}});
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(Fault)
 #endif
 }
 
+BOOST_AUTO_TEST_CASE(WellType)
+{
+#ifdef HAVE_MPI
+    Opm::WellType val1(true, Opm::Phase::OIL);
+    auto val2 = PackUnpack(val1);
+    DO_CHECKS(WellType)
+#endif
+}
+
+BOOST_AUTO_TEST_CASE(DenT)
+{
+#ifdef HAVE_MPI
+    Opm::DenT val1 = getDenT();
+    auto val2 = PackUnpack(val1);
+    DO_CHECKS(DenT)
+#endif
+}
 
 BOOST_AUTO_TEST_CASE(FaultCollection)
 {
@@ -2509,22 +2326,51 @@ BOOST_AUTO_TEST_CASE(FaultCollection)
     faults.insert({"test2", fault});
     Opm::FaultCollection val1(faults);
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(FaultCollection)
 #endif
 }
 
 
-BOOST_AUTO_TEST_CASE(EclEpsScalingPointsInfo)
+BOOST_AUTO_TEST_CASE(SolventDensityTable)
 {
 #ifdef HAVE_MPI
-    Opm::EclEpsScalingPointsInfo<double> val1{ 1.0,  2.0,  3.0,  4.0,  5.0,
-                                               6.0,  7.0,  8.0,  9.0, 10.0,
-                                              11.0, 12.0, 13.0, 14.0, 15.0,
-                                              16.0, 17.0, 18.0, 19.0, 20.0, 21};
+    Opm::SolventDensityTable val1({1.0, 2.0, 3.0});
     auto val2 = PackUnpack(val1);
-    BOOST_CHECK(std::get<1>(val2) == std::get<2>(val2));
-    BOOST_CHECK(val1 == std::get<0>(val2));
+    DO_CHECKS(SolventDensityTable)
+#endif
+}
+
+
+BOOST_AUTO_TEST_CASE(GridDims)
+{
+#ifdef HAVE_MPI
+    Opm::GridDims val1{ 1,  2,  3};
+    auto val2 = PackUnpack(val1);
+    DO_CHECKS(GridDims)
+#endif
+}
+
+
+BOOST_AUTO_TEST_CASE(PlyshlogTable)
+{
+#ifdef HAVE_MPI
+    Opm::OrderedMap<std::string, Opm::TableColumn> data;
+    data.insert({"test3", getTableColumn()});
+    Opm::PlyshlogTable val1(getTableSchema(), data, true, 1.0, 2.0, 3.0, true, true);
+    auto val2 = PackUnpack(val1);
+    DO_CHECKS(PlyshlogTable)
+#endif
+}
+
+
+BOOST_AUTO_TEST_CASE(RocktabTable)
+{
+#ifdef HAVE_MPI
+    Opm::OrderedMap<std::string, Opm::TableColumn> data;
+    data.insert({"test3", getTableColumn()});
+    Opm::RocktabTable val1(getTableSchema(), data, true, true);
+    auto val2 = PackUnpack(val1);
+    DO_CHECKS(RocktabTable)
 #endif
 }
 

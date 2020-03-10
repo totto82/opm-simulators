@@ -58,7 +58,6 @@ function(add_test_compare_restarted_simulation)
   cmake_parse_arguments(PARAM "$" "${oneValueArgs}" "${multiValueArgs}" ${ARGN} )
 
   set(RESULT_PATH ${BASE_RESULT_PATH}/restart/${PARAM_SIMULATOR}+${PARAM_CASENAME})
-  set(TEST_ARGS ${OPM_TESTS_ROOT}/${PARAM_CASENAME}/${PARAM_FILENAME} ${PARAM_TEST_ARGS})
 
   opm_add_test(compareRestartedSim_${PARAM_SIMULATOR}+${PARAM_FILENAME} NO_COMPILE
                EXE_NAME ${PARAM_SIMULATOR}
@@ -69,7 +68,7 @@ function(add_test_compare_restarted_simulation)
                            ${COMPARE_ECL_COMMAND}
                            ${OPM_PACK_COMMAND}
                            0
-               TEST_ARGS ${TEST_ARGS})
+               TEST_ARGS ${PARAM_TEST_ARGS})
 endfunction()
 
 ###########################################################################
@@ -124,7 +123,6 @@ function(add_test_compare_parallel_restarted_simulation)
   cmake_parse_arguments(PARAM "$" "${oneValueArgs}" "${multiValueArgs}" ${ARGN} )
 
   set(RESULT_PATH ${BASE_RESULT_PATH}/parallelRestart/${PARAM_SIMULATOR}+${PARAM_CASENAME})
-  set(TEST_ARGS ${OPM_TESTS_ROOT}/${PARAM_CASENAME}/${PARAM_FILENAME} ${PARAM_TEST_ARGS})
 
   opm_add_test(compareParallelRestartedSim_${PARAM_SIMULATOR}+${PARAM_FILENAME} NO_COMPILE
                EXE_NAME ${PARAM_SIMULATOR}
@@ -135,7 +133,7 @@ function(add_test_compare_parallel_restarted_simulation)
                            ${COMPARE_ECL_COMMAND}
                            ${OPM_PACK_COMMAND}
                            1
-               TEST_ARGS ${TEST_ARGS})
+               TEST_ARGS ${PARAM_TEST_ARGS})
   set_tests_properties(compareParallelRestartedSim_${PARAM_SIMULATOR}+${PARAM_FILENAME}
                        PROPERTIES RUN_SERIAL 1)
 endfunction()
@@ -263,20 +261,22 @@ add_test_compareECLFiles(CASENAME polymer_oilwater
                          FILENAME 2D_OILWATER_POLYMER
                          SIMULATOR flow
                          ABS_TOL ${abs_tol}
-                         REL_TOL ${rel_tol})
+                         REL_TOL ${rel_tol}
+                         TEST_ARGS --tolerance-mb=1.e-7 )
 
 add_test_compareECLFiles(CASENAME polymer_injectivity
                          FILENAME 2D_POLYMER_INJECTIVITY
                          SIMULATOR flow
                          ABS_TOL ${abs_tol}
-                         REL_TOL ${rel_tol})
+                         REL_TOL ${rel_tol}
+                         TEST_ARGS --tolerance-mb=1.e-7 --tolerance-wells=1.e-6)
 
 add_test_compareECLFiles(CASENAME polymer_simple2D
                          FILENAME 2D_THREEPHASE_POLY_HETER
                          SIMULATOR flow
                          ABS_TOL ${abs_tol}
                          REL_TOL ${coarse_rel_tol}
-                         TEST_ARGS --flow-newton-max-iterations=20)
+                         TEST_ARGS --tolerance-mb=1.e-7)
 
 add_test_compareECLFiles(CASENAME spe5
                          FILENAME SPE5CASE1
@@ -409,6 +409,13 @@ add_test_compareECLFiles(CASENAME spe1_foam
                          REL_TOL ${rel_tol}
                          DIR spe1_foam)
 
+add_test_compareECLFiles(CASENAME bc_lab
+                         FILENAME BC_LAB
+                         SIMULATOR flow
+                         ABS_TOL ${abs_tol}
+                         REL_TOL ${rel_tol}
+                         DIR bc_lab)
+
 # Restart tests
 opm_set_test_driver(${PROJECT_SOURCE_DIR}/tests/run-restart-regressionTest.sh "")
 
@@ -419,12 +426,14 @@ add_test_compare_restarted_simulation(CASENAME spe1
                                       FILENAME SPE1CASE2_ACTNUM
                                       SIMULATOR flow
                                       ABS_TOL ${abs_tol_restart}
-                                      REL_TOL ${rel_tol_restart})
+                                      REL_TOL ${rel_tol_restart}
+                                      TEST_ARGS --sched-restart=true)
 add_test_compare_restarted_simulation(CASENAME spe9
                                       FILENAME SPE9_CP_SHORT
                                       SIMULATOR flow
                                       ABS_TOL ${abs_tol_restart}
-                                      REL_TOL ${rel_tol_restart})
+                                      REL_TOL ${rel_tol_restart}
+                                      TEST_ARGS --sched-restart=true)
 
 # PORV test
 opm_set_test_driver(${PROJECT_SOURCE_DIR}/tests/run-porv-acceptanceTest.sh "")
@@ -454,7 +463,8 @@ if(MPI_FOUND)
                                                  FILENAME SPE1CASE2_ACTNUM
                                                  SIMULATOR flow
                                                  ABS_TOL ${abs_tol_restart}
-                                                 REL_TOL ${rel_tol_restart})
+                                                 REL_TOL ${rel_tol_restart}
+                                                 TEST_ARGS --sched-restart=true)
 
 
   opm_set_test_driver(${PROJECT_SOURCE_DIR}/tests/run-parallel-regressionTest.sh "")
@@ -468,41 +478,63 @@ if(MPI_FOUND)
                                        FILENAME SPE1CASE2
                                        SIMULATOR flow
                                        ABS_TOL ${abs_tol_parallel}
-                                       REL_TOL ${rel_tol_parallel})
+                                       REL_TOL ${rel_tol_parallel}
+                                       TEST_ARGS --linear-solver-reduction=1e-7 --tolerance-cnv=5e-6 --tolerance-mb=1e-8)
 
   add_test_compare_parallel_simulation(CASENAME spe9
                                        FILENAME SPE9_CP_SHORT
                                        SIMULATOR flow
                                        ABS_TOL ${abs_tol_parallel}
-                                       REL_TOL ${rel_tol_parallel})
+                                       REL_TOL ${rel_tol_parallel}
+                                       TEST_ARGS --linear-solver-reduction=1e-7 --tolerance-cnv=5e-6 --tolerance-mb=1e-8)
 
   add_test_compare_parallel_simulation(CASENAME spe9group
                                        FILENAME SPE9_CP_GROUP
                                        SIMULATOR flow
                                        ABS_TOL ${abs_tol_parallel}
-                                       REL_TOL ${coarse_rel_tol_parallel})
+                                       REL_TOL ${coarse_rel_tol_parallel}
+                                       TEST_ARGS --linear-solver-reduction=1e-7 --tolerance-cnv=5e-6 --tolerance-mb=1e-8)
 
   add_test_compare_parallel_simulation(CASENAME spe3
                                        FILENAME SPE3CASE1
                                        SIMULATOR flow
                                        ABS_TOL ${abs_tol_parallel}
-                                       REL_TOL ${coarse_rel_tol_parallel})
+                                       REL_TOL ${coarse_rel_tol_parallel}
+                                       TEST_ARGS --linear-solver-reduction=1e-7 --tolerance-cnv=5e-6 --tolerance-mb=1e-8)
 
   add_test_compare_parallel_simulation(CASENAME spe1_solvent
                                        FILENAME SPE1CASE2_SOLVENT
                                        SIMULATOR flow
                                        ABS_TOL ${abs_tol_parallel}
-                                       REL_TOL ${coarse_rel_tol_parallel})
+                                       REL_TOL ${coarse_rel_tol_parallel}
+                                       TEST_ARGS --linear-solver-reduction=1e-7 --tolerance-cnv=5e-6 --tolerance-mb=1e-8)
 
   add_test_compare_parallel_simulation(CASENAME polymer_simple2D
                                        FILENAME 2D_THREEPHASE_POLY_HETER
                                        SIMULATOR flow
                                        ABS_TOL ${abs_tol}
-                                       REL_TOL ${coarse_rel_tol})
+                                       REL_TOL ${coarse_rel_tol}
+                                       TEST_ARGS --linear-solver-reduction=1e-7 --tolerance-cnv=5e-6 --tolerance-mb=1e-8)
 
   add_test_compare_parallel_simulation(CASENAME spe1_foam
                                        FILENAME SPE1FOAM
                                        SIMULATOR flow
                                        ABS_TOL ${abs_tol}
-                                       REL_TOL ${rel_tol})
+                                       REL_TOL ${rel_tol}
+                                       TEST_ARGS --linear-solver-reduction=1e-7 --tolerance-cnv=5e-6 --tolerance-mb=1e-8)
+
+  add_test_compare_parallel_simulation(CASENAME spe1_thermal
+                                       FILENAME SPE1CASE2_THERMAL
+                                       SIMULATOR flow
+                                       ABS_TOL ${abs_tol_parallel}
+                                       REL_TOL 1e-1
+                                       DIR spe1
+                                       TEST_ARGS --linear-solver-reduction=1e-7 --tolerance-cnv=5e-6 --tolerance-mb=1e-8)
+
+  add_test_compare_parallel_simulation(CASENAME spe1_brine
+                                       FILENAME SPE1CASE1_BRINE
+                                       SIMULATOR flow
+                                       ABS_TOL ${abs_tol_parallel}
+                                       REL_TOL ${rel_tol_parallel}
+                                       TEST_ARGS --linear-solver-reduction=1e-7 --tolerance-cnv=5e-6 --tolerance-mb=1e-6)
 endif()

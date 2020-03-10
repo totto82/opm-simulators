@@ -31,15 +31,11 @@
 
 #include <opm/common/utility/platform_dependent/disable_warnings.h>
 #include <boost/test/unit_test.hpp>
-#include <boost/filesystem.hpp>
+#include <opm/common/utility/FileSystem.hpp>
 #include <opm/common/utility/platform_dependent/reenable_warnings.h>
 
 #include <opm/parser/eclipse/Parser/Parser.hpp>
-#include <opm/parser/eclipse/EclipseState/checkDeck.hpp>
-#include <opm/parser/eclipse/EclipseState/EclipseState.hpp>
-#include <opm/parser/eclipse/EclipseState/Schedule/VFPProdTable.hpp>
 #include <opm/parser/eclipse/Units/UnitSystem.hpp>
-
 #include <opm/simulators/wells/VFPHelpers.hpp>
 #include <opm/simulators/wells/VFPProdProperties.hpp>
 
@@ -124,10 +120,8 @@ struct TrivialFixture {
             nz(gfr_axis.size()),
             nu(alq_axis.size()),
             nv(flo_axis.size()),
-            size{{ nx, ny, nz, nu, nv }},
-            data(size)
+            data(nx*ny*nz*nu*nv)
     {
-
     }
 
     ~TrivialFixture() {
@@ -143,7 +137,7 @@ struct TrivialFixture {
                 for (int k=0; k<nz; ++k) {
                     for (int l=0; l<nu; ++l) {
                         for (int m=0; m<nv; ++m) {
-                            data[i][j][k][l][m] = value;
+                            (*this)(i,j,k,l,m) = value;
                         }
                     }
                 }
@@ -166,7 +160,7 @@ struct TrivialFixture {
                         for (int m=0; m<nv; ++m) {
                             double v = m / static_cast<double>(nv-1);
                             // table[thp_idx][wfr_idx][gfr_idx][alq_idx][flo_idx];
-                            data[i][j][k][l][m] = x + 2*y + 3*z + 4*u + 5*v;
+                            (*this)(i,j,k,l,m) = x + 2*y + 3*z + 4*u + 5*v;
                         }
                     }
                 }
@@ -187,7 +181,7 @@ struct TrivialFixture {
                 for (int k=0; k<nz; ++k) {
                     for (int l=0; l<nu; ++l) {
                         for (int m=0; m<nv; ++m) {
-                            data[i][j][k][l][m] = randx / max_val;
+                            (*this)(i,j,k,l,m) = randx / max_val;
                             randx = (randx*1103515245 + 12345);
                         }
                     }
@@ -214,6 +208,11 @@ struct TrivialFixture {
         properties.reset(new Opm::VFPProdProperties(table.get()));
     }
 
+    double& operator()(size_t thp_idx, size_t wfr_idx, size_t gfr_idx, size_t alq_idx, size_t flo_idx) {
+    return data[thp_idx*ny*nz*nu*nv + wfr_idx*nz*nu*nv + gfr_idx*nu*nv + alq_idx*nv + flo_idx];
+}
+
+
 
 
     std::shared_ptr<Opm::VFPProdProperties> properties;
@@ -231,7 +230,6 @@ private:
     int nz;
     int nu;
     int nv;
-    Opm::VFPProdTable::extents size;
     Opm::VFPProdTable::array_type data;
 };
 
@@ -591,12 +589,7 @@ VFPPROD \n\
     auto units = Opm::UnitSystem::newFIELD();
     Opm::Parser parser;
     auto deck = parser.parseString(table_str);
-
-    BOOST_REQUIRE(deck.hasKeyword("VFPPROD"));
-    BOOST_CHECK_EQUAL(deck.count("VFPPROD"), 1);
-
     Opm::VFPProdTable table(deck.getKeyword("VFPPROD", 0), units);
-
     Opm::VFPProdProperties properties(&table);
 
     const int n = 5; //Number of points to check per axis
@@ -647,13 +640,10 @@ BOOST_AUTO_TEST_CASE(ParseInterpolateRealisticVFPPROD)
 {
     auto units = Opm::UnitSystem::newMETRIC();
 
-    Opm::ParseContext parseContext;
-    Opm::ErrorGuard errorGuard;
     Opm::Parser parser;
-    boost::filesystem::path file("VFPPROD2");
+    Opm::filesystem::path file("VFPPROD2");
 
     auto deck = parser.parseFile(file.string());
-    Opm::checkDeck(deck, parser, parseContext, errorGuard);
 
     BOOST_REQUIRE(deck.hasKeyword("VFPPROD"));
     BOOST_CHECK_EQUAL(deck.count("VFPPROD"), 1);

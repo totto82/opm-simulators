@@ -35,13 +35,19 @@ typedef Dune::InverseOperatorResult InverseOperatorResult;
 namespace Opm
 {
 
-BdaBridge::BdaBridge(bool use_gpu_ OPM_UNUSED, int linear_solver_verbosity OPM_UNUSED, int maxit OPM_UNUSED, double tolerance OPM_UNUSED) : use_gpu(use_gpu_) {
 #if HAVE_CUDA
+BdaBridge::BdaBridge(bool use_gpu_, int linear_solver_verbosity, int maxit, double tolerance)
+    : use_gpu(use_gpu_)
+{
     if (use_gpu) {
         backend.reset(new cusparseSolverBackend(linear_solver_verbosity, maxit, tolerance));
     }
-#endif
 }
+#else
+BdaBridge::BdaBridge(bool use_gpu_ OPM_UNUSED, int linear_solver_verbosity OPM_UNUSED, int maxit OPM_UNUSED, double tolerance OPM_UNUSED)
+{
+}
+#endif
 
 
 
@@ -200,6 +206,13 @@ void BdaBridge::get_result(BridgeVector &x OPM_UNUSED) {
 }
 
 template void BdaBridge::solve_system< \
+Dune::BCRSMatrix<Opm::MatrixBlock<double, 1, 1>, std::allocator<Opm::MatrixBlock<double, 1, 1> > > , \
+Dune::BlockVector<Dune::FieldVector<double, 1>, std::allocator<Dune::FieldVector<double, 1> > > > \
+(Dune::BCRSMatrix<Opm::MatrixBlock<double, 1, 1>, std::allocator<Opm::MatrixBlock<double, 1, 1> > > *mat, \
+    Dune::BlockVector<Dune::FieldVector<double, 1>, std::allocator<Dune::FieldVector<double, 1> > > &b, \
+    InverseOperatorResult &res);
+
+template void BdaBridge::solve_system< \
 Dune::BCRSMatrix<Opm::MatrixBlock<double, 2, 2>, std::allocator<Opm::MatrixBlock<double, 2, 2> > > , \
 Dune::BlockVector<Dune::FieldVector<double, 2>, std::allocator<Dune::FieldVector<double, 2> > > > \
 (Dune::BCRSMatrix<Opm::MatrixBlock<double, 2, 2>, std::allocator<Opm::MatrixBlock<double, 2, 2> > > *mat, \
@@ -220,6 +233,9 @@ Dune::BlockVector<Dune::FieldVector<double, 4>, std::allocator<Dune::FieldVector
     Dune::BlockVector<Dune::FieldVector<double, 4>, std::allocator<Dune::FieldVector<double, 4> > > &b, \
     InverseOperatorResult &res);
 
+template void BdaBridge::get_result< \
+Dune::BlockVector<Dune::FieldVector<double, 1>, std::allocator<Dune::FieldVector<double, 1> > > > \
+(Dune::BlockVector<Dune::FieldVector<double, 1>, std::allocator<Dune::FieldVector<double, 1> > > &x);
 
 template void BdaBridge::get_result< \
 Dune::BlockVector<Dune::FieldVector<double, 2>, std::allocator<Dune::FieldVector<double, 2> > > > \

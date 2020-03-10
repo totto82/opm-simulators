@@ -33,6 +33,8 @@
 
 #include <opm/grid/CpGrid.hpp>
 #include <opm/grid/cpgrid/GridHelpers.hpp>
+#include <opm/simulators/utils/ParallelEclipseState.hpp>
+#include <opm/simulators/utils/PropsCentroidsDataHandle.hpp>
 
 #include <dune/grid/common/mcmgmapper.hh>
 
@@ -151,7 +153,7 @@ public:
             if (grid_->size(0))
             {
                 globalTrans_.reset(new EclTransmissibility<TypeTag>(*this));
-                globalTrans_->update();
+                globalTrans_->update(false);
             }
 
             Dune::EdgeWeightMethod edgeWeightsMethod = this->edgeWeightsMethod();
@@ -162,11 +164,7 @@ public:
             const auto& gridView = grid_->leafGridView();
             unsigned numFaces = grid_->numFaces();
             std::vector<double> faceTrans(numFaces, 0.0);
-#if DUNE_VERSION_NEWER(DUNE_GRID, 2,6)
             ElementMapper elemMapper(this->gridView(), Dune::mcmgElementLayout());
-#else
-            ElementMapper elemMapper(this->gridView());
-#endif
             auto elemIt = gridView.template begin</*codim=*/0>();
             const auto& elemEndIt = gridView.template end</*codim=*/0>();
             for (; elemIt != elemEndIt; ++ elemIt) {
@@ -191,7 +189,17 @@ public:
             //distribute the grid and switch to the distributed view.
             {
                 const auto wells = this->schedule().getWellsatEnd();
-                defunctWellNames_ = std::get<1>(grid_->loadBalance(edgeWeightsMethod, &wells, faceTrans.data()));
+                auto& eclState = static_cast<ParallelEclipseState&>(this->eclState());
+                const EclipseGrid* eclGrid = nullptr;
+
+                if (grid_->comm().rank() == 0)
+                {
+                    eclGrid = &this->eclState().getInputGrid();
+                }
+
+                PropsCentroidsDataHandle<Dune::CpGrid> handle(*grid_, eclState, eclGrid, this->centroids_,
+                                                              cartesianIndexMapper());
+                defunctWellNames_ = std::get<1>(grid_->loadBalance(handle, edgeWeightsMethod, &wells, faceTrans.data()));
             }
             grid_->switchToDistributedView();
 
@@ -210,8 +218,12 @@ public:
 #endif
 
         cartesianIndexMapper_.reset(new CartesianIndexMapper(*grid_));
-
         this->updateGridView_();
+#if HAVE_MPI
+        if (mpiSize > 1) {
+            static_cast<ParallelEclipseState&>(this->eclState()).switchToDistributedProps();
+        }
+#endif
     }
 
     /*!
@@ -258,13 +270,14 @@ public:
 protected:
     void createGrids_()
     {
-        const auto& porv = this->eclState().fieldProps().porv(true);
         grid_.reset(new Dune::CpGrid());
-        grid_->processEclipseFormat(&(this->eclState().getInputGrid()),
+        grid_->processEclipseFormat(mpiRank == 0 ? &this->eclState().getInputGrid()
+                                                 : nullptr,
                                     /*isPeriodic=*/false,
                                     /*flipNormals=*/false,
                                     /*clipZ=*/false,
-                                    porv,
+                                    mpiRank == 0 ? this->eclState().fieldProps().porv(true)
+                                                 : std::vector<double>(),
                                     this->eclState().getInputNNC());
 
         // we use separate grid objects: one for the calculation of the initial condition
@@ -277,23 +290,11 @@ protected:
         {
             equilGrid_.reset(new Dune::CpGrid(*grid_));
             equilCartesianIndexMapper_.reset(new CartesianIndexMapper(*equilGrid_));
+
+            std::vector<int> actnum = Opm::UgGridHelpers::createACTNUM(*grid_);
+            auto &field_props = this->eclState().fieldProps();
+            const_cast<FieldPropsManager&>(field_props).reset_actnum(actnum);
         }
-
-        std::vector<int> actnum;
-        unsigned long actnum_size;
-        if (mpiRank == 0) {
-            actnum = Opm::UgGridHelpers::createACTNUM(*grid_);
-            actnum_size = actnum.size();
-        }
-
-        grid_->comm().broadcast(&actnum_size, 1, 0);
-        if (mpiRank != 0)
-            actnum.resize( actnum_size );
-
-        grid_->comm().broadcast(actnum.data(), actnum_size, 0);
-
-        auto & field_props = this->eclState().fieldProps();
-        const_cast<FieldPropsManager&>(field_props).reset_actnum(actnum);
     }
 
     // removing some connection located in inactive grid cells

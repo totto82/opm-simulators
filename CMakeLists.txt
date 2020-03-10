@@ -18,17 +18,46 @@ project(opm-simulators C CXX)
 cmake_minimum_required (VERSION 2.8)
 
 
-find_package(CUDA)
+# Make sure we are using the same compiler underneath
+# NVCC as for the rest. In the case that NVCC does not support
+# that compiler it will error out. Unfortunately this will only
+# work CMake >= 3.8. We found no way to make FindCUDA.cmake error
+# out. It seems to ignore CMAKE_NVCC_FLAGS and CMAKE. Additionally
+# our way of specifying cuda source files never worked for CMake
+# version < 3.8. Hence we deactivate cuda for these versions.
+# We use "CMAKE_VERSION VERSION_GREATER 3.7.9" instead of
+# CMAKE_VERSION VERSION_GREATER_EQUAL 3.8, because of backwards
+# compatibility to cmake 3.6 and lower.
+if(NOT CMAKE_DISABLE_FIND_PACKAGE_CUDA AND
+    CMAKE_VERSION VERSION_GREATER 3.7.9)
+  if(NOT DEFINED ENV{CUDAHOSTCXX} AND
+      (NOT CMAKE_CUDA_FLAGS OR NOT CMAKE_CUDA_FLAGS MATCHES ".*-ccbin .*"))
+    set(CMAKE_CUDA_FLAGS "-ccbin ${CMAKE_CXX_COMPILER} ${CMAKE_CUDA_FLAGS}")
+  endif()
+  include(CheckLanguage)
+  # Unfortunately check_language(CUDA) will only check whether there is
+  # a nvcc compiler. It will not check whether compilation with the above
+  # option works. Since the OPTIONAL flag of enable_language is currently
+  # ignored CMake will error out below if the options do not work.
+  check_language(CUDA)
+  if(CMAKE_CUDA_COMPILER)
+    enable_language(CUDA OPTIONAL)
+  endif()
+  # While the documentation says that it is deprecated, FindCUDA seems the
+  # only easy way to determine the cublas and cusparse libraries.
+  # Hence we call it unconditionally
+  find_package(CUDA)
+endif()
 
 if(CUDA_FOUND)
-  include_directories(${CUDA_INCLUDE_DIRS})
-  enable_language(CUDA)
   set(HAVE_CUDA 1)
+  include_directories(${CUDA_INCLUDE_DIRS})
 endif()
 
 option(SIBLING_SEARCH "Search for other modules in sibling directories?" ON)
 set( USE_OPENMP_DEFAULT OFF ) # Use of OpenMP is considered experimental
 option(BUILD_FLOW "Build the production oriented flow simulator?" ON)
+option(BUILD_FLOW_BLACKOIL_ONLY "Build the production oriented flow simulator only supporting the blackoil model?" OFF)
 option(BUILD_FLOW_VARIANTS "Build the variants for flow by default?" OFF)
 option(BUILD_EBOS "Build the research oriented ebos simulator?" ON)
 option(BUILD_EBOS_EXTENSIONS "Build the variants for various extensions of ebos by default?" OFF)
@@ -63,10 +92,6 @@ endif()
 if(opm-common_DIR AND NOT IS_DIRECTORY ${opm-common_DIR})
   message(WARNING "Value ${opm-common_DIR} passed to variable"
     " opm-common_DIR is not a directory")
-endif()
-option(ENABLE_3DPROPS_TESTING "Enable the in-constructor testing of 3D properties" OFF)
-if (ENABLE_3DPROPS_TESTING)
-  add_definitions(-DENABLE_3DPROPS_TESTING)
 endif()
 
 find_package(opm-common REQUIRED)
@@ -135,7 +160,7 @@ opm_add_test(test_gatherconvergencereport
   SOURCES
     tests/test_gatherconvergencereport.cpp
   CONDITION
-    MPI_FOUND
+    MPI_FOUND AND Boost_UNIT_TEST_FRAMEWORK_FOUND
   DRIVER_ARGS
     5 ${CMAKE_BINARY_DIR}
 )
@@ -146,7 +171,7 @@ opm_add_test(test_gatherdeferredlogger
   SOURCES
     tests/test_gatherdeferredlogger.cpp
   CONDITION
-    MPI_FOUND
+    MPI_FOUND AND Boost_UNIT_TEST_FRAMEWORK_FOUND
   DRIVER_ARGS
     5 ${CMAKE_BINARY_DIR}
 )
@@ -178,6 +203,24 @@ opm_add_test(flow
   flow/flow_ebos_energy.cpp
   flow/flow_ebos_oilwater_polymer.cpp
   flow/flow_ebos_oilwater_polymer_injectivity.cpp)
+
+if (NOT BUILD_FLOW_BLACKOIL_ONLY)
+  set(FLOW_BLACKOIL_ONLY_DEFAULT_ENABLE_IF "FALSE")
+else()
+  set(FLOW_BLACKOIL_ONLY_DEFAULT_ENABLE_IF "TRUE")
+endif()
+
+# the production oriented general-purpose ECL simulator
+opm_add_test(flow_blackoil
+  ONLY_COMPILE
+  ALWAYS_ENABLE
+  DEFAULT_ENABLE_IF ${FLOW_BLACKOIL_ONLY_DEFAULT_ENABLE_IF}
+  DEPENDS "opmsimulators"
+  LIBRARIES "opmsimulators"
+  SOURCES
+  flow/flow.cpp
+  flow/flow_ebos_blackoil.cpp)
+target_compile_definitions(flow_blackoil PRIVATE "FLOW_BLACKOIL_ONLY")
 
 if (NOT BUILD_FLOW_VARIANTS)
   set(FLOW_VARIANTS_DEFAULT_ENABLE_IF "FALSE")
@@ -305,7 +348,7 @@ endif()
 
 # must link libraries after target 'flow' has been defined
 if(CUDA_FOUND)
-  target_link_libraries( opmsimulators ${CUDA_cublas_LIBRARY} )
-  target_link_libraries( opmsimulators ${CUDA_cusparse_LIBRARY} )
+  target_link_libraries( opmsimulators PUBLIC ${CUDA_cusparse_LIBRARY} )
+  target_link_libraries( opmsimulators PUBLIC ${CUDA_cublas_LIBRARY} )
 endif()
 

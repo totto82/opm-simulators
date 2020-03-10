@@ -96,8 +96,14 @@ public:
     void init()
     {
         const Opm::Deck& deck = simulator_.vanguard().deck();
+        const auto& comm = simulator_.gridView().comm();
 
-        if (!deck.hasKeyword("TRACERS"))
+        bool has;
+        if (comm.rank() == 0)
+            has = deck.hasKeyword("TRACERS");
+        comm.broadcast(&has, 1, 0);
+
+        if (!has)
             return; // tracer treatment is supposed to be disabled
 
         if (!EWOMS_GET_PARAM(TypeTag, bool, EnableTracerModel)) {
@@ -408,11 +414,7 @@ protected:
         typedef Dune::BiCGSTABSolver<TracerVector> TracerSolver;
         typedef Dune::MatrixAdapter<TracerMatrix, TracerVector , TracerVector > TracerOperator;
         typedef Dune::SeqScalarProduct< TracerVector > TracerScalarProduct ;
-#if DUNE_VERSION_NEWER(DUNE_ISTL, 2,6)
         typedef Dune::SeqILU< TracerMatrix, TracerVector, TracerVector  > TracerPreconditioner;
-#else
-        typedef Dune::SeqILUn< TracerMatrix, TracerVector, TracerVector  > TracerPreconditioner;
-#endif
 
         TracerOperator tracerOperator(M);
         TracerScalarProduct tracerScalarProduct;

@@ -73,6 +73,7 @@ NEW_PROP_TAG(EclDeckFileName);
 NEW_PROP_TAG(OutputDir);
 NEW_PROP_TAG(EnableOpmRstFile);
 NEW_PROP_TAG(EclStrictParsing);
+NEW_PROP_TAG(SchedRestart);
 NEW_PROP_TAG(EclOutputInterval);
 NEW_PROP_TAG(IgnoreKeywords);
 NEW_PROP_TAG(EnableExperiments);
@@ -83,6 +84,7 @@ SET_STRING_PROP(EclBaseVanguard, EclDeckFileName, "");
 SET_INT_PROP(EclBaseVanguard, EclOutputInterval, -1); // use the deck-provided value
 SET_BOOL_PROP(EclBaseVanguard, EnableOpmRstFile, false);
 SET_BOOL_PROP(EclBaseVanguard, EclStrictParsing, false);
+SET_BOOL_PROP(EclBaseVanguard, SchedRestart, true);
 SET_INT_PROP(EclBaseVanguard, EdgeWeightsMethod, 1);
 
 END_PROPERTIES
@@ -127,6 +129,8 @@ public:
                              "List of Eclipse keywords which should be ignored. As a ':' separated string.");
         EWOMS_REGISTER_PARAM(TypeTag, bool, EclStrictParsing,
                              "Use strict mode for parsing - all errors are collected before the applicaton exists.");
+        EWOMS_REGISTER_PARAM(TypeTag, bool, SchedRestart,
+                             "When restarting: should we try to initialize wells and groups from historical SCHEDULE section.");
         EWOMS_REGISTER_PARAM(TypeTag, int, EdgeWeightsMethod,
                              "Choose edge-weighing strategy: 0=uniform, 1=trans, 2=log(trans).");
     }
@@ -137,20 +141,20 @@ public:
      * The input can either be the canonical deck file name or the name of the case
      * (i.e., without the .DATA extension)
      */
-    static boost::filesystem::path canonicalDeckPath(const std::string& caseName)
+    static Opm::filesystem::path canonicalDeckPath(const std::string& caseName)
     {
-        const auto fileExists = [](const boost::filesystem::path& f) -> bool
+        const auto fileExists = [](const Opm::filesystem::path& f) -> bool
             {
-                if (!boost::filesystem::exists(f))
+                if (!Opm::filesystem::exists(f))
                     return false;
 
-                if (boost::filesystem::is_regular_file(f))
+                if (Opm::filesystem::is_regular_file(f))
                     return true;
 
-                return boost::filesystem::is_symlink(f) && boost::filesystem::is_regular_file(boost::filesystem::read_symlink(f));
+                return Opm::filesystem::is_symlink(f) && Opm::filesystem::is_regular_file(Opm::filesystem::read_symlink(f));
             };
 
-        auto simcase = boost::filesystem::path(caseName);
+        auto simcase = Opm::filesystem::path(caseName);
         if (fileExists(simcase))
             return simcase;
 
@@ -322,16 +326,14 @@ public:
                 Opm::checkDeck(*deck_, parser,  *parseContext_, *errorGuard_);
         }
         else {
-            assert(externalDeck_);
             deck_ = externalDeck_;
         }
 
         if (!externalEclState_) {
-            internalEclState_.reset(new Opm::EclipseState(*deck_, *parseContext_, *errorGuard_));
+            internalEclState_.reset(new Opm::EclipseState(*deck_));
             eclState_ = internalEclState_.get();
         }
         else {
-            assert(externalDeck_);
             assert(externalEclState_);
 
             deck_ = externalDeck_;
@@ -375,7 +377,7 @@ public:
         // written to disk (every N report step)
         int outputInterval = EWOMS_GET_PARAM(TypeTag, int, EclOutputInterval);
         if (outputInterval >= 0)
-            eclState_->getRestartConfig().overrideRestartWriteInterval(outputInterval);
+            schedule().restart().overrideRestartWriteInterval(outputInterval);
     }
 
     /*!
@@ -531,6 +533,15 @@ public:
     std::unordered_set<std::string> defunctWellNames() const
     { return std::unordered_set<std::string>(); }
 
+    /*!
+     * \brief Get the cell centroids for a distributed grid.
+     *
+     * Currently this only non-empty for a loadbalanced CpGrid.
+     */
+    const std::vector<double>& cellCentroids() const
+    {
+        return centroids_;
+    }
 protected:
     void callImplementationInit()
     {
@@ -557,9 +568,9 @@ private:
             outputDir = ioConfig.getOutputDir();
 
         // ensure that the output directory exists and that it is a directory
-        if (!boost::filesystem::is_directory(outputDir)) {
+        if (!Opm::filesystem::is_directory(outputDir)) {
             try {
-                boost::filesystem::create_directories(outputDir);
+                Opm::filesystem::create_directories(outputDir);
             }
             catch (...) {
                  throw std::runtime_error("Creation of output directory '"+outputDir+"' failed\n");
@@ -608,6 +619,12 @@ private:
     Opm::SummaryConfig* eclSummaryConfig_;
 
     Dune::EdgeWeightMethod edgeWeightsMethod_;
+
+protected:
+    /*! \brief The cell centroids after loadbalance was called.
+     * Empty otherwise. Used by EclTransmissibilty.
+     */
+    std::vector<double> centroids_;
 };
 
 template <class TypeTag>

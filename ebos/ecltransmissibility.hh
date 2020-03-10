@@ -117,31 +117,27 @@ public:
      * either but at least it seems to be much better.
      */
     void finishInit()
-    { update(); }
+    { update(true); }
 
 
     /*!
      * \brief Compute all transmissibilities
      *
+     * \param global If true, update is called on all processes
      * Also, this updates the "thermal half transmissibilities" if energy is enabled.
      */
-    void update()
+    void update(bool global)
     {
         const auto& gridView = vanguard_.gridView();
         const auto& cartMapper = vanguard_.cartesianIndexMapper();
         const auto& eclState = vanguard_.eclState();
-        const auto& eclGrid = eclState.getInputGrid();
         const auto& cartDims = cartMapper.cartesianDimensions();
         auto& transMult = eclState.getTransMult();
-#if DUNE_VERSION_NEWER(DUNE_GRID, 2,6)
+        const auto& comm = vanguard_.gridView().comm();
         ElementMapper elemMapper(gridView, Dune::mcmgElementLayout());
-#else
-        ElementMapper elemMapper(gridView);
-#endif
 
         // get the ntg values, the ntg values are modified for the cells merged with minpv
-        std::vector<double> ntg;
-        minPvFillNtg_(ntg);
+        const std::vector<double>& ntg = eclState.fieldProps().get_double("NTG");
 
         unsigned numElements = elemMapper.size();
 
@@ -153,17 +149,26 @@ public:
         for (unsigned dimIdx = 0; dimIdx < dimWorld; ++dimIdx)
             axisCentroids[dimIdx].resize(numElements);
 
+        const std::vector<double>& centroids = vanguard_.cellCentroids();
+
         auto elemIt = gridView.template begin</*codim=*/ 0>();
         const auto& elemEndIt = gridView.template end</*codim=*/ 0>();
-        for (; elemIt != elemEndIt; ++elemIt) {
+        size_t centroidIdx = 0;
+        for (; elemIt != elemEndIt; ++elemIt, ++centroidIdx) {
             const auto& elem = *elemIt;
             unsigned elemIdx = elemMapper.index(elem);
 
             // compute the axis specific "centroids" used for the transmissibilities. for
             // consistency with the flow simulator, we use the element centers as
             // computed by opm-parser's Opm::EclipseGrid class for all axes.
-            unsigned cartesianCellIdx = cartMapper.cartesianIndex(elemIdx);
-            const auto& centroid = eclGrid.getCellCenter(cartesianCellIdx);
+            const double* centroid;
+            if (vanguard_.gridView().comm().rank() == 0) {
+                const auto& eclGrid = eclState.getInputGrid();
+                unsigned cartesianCellIdx = cartMapper.cartesianIndex(elemIdx);
+                centroid = &eclGrid.getCellCenter(cartesianCellIdx)[0];
+            } else
+                centroid = &centroids[centroidIdx * dimWorld];
+
             for (unsigned axisIdx = 0; axisIdx < dimWorld; ++axisIdx)
                 for (unsigned dimIdx = 0; dimIdx < dimWorld; ++dimIdx)
                     axisCentroids[axisIdx][elemIdx][dimIdx] = centroid[dimIdx];
@@ -184,6 +189,18 @@ public:
             thermalHalfTrans_->reserve(numElements*6*1.05);
 
             thermalHalfTransBoundary_.clear();
+        }
+
+        // The MULTZ needs special case if the option is ALL
+        // Then the smallest multiplier is applied.
+        // Default is to apply the top and bottom multiplier
+        bool useSmallestMultiplier;
+        if (comm.rank() == 0) {
+            const auto& eclGrid = eclState.getInputGrid();
+            useSmallestMultiplier = eclGrid.getMultzOption() == Opm::PinchMode::ModeEnum::ALL;
+        }
+        if (global && comm.size() > 1) {
+            comm.broadcast(&useSmallestMultiplier, 1, 0);
         }
 
         // compute the transmissibilities for all intersections
@@ -320,8 +337,8 @@ public:
                                                   axisCentroids),
                                   permeability_[outsideElemIdx]);
 
-                applyNtg_(halfTrans1, insideFaceIdx, insideCartElemIdx, ntg);
-                applyNtg_(halfTrans2, outsideFaceIdx, outsideCartElemIdx, ntg);
+                applyNtg_(halfTrans1, insideFaceIdx, elemIdx, ntg);
+                applyNtg_(halfTrans2, outsideFaceIdx, outsideElemIdx, ntg);
 
                 // convert half transmissibilities to full face
                 // transmissibilities using the harmonic mean
@@ -335,10 +352,6 @@ public:
                 // apply the full face transmissibility multipliers
                 // for the inside ...
 
-                // The MULTZ needs special case if the option is ALL
-                // Then the smallest multiplier is applied.
-                // Default is to apply the top and bottom multiplier
-                bool useSmallestMultiplier = eclGrid.getMultzOption() == Opm::PinchMode::ModeEnum::ALL;
                 if (useSmallestMultiplier)
                     applyAllZMultipliers_(trans, insideFaceIdx, insideCartElemIdx, outsideCartElemIdx, transMult, cartDims);
                 else
@@ -499,16 +512,12 @@ private:
         const auto& gridView = vanguard_.gridView();
         const auto& cartMapper = vanguard_.cartesianIndexMapper();
         const auto& cartDims = cartMapper.cartesianDimensions();
-#if DUNE_VERSION_NEWER(DUNE_GRID, 2,6)
         ElementMapper elemMapper(gridView, Dune::mcmgElementLayout());
-#else
-        ElementMapper elemMapper(gridView);
-#endif
 
         const auto& fp = vanguard_.eclState().fieldProps();
-        const auto& inputTranxData = fp.get_global_double("TRANX");
-        const auto& inputTranyData = fp.get_global_double("TRANY");
-        const auto& inputTranzData = fp.get_global_double("TRANZ");
+        const auto& inputTranxData = fp.get_double("TRANX");
+        const auto& inputTranyData = fp.get_double("TRANY");
+        const auto& inputTranzData = fp.get_double("TRANZ");
         bool tranx_deckAssigned = false;                     // Ohh my ....
         bool trany_deckAssigned = false;
         bool tranz_deckAssigned = false;
@@ -540,26 +549,26 @@ private:
                 if (gc2 - gc1 == 1) {
                     if (tranx_deckAssigned)
                         // set simulator internal transmissibilities to values from inputTranx
-                        trans_[isId] = inputTranxData[gc1];
+                        trans_[isId] = inputTranxData[c1];
                     else
                         // Scale transmissibilities with scale factor from inputTranx
-                        trans_[isId] *= inputTranxData[gc1];
+                        trans_[isId] *= inputTranxData[c1];
                 }
                 else if (gc2 - gc1 == cartDims[0]) {
                     if (trany_deckAssigned)
                         // set simulator internal transmissibilities to values from inputTrany
-                        trans_[isId] = inputTranyData[gc1];
+                        trans_[isId] = inputTranyData[c1];
                     else
                         // Scale transmissibilities with scale factor from inputTrany
-                        trans_[isId] *= inputTranyData[gc1];
+                        trans_[isId] *= inputTranyData[c1];
                 }
                 else if (gc2 - gc1 == cartDims[0]*cartDims[1]) {
                     if (tranz_deckAssigned)
                         // set simulator internal transmissibilities to values from inputTranz
-                        trans_[isId] = inputTranzData[gc1];
+                        trans_[isId] = inputTranzData[c1];
                     else
                         // Scale transmissibilities with scale factor from inputTranz
-                        trans_[isId] *= inputTranzData[gc1];
+                        trans_[isId] *= inputTranzData[c1];
                 }
                 //else.. We don't support modification of NNC at the moment.
             }
@@ -718,22 +727,25 @@ private:
         // over several processes.)
         const auto& fp = vanguard_.eclState().fieldProps();
         if (fp.has_double("PERMX")) {
-            const std::vector<double>& permxData = fp.get_global_double("PERMX");
+            const std::vector<double>& permxData = fp.get_double("PERMX");
 
-            std::vector<double> permyData(permxData);
+            std::vector<double> permyData;
             if (fp.has_double("PERMY"))
-                permyData = fp.get_global_double("PERMY");
+                permyData = fp.get_double("PERMY");
+            else
+                permyData = permxData;
 
-            std::vector<double> permzData(permxData);
+            std::vector<double> permzData;
             if (fp.has_double("PERMZ"))
-                permzData = fp.get_global_double("PERMZ");
+                permzData = fp.get_double("PERMZ");
+            else
+                permzData = permxData;
 
             for (size_t dofIdx = 0; dofIdx < numElem; ++ dofIdx) {
-                unsigned cartesianElemIdx = vanguard_.cartesianIndex(dofIdx);
                 permeability_[dofIdx] = 0.0;
-                permeability_[dofIdx][0][0] = permxData[cartesianElemIdx];
-                permeability_[dofIdx][1][1] = permyData[cartesianElemIdx];
-                permeability_[dofIdx][2][2] = permzData[cartesianElemIdx];
+                permeability_[dofIdx][0][0] = permxData[dofIdx];
+                permeability_[dofIdx][1][1] = permyData[dofIdx];
+                permeability_[dofIdx][2][2] = permzData[dofIdx];
             }
 
             // for now we don't care about non-diagonal entries
@@ -835,7 +847,7 @@ private:
 
     void applyNtg_(Scalar& trans,
                    unsigned faceIdx,
-                   unsigned cartElemIdx,
+                   unsigned elemIdx,
                    const std::vector<double>& ntg) const
     {
         // apply multiplyer for the transmissibility of the face. (the
@@ -843,67 +855,20 @@ private:
         // contains the intersection of interest.)
         switch (faceIdx) {
         case 0: // left
-            trans *= ntg[cartElemIdx];
+            trans *= ntg[elemIdx];
             break;
         case 1: // right
-            trans *= ntg[cartElemIdx];
+            trans *= ntg[elemIdx];
             break;
 
         case 2: // front
-            trans *= ntg[cartElemIdx];
+            trans *= ntg[elemIdx];
             break;
         case 3: // back
-            trans *= ntg[cartElemIdx];
+            trans *= ntg[elemIdx];
             break;
 
             // NTG does not apply to top and bottom faces
-        }
-    }
-
-    void minPvFillNtg_(std::vector<double>& averageNtg) const
-    {
-        // compute volume weighted arithmetic average of NTG for
-        // cells merged as an result of minpv.
-        const auto& eclState = vanguard_.eclState();
-        const auto& eclGrid = eclState.getInputGrid();
-        bool opmfil = eclGrid.getMinpvMode() == Opm::MinpvMode::OpmFIL;
-        std::vector<double> ntg;
-
-        ntg = eclState.fieldProps().get_global_double("NTG");
-        // just return the unmodified ntg if opmfil is not used
-        averageNtg = ntg;
-        if (!opmfil)
-            return;
-
-        const auto& cartMapper = vanguard_.cartesianIndexMapper();
-        const auto& cartDims = cartMapper.cartesianDimensions();
-        const auto& actnum = eclState.fieldProps().actnum();
-        const auto& porv = eclState.fieldProps().porv(true);
-        assert(dimWorld > 1);
-        const size_t nxny = cartDims[0] * cartDims[1];
-        for (size_t cartesianCellIdx = 0; cartesianCellIdx < ntg.size(); ++cartesianCellIdx) {
-            // use the original ntg values for the inactive cells
-            if (!actnum[cartesianCellIdx])
-                continue;
-
-            // Average properties as long as there exist cells above
-            // that has pore volume less than the MINPV threshold
-            const double cellVolume = eclGrid.getCellVolume(cartesianCellIdx);
-            double ntgCellVolume = ntg[cartesianCellIdx] * cellVolume;
-            double totalCellVolume = cellVolume;
-            int cartesianCellIdxAbove = cartesianCellIdx - nxny;
-            while (cartesianCellIdxAbove >= 0 &&
-                   actnum[cartesianCellIdxAbove] > 0 &&
-                   porv[cartesianCellIdxAbove] < eclGrid.getMinpvVector()[cartesianCellIdxAbove])
-            {
-                // Volume weighted arithmetic average of NTG
-                const double cellAboveVolume = eclGrid.getCellVolume(cartesianCellIdxAbove);
-                totalCellVolume += cellAboveVolume;
-                ntgCellVolume += ntg[cartesianCellIdxAbove]*cellAboveVolume;
-                cartesianCellIdxAbove -= nxny;
-            }
-
-            averageNtg[cartesianCellIdx] = ntgCellVolume / totalCellVolume;
         }
     }
 

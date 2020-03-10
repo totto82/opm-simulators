@@ -135,7 +135,7 @@ namespace Opm
                         const size_t size = opAParallel_->getmat().N();
 
                         const ParallelISTLInformation& info =
-                            boost::any_cast<const ParallelISTLInformation&>( this->parallelInformation_);
+                            std::any_cast<const ParallelISTLInformation&>( this->parallelInformation_);
 
                         // As we use a dune-istl with block size np the number of components
                         // per parallel is only one.
@@ -149,17 +149,9 @@ namespace Opm
                     }
                 }
 
-#if DUNE_VERSION_NEWER(DUNE_ISTL, 2, 6)
                 constexpr Dune::SolverCategory::Category category=Dune::SolverCategory::overlapping;
                 auto sp = Dune::createScalarProduct<Vector,POrComm>(*comm_, category);
                 sp_ = std::move(sp);
-#else
-                constexpr int  category = Dune::SolverCategory::overlapping;
-                typedef Dune::ScalarProductChooser<Vector, POrComm, category> ScalarProductChooser;
-                typedef std::unique_ptr<typename ScalarProductChooser::ScalarProduct> SPPointer;
-                SPPointer sp(ScalarProductChooser::construct(*comm_));
-                sp_ = std::move(sp);
-#endif
 
                 using AMGOperator = Dune::OverlappingSchwarzOperator<Matrix, Vector, Vector, POrComm>;
                 // If clause is always execute as as Linearoperator is WellModelMatrixAdapter< Matrix, Vector, Vector, WellModel, false|true>;
@@ -183,17 +175,9 @@ namespace Opm
                 POrCommType parallelInformation_arg;
                 typedef  OperatorSerial LinearOperator;
 
-#if DUNE_VERSION_NEWER(DUNE_ISTL, 2, 6)
                 constexpr Dune::SolverCategory::Category category=Dune::SolverCategory::sequential;
                 auto sp = Dune::createScalarProduct<Vector,POrComm>(parallelInformation_arg, category);
                 sp_ = std::move(sp);
-#else
-                constexpr int  category = Dune::SolverCategory::sequential;
-                typedef Dune::ScalarProductChooser<Vector, POrCommType, category> ScalarProductChooser;
-                typedef std::unique_ptr<typename ScalarProductChooser::ScalarProduct> SPPointer;
-                SPPointer sp(ScalarProductChooser::construct(parallelInformation_arg));
-                sp_ = std::move(sp);
-#endif
 
                 // If clause is always execute as as Linearoperator is WellModelMatrixAdapter< Matrix, Vector, Vector, WellModel, false|true>;
                 if( ! std::is_same< LinearOperator, MatrixAdapter > :: value &&

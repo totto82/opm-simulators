@@ -94,13 +94,7 @@ namespace Opm {
             typedef Dune::FieldVector<Scalar, numEq    > VectorBlockType;
             typedef Dune::BlockVector<VectorBlockType> BVector;
 
-#if  DUNE_VERSION_NEWER_REV(DUNE_ISTL, 2 , 5, 1)
-            // 3x3 matrix block inversion was unstable from at least 2.3 until and
-            // including 2.5.0
             typedef Dune::FieldMatrix<Scalar, numEq, numEq > MatrixBlockType;
-#else
-            typedef Dune::FieldMatrix<Scalar, numEq, numEq > MatrixBlockType;
-#endif
 
             typedef Opm::BlackOilPolymerModule<TypeTag> PolymerModule;
 
@@ -270,6 +264,7 @@ namespace Opm {
             double gravity_;
             std::vector<double> depth_;
             bool initial_step_;
+            bool report_step_starts_;
 
             std::unique_ptr<RateConverterType> rateConverter_;
             std::unique_ptr<VFPProperties<VFPInjProperties,VFPProdProperties>> vfp_properties_;
@@ -306,7 +301,7 @@ namespace Opm {
             // xw to update Well State
             void recoverWellSolutionAndUpdateWellState(const BVector& x);
 
-            void updateWellControls(Opm::DeferredLogger& deferred_logger, const bool checkGroupControl);
+            void updateWellControls(Opm::DeferredLogger& deferred_logger, const bool checkGroupControl, const bool checkCurrentGroupControl);
 
             // setting the well_solutions_ based on well_state.
             void updatePrimaryVariables(Opm::DeferredLogger& deferred_logger);
@@ -379,11 +374,11 @@ namespace Opm {
 
             const Well& getWellEcl(const std::string& well_name) const;
 
-            void checkGroupConstraints(const Group& group, Opm::DeferredLogger& deferred_logger);
+            void checkGroupConstraints(const Group& group, const bool checkCurrentControl, Opm::DeferredLogger& deferred_logger);
 
             void actionOnBrokenConstraints(const Group& group, const Group::ExceedAction& exceed_action, const Group::ProductionCMode& newControl, const int reportStepIdx, Opm::DeferredLogger& deferred_logger);
 
-            void actionOnBrokenConstraints(const Group& group, const Group::InjectionCMode& newControl, const int reportStepIdx, Opm::DeferredLogger& deferred_logger);
+            void actionOnBrokenConstraints(const Group& group, const Group::InjectionCMode& newControl, const Phase& topUpPhase, const int reportStepIdx, Opm::DeferredLogger& deferred_logger);
 
             WellInterfacePtr getWell(const std::string& well_name) const;
 

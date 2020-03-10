@@ -301,20 +301,20 @@ namespace Opm
         {
             const auto& controls = well.injectionControls(summaryState);
 
-            Well::InjectorType injectorType = controls.injector_type;
+            InjectorType injectorType = controls.injector_type;
             int phasePos;
             switch (injectorType) {
-            case Well::InjectorType::WATER:
+            case InjectorType::WATER:
             {
                 phasePos = pu.phase_pos[BlackoilPhases::Aqua];
                 break;
             }
-            case Well::InjectorType::OIL:
+            case InjectorType::OIL:
             {
                 phasePos = pu.phase_pos[BlackoilPhases::Liquid];
                 break;
             }
-            case Well::InjectorType::GAS:
+            case InjectorType::GAS:
             {
                 phasePos = pu.phase_pos[BlackoilPhases::Vapour];
                 break;
@@ -891,7 +891,7 @@ namespace Opm
                     auto phase = well.getInjectionProperties().injectorType;
 
                     if (FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx)) {
-                        if (phase == Well::InjectorType::WATER) {
+                        if (phase == InjectorType::WATER) {
                             primary_variables_[seg][WFrac] = 1.0;
                         } else {
                             primary_variables_[seg][WFrac] = 0.0;
@@ -899,7 +899,7 @@ namespace Opm
                     }
 
                     if (FluidSystem::phaseIsActive(FluidSystem::gasPhaseIdx)) {
-                        if (phase == Well::InjectorType::GAS) {
+                        if (phase == InjectorType::GAS) {
                             primary_variables_[seg][GFrac] = 1.0;
                         } else {
                             primary_variables_[seg][GFrac] = 0.0;
@@ -1164,16 +1164,6 @@ namespace Opm
     }
 
 
-
-
-
-    template <typename TypeTag>
-    WellSegments::MultiPhaseModel
-    MultisegmentWell<TypeTag>::
-    multiphaseModel() const
-    {
-        return segmentSet().multiPhaseModel();
-    }
 
 
 
@@ -1660,18 +1650,18 @@ namespace Opm
 
             if (FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx)
                     && Indices::canonicalToActiveComponentIndex(FluidSystem::waterCompIdx) == comp_idx
-                    && phase == Well::InjectorType::WATER)
+                    && phase == InjectorType::WATER)
                 return primary_variables_evaluation_[seg][GTotal] / scalingFactor(ebosCompIdxToFlowCompIdx(comp_idx));
 
 
             if (FluidSystem::phaseIsActive(FluidSystem::oilPhaseIdx)
                     && Indices::canonicalToActiveComponentIndex(FluidSystem::oilCompIdx) == comp_idx
-                    && phase == Well::InjectorType::OIL)
+                    && phase == InjectorType::OIL)
                 return primary_variables_evaluation_[seg][GTotal] / scalingFactor(ebosCompIdxToFlowCompIdx(comp_idx));
 
             if (FluidSystem::phaseIsActive(FluidSystem::gasPhaseIdx)
                     && Indices::canonicalToActiveComponentIndex(FluidSystem::gasCompIdx) == comp_idx
-                    && phase == Well::InjectorType::GAS)
+                    && phase == InjectorType::GAS)
                 return primary_variables_evaluation_[seg][GTotal] / scalingFactor(ebosCompIdxToFlowCompIdx(comp_idx));
 
             return 0.0;
@@ -1778,23 +1768,23 @@ namespace Opm
             const Opm::Well::InjectorCMode& current = well_state.currentInjectionControls()[well_index];
             const auto& controls = inj_controls;
 
-            Well::InjectorType injectorType = controls.injector_type;
+            InjectorType injectorType = controls.injector_type;
             double scaling = 1.0;
 
             const auto& pu = phaseUsage();
 
             switch (injectorType) {
-            case Well::InjectorType::WATER:
+            case InjectorType::WATER:
             {
                 scaling = scalingFactor(pu.phase_pos[BlackoilPhases::Aqua]);
                 break;
             }
-            case Well::InjectorType::OIL:
+            case InjectorType::OIL:
             {
                 scaling = scalingFactor(pu.phase_pos[BlackoilPhases::Liquid]);
                 break;
             }
-            case Well::InjectorType::GAS:
+            case InjectorType::GAS:
             {
                 scaling = scalingFactor(pu.phase_pos[BlackoilPhases::Vapour]);
                 break;
@@ -1818,17 +1808,17 @@ namespace Opm
                 double coeff = 1.0;
 
                 switch (injectorType) {
-                case Well::InjectorType::WATER:
+                case InjectorType::WATER:
                 {
                     coeff = convert_coeff[pu.phase_pos[BlackoilPhases::Aqua]];
                     break;
                 }
-                case Well::InjectorType::OIL:
+                case InjectorType::OIL:
                 {
                     coeff = convert_coeff[pu.phase_pos[BlackoilPhases::Liquid]];
                     break;
                 }
-                case Well::InjectorType::GAS:
+                case InjectorType::GAS:
                 {
                     coeff = convert_coeff[pu.phase_pos[BlackoilPhases::Vapour]];
                     break;
@@ -2123,11 +2113,46 @@ namespace Opm
     template <typename TypeTag>
     void
     MultisegmentWell<TypeTag>::
-    assembleGroupInjectionControl(const Group& group, const WellState& well_state, const Opm::Schedule& schedule, const SummaryState& summaryState, const Well::InjectorType& injectorType, EvalWell& control_eq, double efficiencyFactor, Opm::DeferredLogger& deferred_logger)
+    assembleGroupInjectionControl(const Group& group, const WellState& well_state, const Opm::Schedule& schedule, const SummaryState& summaryState, const InjectorType& injectorType, EvalWell& control_eq, double efficiencyFactor, Opm::DeferredLogger& deferred_logger)
     {
         const auto& well = well_ecl_;
-        const auto pu = phaseUsage();
-        const Group::InjectionCMode& currentGroupControl = well_state.currentInjectionGroupControl(group.name());
+        const auto& pu = phaseUsage();
+
+        int phasePos;
+        Well::GuideRateTarget wellTarget;
+        Phase injectionPhase;
+        double scaling = 1.0;
+
+        switch (injectorType) {
+        case InjectorType::WATER:
+        {
+            phasePos = pu.phase_pos[BlackoilPhases::Aqua];
+            wellTarget = Well::GuideRateTarget::WAT;
+            injectionPhase = Phase::WATER;
+            scaling = scalingFactor(pu.phase_pos[BlackoilPhases::Aqua]);
+            break;
+        }
+        case InjectorType::OIL:
+        {
+            phasePos = pu.phase_pos[BlackoilPhases::Liquid];
+            wellTarget = Well::GuideRateTarget::OIL;
+            injectionPhase = Phase::OIL;
+            scaling = scalingFactor(pu.phase_pos[BlackoilPhases::Liquid]);
+            break;
+        }
+        case InjectorType::GAS:
+        {
+            phasePos = pu.phase_pos[BlackoilPhases::Vapour];
+            wellTarget = Well::GuideRateTarget::GAS;
+            injectionPhase = Phase::GAS;
+            scaling = scalingFactor(pu.phase_pos[BlackoilPhases::Vapour]);
+            break;
+        }
+        default:
+            throw("Expected WATER, OIL or GAS as type for injectors " + well.name());
+        }
+
+        const Group::InjectionCMode& currentGroupControl = well_state.currentInjectionGroupControl(injectionPhase, group.name());
         if (currentGroupControl == Group::InjectionCMode::FLD) {
             // Inject share of parents control
             const auto& parent = schedule.getGroup( group.parent(), current_step_ );
@@ -2145,42 +2170,13 @@ namespace Opm
             return;
         }
 
-        const auto& groupcontrols = group.injectionControls(summaryState);
-
-        int phasePos;
-        Well::GuideRateTarget wellTarget;
-        double scaling = 1.0;
-
-        switch (injectorType) {
-        case Well::InjectorType::WATER:
-        {
-            phasePos = pu.phase_pos[BlackoilPhases::Aqua];
-            wellTarget = Well::GuideRateTarget::WAT;
-            scaling = scalingFactor(pu.phase_pos[BlackoilPhases::Aqua]);
-            break;
-        }
-        case Well::InjectorType::OIL:
-        {
-            phasePos = pu.phase_pos[BlackoilPhases::Liquid];
-            wellTarget = Well::GuideRateTarget::OIL;
-            scaling = scalingFactor(pu.phase_pos[BlackoilPhases::Liquid]);
-            break;
-        }
-        case Well::InjectorType::GAS:
-        {
-            phasePos = pu.phase_pos[BlackoilPhases::Vapour];
-            wellTarget = Well::GuideRateTarget::GAS;
-            scaling = scalingFactor(pu.phase_pos[BlackoilPhases::Vapour]);
-            break;
-        }
-        default:
-            throw("Expected WATER, OIL or GAS as type for injectors " + well.name());
-        }
+        assert(group.hasInjectionControl(injectionPhase));
+        const auto& groupcontrols = group.injectionControls(injectionPhase, summaryState);
 
         const std::vector<double>& groupInjectionReductions = well_state.currentInjectionGroupReductionRates(group.name());
         double groupTargetReduction = groupInjectionReductions[phasePos];
         double fraction = wellGroupHelpers::wellFractionFromGuideRates(well, schedule, well_state, current_step_, Base::guide_rate_, wellTarget, /*isInjector*/true);
-        wellGroupHelpers::accumulateGroupInjectionPotentialFractions(well.groupName(), group.name(), schedule, well_state, current_step_, phasePos, fraction);
+        wellGroupHelpers::accumulateGroupInjectionPotentialFractions(well.groupName(), group.name(), schedule, well_state, pu, current_step_, injectionPhase, fraction);
 
         switch(currentGroupControl) {
         case Group::InjectionCMode::NONE:
@@ -2220,15 +2216,15 @@ namespace Opm
             double voidageRate = well_state.currentInjectionVREPRates(groupcontrols.voidage_group)*groupcontrols.target_void_fraction;
 
             double injReduction = 0.0;
-
+            std::vector<double> groupInjectionReservoirRates = well_state.currentInjectionGroupReservoirRates(group.name());
             if (groupcontrols.phase != Phase::WATER)
-                injReduction += groupInjectionReductions[pu.phase_pos[BlackoilPhases::Aqua]]*convert_coeff[pu.phase_pos[BlackoilPhases::Aqua]];
+                injReduction += groupInjectionReservoirRates[pu.phase_pos[BlackoilPhases::Aqua]];
 
             if (groupcontrols.phase != Phase::OIL)
-                injReduction += groupInjectionReductions[pu.phase_pos[BlackoilPhases::Liquid]]*convert_coeff[pu.phase_pos[BlackoilPhases::Liquid]];
+                injReduction += groupInjectionReservoirRates[pu.phase_pos[BlackoilPhases::Liquid]];
 
             if (groupcontrols.phase != Phase::GAS)
-                injReduction += groupInjectionReductions[pu.phase_pos[BlackoilPhases::Vapour]]*convert_coeff[pu.phase_pos[BlackoilPhases::Vapour]];
+                injReduction += groupInjectionReservoirRates[pu.phase_pos[BlackoilPhases::Vapour]];
 
             voidageRate -= injReduction;
 
@@ -3550,7 +3546,7 @@ namespace Opm
 
 
     template<typename TypeTag>
-    boost::optional<double>
+    std::optional<double>
     MultisegmentWell<TypeTag>::
     computeBhpAtThpLimitProd(const Simulator& ebos_simulator,
                              const std::vector<Scalar>& B_avg,
@@ -3632,7 +3628,7 @@ namespace Opm
                     // empty optional.
                     deferred_logger.warning("FAILED_ROBUST_BHP_THP_SOLVE_INOPERABLE",
                                             "Robust bhp(thp) solve failed due to inoperability for well " + name());
-                    return boost::optional<double>();
+                    return std::optional<double>();
                 } else {
                     // Still producing, even at high bhp.
                     assert(f_high < 0.0);
@@ -3716,7 +3712,7 @@ namespace Opm
                         // Return failure.
                         deferred_logger.warning("FAILED_ROBUST_BHP_THP_SOLVE_BRACKETING_FAILURE",
                                                 "Robust bhp(thp) solve failed due to bracketing failure for well " + name());
-                        return boost::optional<double>();
+                        return std::optional<double>();
                     }
                 }
             }
@@ -3742,7 +3738,7 @@ namespace Opm
         catch (...) {
             deferred_logger.warning("FAILED_ROBUST_BHP_THP_SOLVE",
                                     "Robust bhp(thp) solve failed for well " + name());
-            return boost::optional<double>();
+            return std::optional<double>();
 	}
     }
 
@@ -3750,7 +3746,7 @@ namespace Opm
 
 
     template<typename TypeTag>
-    boost::optional<double>
+    std::optional<double>
     MultisegmentWell<TypeTag>::
     computeBhpAtThpLimitInj(const Simulator& ebos_simulator,
                             const std::vector<Scalar>& B_avg,
@@ -3910,7 +3906,7 @@ namespace Opm
 
         // Handle the no solution case.
         if (sign_change_index == -1) {
-            return boost::optional<double>();
+            return std::optional<double>();
         }
 
         // Solve for the proper solution in the given interval.
@@ -3929,7 +3925,7 @@ namespace Opm
             assert(low == controls.bhp_limit);
             deferred_logger.warning("FAILED_ROBUST_BHP_THP_SOLVE",
                                     "Robust bhp(thp) solve failed for well " + name());
-            return boost::optional<double>();
+            return std::optional<double>();
         }
         try {
             const double solved_bhp = RegulaFalsiBisection<WarnAndContinueOnError>::
@@ -3943,7 +3939,7 @@ namespace Opm
         catch (...) {
             deferred_logger.warning("FAILED_ROBUST_BHP_THP_SOLVE",
                                     "Robust bhp(thp) solve failed for well " + name());
-            return boost::optional<double>();
+            return std::optional<double>();
         }
 
     }

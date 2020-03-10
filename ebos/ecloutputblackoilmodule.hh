@@ -219,7 +219,7 @@ public:
         const Opm::SummaryConfig summaryConfig = simulator_.vanguard().summaryConfig();
 
         // Only output RESTART_AUXILIARY asked for by the user.
-        const Opm::RestartConfig& restartConfig = simulator_.vanguard().eclState().getRestartConfig();
+        const Opm::RestartConfig& restartConfig = simulator_.vanguard().schedule().restart();
         std::map<std::string, int> rstKeywords = restartConfig.getRestartKeywords(reportStepNum);
         for (auto& keyValue: rstKeywords) {
             keyValue.second = restartConfig.getKeyword(keyValue.first, reportStepNum);
@@ -272,7 +272,7 @@ public:
                     const size_t i = size_t(connection.getI());
                     const size_t j = size_t(connection.getJ());
                     const size_t k = size_t(connection.getK());
-                    const size_t index = simulator_.vanguard().eclState().getInputGrid().getGlobalIndex(i, j, k);
+                    const size_t index = simulator_.vanguard().eclState().gridDims().getGlobalIndex(i, j, k);
 
                     oilConnectionPressures_.emplace(std::make_pair(index, 0.0));
                     waterConnectionSaturations_.emplace(std::make_pair(index, 0.0));
@@ -840,7 +840,7 @@ public:
                     const size_t j = size_t(connection.getJ());
                     const size_t k = size_t(connection.getK());
 
-                    const size_t index = simulator_.vanguard().eclState().getInputGrid().getGlobalIndex(i, j, k);
+                    const size_t index = simulator_.vanguard().eclState().gridDims().getGlobalIndex(i, j, k);
                     auto& connectionData = wellData.connections[count];
                     connectionData.index = index;
                     count++;
@@ -1278,7 +1278,7 @@ public:
                                 const auto ctlMode = controls.cmode;
                                 const auto injType = controls.injector_type;                            
                                 using CMode = ::Opm::Well::InjectorCMode;
-                                using WType = ::Opm::Well::InjectorType;
+                                using WType = ::Opm::InjectorType;
                                 
                                 auto ftype = [](const auto wtype) -> std::string
                                 {
@@ -1404,7 +1404,7 @@ public:
                                         const auto ctlMode = controls.cmode;
                                         const auto injType = controls.injector_type;                            
                                         using CMode = ::Opm::Well::InjectorCMode;
-                                        using WType = ::Opm::Well::InjectorType;
+                                        using WType = ::Opm::InjectorType;
                                         
                                         auto ftype = [](const auto wtype) -> std::string
                                         {
@@ -1744,24 +1744,20 @@ private:
 
     void createLocalFipnum_()
     {
-        const std::vector<int> fipnumGlobal = simulator_.vanguard().eclState().fieldProps().get_global_int("FIPNUM");
-        // Get compressed cell fipnum.
         const auto& gridView = simulator_.vanguard().gridView();
-        unsigned numElements = gridView.size(/*codim=*/0);
-        fipnum_.resize(numElements, 0.0);
-        if (!fipnumGlobal.empty()) {
-            ElementContext elemCtx(simulator_);
-            ElementIterator elemIt = gridView.template begin</*codim=*/0>();
-            const ElementIterator& elemEndIt = gridView.template end</*codim=*/0>();
-            for (; elemIt != elemEndIt; ++elemIt) {
-                const Element& elem = *elemIt;
-                if (elem.partitionType() != Dune::InteriorEntity)
-                    continue; // assign no fipnum regions to ghost elements
+        if (simulator_.vanguard().eclState().fieldProps().has_int("FIPNUM"))
+            fipnum_ = simulator_.vanguard().eclState().fieldProps().get_int("FIPNUM");
+        else
+            fipnum_.resize(gridView.size(/*codim=*/0), 1);
 
-                elemCtx.updatePrimaryStencil(elem);
-                const unsigned elemIdx = elemCtx.globalSpaceIndex(/*spaceIdx=*/0, /*timeIdx=*/0);
-                fipnum_[elemIdx] = fipnumGlobal[simulator_.vanguard().cartesianIndex(elemIdx)];
-            }
+        ElementContext elemCtx(simulator_);
+        ElementIterator elemIt = simulator_.gridView().template begin</*codim=*/0>();
+        const ElementIterator& elemEndIt = simulator_.gridView().template end</*codim=*/0>();
+        size_t elemIdx = 0;
+        for (; elemIt != elemEndIt; ++elemIt, ++elemIdx) {
+            const Element& elem = *elemIt;
+            if (elem.partitionType() != Dune::InteriorEntity)
+                fipnum_[elemIdx] = 0;
         }
     }
 

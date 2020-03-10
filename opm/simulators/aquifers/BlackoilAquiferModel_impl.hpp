@@ -139,31 +139,56 @@ template <typename TypeTag>
 void
 BlackoilAquiferModel<TypeTag>::init()
 {
+    /*
+    const auto& comm = this->simulator_.vanguard().gridView().comm();
+    const auto& aquifer = this->simulator_.vanguard().eclState().aquifer();
+    const auto& connections = aquifer.connections();
+
+
+    for (const auto& aq : aquifer.fetp())
+        aquifers_Fetkovich.push_back(AquiferFetkovich<TypeTag>(connections[aq.aquiferID], cartesian_to_compressed_, this->simulator_, aq));
+
+    for (const auto& aq : aquifer.ct())
+        aquifers_CarterTracy.push_back(AquiferCarterTracy<TypeTag>(connections[aq.aquiferID], cartesian_to_compressed_, this->simulator_, aq));
+    */
+
     const auto& deck = this->simulator_.vanguard().deck();
-    if (deck.hasKeyword("AQUCT")) {
+    const auto& comm = this->simulator_.vanguard().gridView().comm();
+
+    bool has;
+    if (comm.rank() == 0)
+        has = deck.hasKeyword("AQUCT");
+    comm.broadcast(&has, 1, 0);
+
+    if (has) {
+         if (comm.size() > 1)
+             throw std::runtime_error("Aquifers currently do not work in parallel.");
+
         // updateConnectionIntensiveQuantities();
         const auto& eclState = this->simulator_.vanguard().eclState();
 
         // Get all the carter tracy aquifer properties data and put it in aquifers vector
-        const AquiferCT aquiferct = AquiferCT(eclState, deck);
+        const AquiferCT aquiferct = AquiferCT(eclState.getTableManager(), deck);
         const Aquancon aquifer_connect = Aquancon(eclState.getInputGrid(), deck);
 
-        std::vector<AquiferCT::AQUCT_data> aquifersData = aquiferct.getAquifers();
-        std::vector<Aquancon::AquanconOutput> aquifer_connection = aquifer_connect.getAquOutput();
-
-        assert(aquifersData.size() == aquifer_connection.size());
         const auto& ugrid = simulator_.vanguard().grid();
         const auto& gridView = simulator_.gridView();
         const int number_of_cells = gridView.size(0);
 
         cartesian_to_compressed_ = cartesianToCompressed(number_of_cells, Opm::UgGridHelpers::globalCell(ugrid));
 
-        for (size_t i = 0; i < aquifersData.size(); ++i) {
-            aquifers_CarterTracy.push_back(AquiferCarterTracy<TypeTag>(
-                aquifer_connection.at(i), cartesian_to_compressed_, this->simulator_, aquifersData.at(i)));
-        }
+        for (const auto& aquifer : aquiferct)
+            aquifers_CarterTracy.push_back(AquiferCarterTracy<TypeTag>(aquifer_connect[aquifer.aquiferID], cartesian_to_compressed_, this->simulator_, aquifer));
+
     }
-    if (deck.hasKeyword("AQUFETP")) {
+    if (comm.rank() == 0)
+        has = deck.hasKeyword("AQUFETP");
+    comm.broadcast(&has, 1, 0);
+
+    if (has) {
+         if (comm.size() > 1)
+             throw std::runtime_error("Aquifers currently do not work in parallel.");
+
         // updateConnectionIntensiveQuantities();
         const auto& eclState = this->simulator_.vanguard().eclState();
 
@@ -171,20 +196,15 @@ BlackoilAquiferModel<TypeTag>::init()
         const Aquifetp aquifetp = Aquifetp(deck);
         const Aquancon aquifer_connect = Aquancon(eclState.getInputGrid(), deck);
 
-        std::vector<Aquifetp::AQUFETP_data> aquifersData = aquifetp.getAquifers();
-        std::vector<Aquancon::AquanconOutput> aquifer_connection = aquifer_connect.getAquOutput();
-
-        assert(aquifersData.size() == aquifer_connection.size());
         const auto& ugrid = simulator_.vanguard().grid();
         const auto& gridView = simulator_.gridView();
         const int number_of_cells = gridView.size(0);
 
         cartesian_to_compressed_ = cartesianToCompressed(number_of_cells, Opm::UgGridHelpers::globalCell(ugrid));
 
-        for (size_t i = 0; i < aquifersData.size(); ++i) {
-            aquifers_Fetkovich.push_back(AquiferFetkovich<TypeTag>(
-                aquifer_connection.at(i), cartesian_to_compressed_, this->simulator_, aquifersData.at(i)));
-        }
+        for (const auto& aquifer : aquifetp)
+            aquifers_Fetkovich.push_back(AquiferFetkovich<TypeTag>(aquifer_connect[aquifer.aquiferID], cartesian_to_compressed_, this->simulator_, aquifer));
+
     }
 }
 template <typename TypeTag>
