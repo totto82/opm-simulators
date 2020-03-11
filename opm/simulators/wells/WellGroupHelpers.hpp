@@ -530,7 +530,11 @@ namespace Opm {
             const double my_guide_rate = guideRate(name, always_included_child);
             const Group& parent_group = schedule_.getGroup(parent(name), report_step_);
             const double total_guide_rate = guideRateSum(parent_group, always_included_child);
-            return my_guide_rate / total_guide_rate;
+            assert(total_guide_rate >= my_guide_rate);
+            const double guide_rate_epsilon = 1e-12;
+            return (total_guide_rate > guide_rate_epsilon)
+                ? my_guide_rate / total_guide_rate
+                : 0.0;
         }
         std::string parent(const std::string& name)
         {
@@ -641,7 +645,11 @@ namespace Opm {
         if (alwaysIncludeThis)
             controlGroupGuideRate += thisGuideRate;
 
-        return thisGuideRate / controlGroupGuideRate;
+        assert(controlGroupGuideRate >= thisGuideRate);
+        const double guideRateEpsilon = 1e-12;
+        return (controlGroupGuideRate > guideRateEpsilon)
+            ? thisGuideRate / controlGroupGuideRate
+            : 0.0;
     }
 
 
