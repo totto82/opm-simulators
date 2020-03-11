@@ -888,12 +888,16 @@ namespace Opm
                 if (it == end)  // the well is not found
                     continue;
 
-                int well_index = it->second[0];
-
-                if (well.isInjector())
-                    globalIsInjectionGrup_[global_well_index] = (currentInjectionControls()[well_index] == Well::InjectorCMode::GRUP);
-                else
-                    globalIsProductionGrup_[global_well_index] = (currentProductionControls()[well_index] == Well::ProducerCMode::GRUP);
+                const int well_index = it->second[0];
+                if (!this->open_for_output_[well_index]) {
+                    // Well is shut.
+                    globalIsInjectionGrup_[global_well_index] = 0;
+                } else {
+                    if (well.isInjector())
+                        globalIsInjectionGrup_[global_well_index] = (currentInjectionControls()[well_index] == Well::InjectorCMode::GRUP);
+                    else
+                        globalIsProductionGrup_[global_well_index] = (currentProductionControls()[well_index] == Well::ProducerCMode::GRUP);
+                }
             }
             comm.sum(globalIsInjectionGrup_.data(), globalIsInjectionGrup_.size());
             comm.sum(globalIsProductionGrup_.data(), globalIsProductionGrup_.size());
