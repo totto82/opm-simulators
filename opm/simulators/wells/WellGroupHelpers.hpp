@@ -563,15 +563,46 @@ namespace Opm {
         }
         double guideRate(const std::string& name, const std::string& always_included_child)
         {
-            if (schedule_.hasWell(name, report_step_) || guide_rate_->has(name)) {
+            if (schedule_.hasWell(name, report_step_)) {
                 return guide_rate_->get(name, target_);
             } else {
-                // We are a group, with default guide rate.
-                // Compute guide rate by accumulating our children's guide rates.
-                // (only children not under individual control though).
-                const Group& group = schedule_.getGroup(name, report_step_);
-                return guideRateSum(group, always_included_child);
+                if (groupControlledWells(name, always_included_child) > 0) {
+                    if (guide_rate_->has(name)) {
+                        return guide_rate_->get(name, target_);
+                    } else {
+                        // We are a group, with default guide rate.
+                        // Compute guide rate by accumulating our children's guide rates.
+                        // (only children not under individual control though).
+                        const Group& group = schedule_.getGroup(name, report_step_);
+                        return guideRateSum(group, always_included_child);
+                    }
+                } else {
+                    // No group-controlled subordinate wells.
+                    return 0.0;
+                }
             }
+        }
+        int groupControlledWells(const std::string& group_name, const std::string& always_included_child)
+        {
+            const Group& group = schedule_.getGroup(group_name, report_step_);
+            int num_wells = 0;
+            for (const std::string& child_group : group.groups()) {
+                const auto ctrl = well_state_.currentProductionGroupControl(child_group);
+                const bool included = (ctrl == Group::ProductionCMode::FLD)
+                    || (ctrl == Group::ProductionCMode::NONE)
+                    || (child_group == always_included_child);
+                if (included) {
+                    num_wells += groupControlledWells(child_group, always_included_child);
+                }
+            }
+            for (const std::string& child_well : group.wells()) {
+                const bool included = (well_state_.isProductionGrup(child_well))
+                    || (child_well == always_included_child);
+                if (included) {
+                    ++num_wells;
+                }
+            }
+            return num_wells;
         }
         const Schedule& schedule_;
         const WellStateFullyImplicitBlackoil& well_state_;
