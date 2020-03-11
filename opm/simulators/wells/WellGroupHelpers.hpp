@@ -525,6 +525,37 @@ namespace Opm {
             return fraction;
         }
     private:
+
+        int numberOfOpenWells(const std::string& name, const std::string& always_included_child)
+        {
+            const Group& group = schedule_.getGroup(name, report_step_);
+            int numberOfWells = 0.0;
+            for (const std::string& child_group : group.groups()) {
+                numberOfWells += numberOfOpenWells(child_group, always_included_child);
+            }
+            for (const std::string& child_well : group.wells()) {
+
+                const auto& well = schedule_.getWell(child_well, report_step_);
+
+
+                if (well.isInjector())
+                    continue;
+
+                if (well.getStatus() == Well::Status::SHUT)
+                    continue;
+
+                const bool included = (well_state_.isProductionGrup(child_well))
+                        || (child_well == always_included_child);
+
+
+                if (included)
+                    numberOfWells++;
+
+            }
+
+            return numberOfWells;
+        }
+
         double localFraction(const std::string& name, const std::string& always_included_child)
         {
             const double my_guide_rate = guideRate(name, always_included_child);
@@ -563,9 +594,16 @@ namespace Opm {
         }
         double guideRate(const std::string& name, const std::string& always_included_child)
         {
-            if (schedule_.hasWell(name, report_step_) || guide_rate_->has(name)) {
+            if (schedule_.hasWell(name, report_step_)) {
                 return guide_rate_->get(name, target_);
-            } else {
+            } else if (guide_rate_->has(name)) {
+                // We are a group, with non-default value
+                // return 0 if no wells are open
+                if( numberOfOpenWells(name, always_included_child) > 0)
+                    return guide_rate_->get(name, target_);
+                else
+                    return 0.0;
+                 } else {
                 // We are a group, with default guide rate.
                 // Compute guide rate by accumulating our children's guide rates.
                 // (only children not under individual control though).
