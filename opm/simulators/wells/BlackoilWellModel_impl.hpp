@@ -1098,10 +1098,12 @@ namespace Opm {
     template<typename TypeTag>
     ConvergenceReport
     BlackoilWellModel<TypeTag>::
-    getWellConvergence(const std::vector<Scalar>& B_avg) const
+    getWellConvergence(const std::vector<Scalar>& B_avg)
     {
 
         Opm::DeferredLogger local_deferredLogger;
+        updateWellControls(local_deferredLogger,true);
+
         // Get global (from all processes) convergence report.
         ConvergenceReport local_report;
         for (const auto& well : well_container_) {
@@ -1159,6 +1161,7 @@ namespace Opm {
         // return as the DeferredLogger uses global communication.
         // For no well active globally we simply return.
         if( !wellsActive() ) return ;
+
 
         updateAndCommunicateGroupData();
 
@@ -1900,6 +1903,7 @@ namespace Opm {
                     if (controls.oil_target < current_rate  ) {
                         switched_groups.insert(group.name());
                         actionOnBrokenConstraints(group, controls.exceed_action, Group::ProductionCMode::ORAT, reportStepIdx, deferred_logger);
+                        std::cout << "to ORAT " << group.name() << " " << controls.oil_target << " " <<current_rate << std::endl;
                     }
                 }
             }
@@ -1949,6 +1953,7 @@ namespace Opm {
 
                     if (controls.liquid_target < current_rate  ) {
                         switched_groups.insert(group.name());
+                        std::cout << "to LRAT " << group.name() << " " << controls.liquid_target << " " <<current_rate << std::endl;
                         actionOnBrokenConstraints(group, controls.exceed_action, Group::ProductionCMode::LRAT, reportStepIdx, deferred_logger);
                     }
                 }

@@ -282,7 +282,6 @@ namespace Opm
         // first initialize wellRates and then use it to compute segRates
         // When THP is supported for MSW wells this code and its fried in the standard model
         // can be merge.
-
         const auto& well = well_ecl_;
         const int well_index = index_of_well_;
         const int top_segment_index = well_state.topSegmentIndex(index_of_well_);
@@ -693,7 +692,7 @@ namespace Opm
                     const EvalWell rate = this->getSegmentRate(0, compIdx);
                     well_potentials[ebosCompIdxToFlowCompIdx(compIdx)] = rate.value();
                 }
-                return;
+                //return;
             }
         }
 
@@ -2371,6 +2370,7 @@ namespace Opm
             EvalWell rate = -getSegmentRate(0, Indices::canonicalToActiveComponentIndex(FluidSystem::waterCompIdx))
                     -getSegmentRate(0, Indices::canonicalToActiveComponentIndex(FluidSystem::oilCompIdx));
             control_eq = rate - fraction * rate_target;
+            std::cout << well.name() << " " << group.name() << " " << fraction << " " << rate_target << " " << groupTargetReduction << std::endl;
             break;
         }
         case Group::ProductionCMode::CRAT:

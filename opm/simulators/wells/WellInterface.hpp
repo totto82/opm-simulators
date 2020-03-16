@@ -496,14 +496,14 @@ namespace Opm
                                    DeferredLogger& deferred_logger) const;
 
         bool checkGroupConstraintsProd(const Group& group,
-                                       const WellState& well_state,
+                                       WellState& well_state,
                                        const double efficiencyFactor,
                                        const Schedule& schedule,
                                        const SummaryState& summaryState,
                                        DeferredLogger& deferred_logger) const;
 
         bool checkGroupConstraintsInj(const Group& group,
-                                      const WellState& well_state,
+                                      WellState& well_state,
                                       const double efficiencyFactor,
                                       const Schedule& schedule,
                                       const SummaryState& summaryState,

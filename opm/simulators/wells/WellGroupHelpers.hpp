@@ -660,7 +660,7 @@ namespace Opm {
                                          const WellStateFullyImplicitBlackoil& wellState,
                                          const int reportStepIdx,
                                          const GuideRate* guideRate,
-                                         const double* rates,
+                                         double* rates,
                                          Phase injectionPhase,
                                          const PhaseUsage& pu,
                                          const double efficiencyFactor,
@@ -744,6 +744,7 @@ namespace Opm {
         double fraction = wellGroupHelpers::fractionFromInjectionPotentials(name, group.name(), schedule, wellState, reportStepIdx, guideRate, target, pu, injectionPhase, true);
 
         bool constraint_broken = false;
+        double target_fraction = 1.0;
         switch(currentGroupControl) {
         case Group::InjectionCMode::RATE:
         {
@@ -751,6 +752,7 @@ namespace Opm {
             const double target_rate = fraction * std::max(0.0, (groupcontrols.surface_max_rate - groupTargetReduction + current_rate*efficiencyFactor)) / efficiencyFactor;
             if (current_rate > target_rate) {
                 constraint_broken = true;
+                target_fraction = target_rate / current_rate;
             }
             break;
         }
@@ -763,6 +765,7 @@ namespace Opm {
             const double target_rate = fraction * std::max(0.0, (groupcontrols.resv_max_rate/coeff - groupTargetReduction + current_rate*efficiencyFactor)) / efficiencyFactor;
             if (current_rate > target_rate) {
                 constraint_broken = true;
+                target_fraction = target_rate / current_rate;
             }
             break;
         }
@@ -773,6 +776,7 @@ namespace Opm {
             const double target_rate = fraction * std::max(0.0, (groupcontrols.target_reinj_fraction*productionRate - groupTargetReduction + current_rate*efficiencyFactor)) / efficiencyFactor;
             if (current_rate > target_rate) {
                 constraint_broken = true;
+                target_fraction = target_rate / current_rate;
             }
             break;
         }
@@ -796,6 +800,7 @@ namespace Opm {
             const double target_rate = fraction * std::max(0.0, ( voidageRate/coeff - groupTargetReduction + current_rate*efficiencyFactor)) / efficiencyFactor;
             if (current_rate > target_rate) {
                 constraint_broken = true;
+                target_fraction = target_rate / current_rate;
             }
             break;
         }
@@ -820,6 +825,7 @@ namespace Opm {
             const double target_rate = fraction * std::max(0.0, (inj_rate - groupTargetReduction + current_rate*efficiencyFactor)) / efficiencyFactor;
             if (current_rate > target_rate) {
                 constraint_broken = true;
+                target_fraction = target_rate / current_rate;
             }
             break;
         }
@@ -836,6 +842,11 @@ namespace Opm {
 
         }
 
+
+        for (int p = 0; p<pu.num_phases; ++p) {
+            rates[p] *= target_fraction;
+        }
+
         return constraint_broken;
     }
 
@@ -847,7 +858,7 @@ namespace Opm {
                                           const WellStateFullyImplicitBlackoil& wellState,
                                           const int reportStepIdx,
                                           const GuideRate* guideRate,
-                                          const double* rates,
+                                          double* rates,
                                           const PhaseUsage& pu,
                                           const double efficiencyFactor,
                                           const Schedule& schedule,
@@ -914,6 +925,7 @@ namespace Opm {
         const std::vector<double>& groupTargetReductions = wellState.currentProductionGroupReductionRates(group.name());
 
         bool constraint_broken = false;
+        double target_fraction = 1.0;
         switch(currentGroupControl) {
         case Group::ProductionCMode::ORAT:
         {
@@ -924,7 +936,9 @@ namespace Opm {
             const double current_rate = -rates[pos];
             const double target_rate = fraction * std::max(0.0, groupcontrols.oil_target - groupTargetReduction + current_rate*efficiencyFactor) / efficiencyFactor;
             if (current_rate > target_rate) {
+                std::cout << "ORAT ->Group" << name << " " << parent << " " << group.name() << " " << current_rate << " " << target_rate << std::endl;
                 constraint_broken = true;
+                target_fraction = target_rate / current_rate;
             }
             break;
         }
@@ -938,6 +952,7 @@ namespace Opm {
             const double target_rate = fraction * std::max(0.0, groupcontrols.water_target - groupTargetReduction + current_rate*efficiencyFactor) / efficiencyFactor;
             if (current_rate > target_rate) {
                 constraint_broken = true;
+                target_fraction = target_rate / current_rate;
             }
             break;
         }
@@ -951,6 +966,7 @@ namespace Opm {
             const double target_rate = fraction * std::max(0.0, groupcontrols.gas_target - groupTargetReduction + current_rate*efficiencyFactor) / efficiencyFactor;
             if (current_rate > target_rate) {
                 constraint_broken = true;
+                target_fraction = target_rate / current_rate;
             }
             break;
         }
@@ -966,6 +982,9 @@ namespace Opm {
             const double target_rate = fraction * std::max(0.0, groupcontrols.liquid_target - groupTargetReduction + current_rate*efficiencyFactor) / efficiencyFactor;
             if (current_rate > target_rate) {
                 constraint_broken = true;
+                target_fraction = target_rate / current_rate;
+                std::cout << "LRAT ->Group" << name << " " << parent << " " << group.name() << " " << current_rate << " " << target_rate << " " << fraction << " " << groupTargetReduction << " " << target_fraction << std::endl;
+
             }
             break;
         }
@@ -993,7 +1012,9 @@ namespace Opm {
             const double target_rate = fraction * std::max(0.0, groupcontrols.resv_target - groupTargetReduction + current_rate*efficiencyFactor) / efficiencyFactor;
             if (current_rate > target_rate) {
                 constraint_broken = true;
+                target_fraction = target_rate / current_rate;
             }
+            break;
         }
         case Group::ProductionCMode::PRBL:
         {
@@ -1007,6 +1028,11 @@ namespace Opm {
         default:
             OPM_DEFLOG_THROW(std::runtime_error, "Invalid group control specified for group "  + group.name(), deferred_logger );
         }
+
+        for (int p = 0; p<pu.num_phases; ++p) {
+            rates[p] *= target_fraction;
+        }
+
 
         return constraint_broken;
     }

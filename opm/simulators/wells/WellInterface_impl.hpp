@@ -1601,6 +1601,7 @@ namespace Opm
                 double current_rate = -well_state.wellRates()[ wellrate_index + pu.phase_pos[BlackoilPhases::Liquid] ];
                 current_rate -= well_state.wellRates()[ wellrate_index + pu.phase_pos[BlackoilPhases::Aqua] ];
                 if (controls.liquid_rate < current_rate  ) {
+                    std::cout << "->LRAT" << " " << well.name() <<  "  " << controls.liquid_rate << " " << current_rate << std::endl;
                     currentControl = Well::ProducerCMode::LRAT;
                     return true;
                 }
@@ -1736,7 +1737,7 @@ namespace Opm
     template <typename TypeTag>
     bool
     WellInterface<TypeTag>::checkGroupConstraintsInj(const Group& group,
-                                                     const WellState& well_state,
+                                                     WellState& well_state,
                                                      const double efficiencyFactor,
                                                      const Schedule& schedule,
                                                      const SummaryState& summaryState,
@@ -1790,7 +1791,7 @@ namespace Opm
     template <typename TypeTag>
     bool
     WellInterface<TypeTag>::checkGroupConstraintsProd(const Group& group,
-                                                      const WellState& well_state,
+                                                      WellState& well_state,
                                                       const double efficiencyFactor,
                                                       const Schedule& schedule,
                                                       const SummaryState& summaryState,
