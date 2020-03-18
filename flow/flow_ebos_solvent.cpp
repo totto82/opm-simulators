@@ -23,6 +23,9 @@
 #include <opm/simulators/flow/SimulatorFullyImplicitBlackoilEbos.hpp>
 #include <opm/simulators/flow/FlowMainEbos.hpp>
 
+#include <opm/models/discretization/sofv/sofvdiscretization.hh>
+
+
 #if HAVE_DUNE_FEM
 #include <dune/fem/misc/mpimanager.hh>
 #else
@@ -33,6 +36,13 @@ namespace Opm {
 namespace Properties {
 NEW_TYPE_TAG(EclFlowSolventProblem, INHERITS_FROM(EclFlowProblem));
 SET_BOOL_PROP(EclFlowSolventProblem, EnableSolvent, true);
+SET_TAG_PROP(EclFlowSolventProblem, SpatialDiscretizationSplice, SofvDiscretization);
+SET_PROP(EclFlowSolventProblem, Stencil)
+{
+public:
+    typedef Opm::SofvStencil<TypeTag> type;
+};
+
 }}
 
 namespace Opm {
