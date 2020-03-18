@@ -26,6 +26,8 @@
 #include <opm/simulators/flow/SimulatorFullyImplicitBlackoilEbos.hpp>
 #include <opm/simulators/flow/FlowMainEbos.hpp>
 
+#include <opm/models/discretization/sofv/sofvdiscretization.hh>
+
 #if HAVE_DUNE_FEM
 #include <dune/fem/misc/mpimanager.hh>
 #else
@@ -33,10 +35,22 @@
 #endif
 
 namespace Opm {
+namespace Properties {
+NEW_TYPE_TAG(EclFlowProblemSofv, INHERITS_FROM(EclFlowProblem));
+SET_TAG_PROP(EclFlowProblemSofv, SpatialDiscretizationSplice, SofvDiscretization);
+SET_PROP(EclFlowProblemSofv, Stencil)
+{
+public:
+    typedef Opm::SofvStencil<TypeTag> type;
+};
+}}
+
+
+namespace Opm {
 
 void flowEbosBlackoilSetDeck(double setupTime, Deck *deck, EclipseState& eclState, Schedule& schedule, SummaryConfig& summaryConfig)
 {
-    typedef TTAG(EclFlowProblem) TypeTag;
+    typedef TTAG(EclFlowProblemSofv) TypeTag;
     typedef GET_PROP_TYPE(TypeTag, Vanguard) Vanguard;
 
     Vanguard::setExternalSetupTime(setupTime);
@@ -59,7 +73,7 @@ int flowEbosBlackoilMain(int argc, char** argv, bool outputCout, bool outputFile
     Dune::MPIHelper::instance(argc, argv);
 #endif
 
-    Opm::FlowMainEbos<TTAG(EclFlowProblem)> mainfunc;
+    Opm::FlowMainEbos<TTAG(EclFlowProblemSofv)> mainfunc;
     return mainfunc.execute(argc, argv, outputCout, outputFiles);
 }
 
