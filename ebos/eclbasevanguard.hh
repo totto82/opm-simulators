@@ -35,6 +35,7 @@
 #include <opm/grid/cpgrid/GridHelpers.hpp>
 #include <opm/core/props/satfunc/RelpermDiagnostics.hpp>
 
+#include <opm/parser/eclipse/Python/Python.hpp>
 #include <opm/parser/eclipse/Parser/Parser.hpp>
 #include <opm/parser/eclipse/Parser/ParseContext.hpp>
 #include <opm/parser/eclipse/Parser/ErrorGuard.hpp>
@@ -78,6 +79,7 @@ NEW_PROP_TAG(EclOutputInterval);
 NEW_PROP_TAG(IgnoreKeywords);
 NEW_PROP_TAG(EnableExperiments);
 NEW_PROP_TAG(EdgeWeightsMethod);
+NEW_PROP_TAG(OwnerCellsFirst);
 
 SET_STRING_PROP(EclBaseVanguard, IgnoreKeywords, "");
 SET_STRING_PROP(EclBaseVanguard, EclDeckFileName, "");
@@ -86,6 +88,7 @@ SET_BOOL_PROP(EclBaseVanguard, EnableOpmRstFile, false);
 SET_BOOL_PROP(EclBaseVanguard, EclStrictParsing, false);
 SET_BOOL_PROP(EclBaseVanguard, SchedRestart, true);
 SET_INT_PROP(EclBaseVanguard, EdgeWeightsMethod, 1);
+SET_BOOL_PROP(EclBaseVanguard, OwnerCellsFirst, false);
 
 END_PROPERTIES
 
@@ -133,6 +136,8 @@ public:
                              "When restarting: should we try to initialize wells and groups from historical SCHEDULE section.");
         EWOMS_REGISTER_PARAM(TypeTag, int, EdgeWeightsMethod,
                              "Choose edge-weighing strategy: 0=uniform, 1=trans, 2=log(trans).");
+        EWOMS_REGISTER_PARAM(TypeTag, bool, OwnerCellsFirst,
+                             "Order cells owned by rank before ghost/overlap cells.");
     }
 
     /*!
@@ -240,8 +245,7 @@ public:
      * as the simulator vanguard object is alive.
      */
     static void setExternalDeck(Opm::Deck* deck)
-    { externalDeck_ = deck; }
-
+    { externalDeck_ = deck; externalDeckSet_ = true; }
     /*!
      * \brief Set the Opm::EclipseState object which ought to be used when the simulator
      *        vanguard is instantiated.
@@ -265,6 +269,7 @@ public:
 
         std::string fileName = EWOMS_GET_PARAM(TypeTag, std::string, EclDeckFileName);
         edgeWeightsMethod_   = Dune::EdgeWeightMethod(EWOMS_GET_PARAM(TypeTag, int, EdgeWeightsMethod));
+        ownersFirst_ = EWOMS_GET_PARAM(TypeTag, bool, OwnerCellsFirst);
 
         // Skip processing of filename if external deck already exists.
         if (!externalDeck_)
@@ -314,7 +319,7 @@ public:
         else
             errorGuard_ = externalErrorGuard_;
 
-        if (!externalDeck_) {
+        if (!externalDeck_ && !externalDeckSet_) {
             if (myRank == 0)
                 std::cout << "Reading the deck file '" << fileName << "'" << std::endl;
 
@@ -344,7 +349,7 @@ public:
             // create the schedule object. Note that if eclState is supposed to represent
             // the internalized version of the deck, this constitutes a layering
             // violation.
-            internalEclSchedule_.reset(new Opm::Schedule(*deck_, *eclState_, *parseContext_, *errorGuard_));
+            internalEclSchedule_.reset(new Opm::Schedule(*deck_, *eclState_, *parseContext_, *errorGuard_, python));
             eclSchedule_ = internalEclSchedule_.get();
         }
         else
@@ -451,6 +456,13 @@ public:
      */
     Dune::EdgeWeightMethod edgeWeightsMethod() const
     { return edgeWeightsMethod_; }
+
+    /*!
+     * \brief Parameter that decide if cells owned by rank are ordered before ghost cells.
+     */
+    bool ownersFirst() const
+    { return ownersFirst_; }
+    
     /*!
      * \brief Returns the name of the case.
      *
@@ -552,7 +564,7 @@ protected:
 
         if (enableExperiments) {
             Opm::RelpermDiagnostics relpermDiagnostics;
-            relpermDiagnostics.diagnosis(*eclState_, *deck_, asImp_().grid());
+            relpermDiagnostics.diagnosis(*eclState_, asImp_().grid());
         }
     }
 private:
@@ -597,6 +609,7 @@ private:
     static Opm::ParseContext* externalParseContext_;
     static Opm::ErrorGuard* externalErrorGuard_;
     static Opm::Deck* externalDeck_;
+    static bool externalDeckSet_;
     static Opm::EclipseState* externalEclState_;
     static Opm::Schedule* externalEclSchedule_;
     static Opm::SummaryConfig* externalEclSummaryConfig_;
@@ -617,8 +630,10 @@ private:
     Opm::EclipseState* eclState_;
     Opm::Schedule* eclSchedule_;
     Opm::SummaryConfig* eclSummaryConfig_;
+    Opm::Python python;
 
     Dune::EdgeWeightMethod edgeWeightsMethod_;
+    bool ownersFirst_;
 
 protected:
     /*! \brief The cell centroids after loadbalance was called.
@@ -638,6 +653,9 @@ Opm::ErrorGuard* EclBaseVanguard<TypeTag>::externalErrorGuard_ = nullptr;
 
 template <class TypeTag>
 Opm::Deck* EclBaseVanguard<TypeTag>::externalDeck_ = nullptr;
+
+template <class TypeTag>
+bool EclBaseVanguard<TypeTag>::externalDeckSet_ = false;
 
 template <class TypeTag>
 Opm::EclipseState* EclBaseVanguard<TypeTag>::externalEclState_;

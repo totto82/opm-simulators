@@ -82,16 +82,14 @@ namespace detail
     /// \param grid The grid where we look for overlap cells.
     /// \param overlapRows List where overlap rows are stored.
     /// \param interiorRows List where overlap rows are stored.
-    template<class Grid>
-    void findOverlapAndInterior(const Grid& grid, std::vector<int>& overlapRows,
+    template<class Grid, class Mapper>
+    void findOverlapAndInterior(const Grid& grid, const Mapper& mapper, std::vector<int>& overlapRows,
                                 std::vector<int>& interiorRows)
     {
         //only relevant in parallel case.
         if ( grid.comm().size() > 1)
         {
             //Numbering of cells
-            const auto& lid = grid.localIdSet();
-
             const auto& gridView = grid.leafGridView();
             auto elemIt = gridView.template begin<0>();
             const auto& elemEndIt = gridView.template end<0>();
@@ -100,7 +98,7 @@ namespace detail
             for (; elemIt != elemEndIt; ++elemIt)
             {
                 const auto& elem = *elemIt;
-                int lcell = lid.id(elem);
+                int lcell = mapper.index(elem);
 
                 if (elem.partitionType() != Dune::InteriorEntity)
                 {
@@ -111,6 +109,33 @@ namespace detail
                 }
             }
         }
+    }
+
+    /// \brief If ownerFirst=true, returns the number of interior cells in grid, else just numCells().
+    ///
+    /// If cells in grid is ordered so that interior/owner cells come before overlap/copy cells, the method
+    /// returns the number of interior cells numInterior. In the linear solver only the first numInterior rows of
+    /// the matrix are needed.
+    template <class Grid>
+    size_t numMatrixRowsToUseInSolver(const Grid& grid, bool ownerFirst)
+    {
+        size_t numInterior = 0;
+        if (!ownerFirst || grid.comm().size()==1)
+            return grid.numCells();
+        const auto& gridView = grid.leafGridView();
+        auto elemIt = gridView.template begin<0>();
+        const auto& elemEndIt = gridView.template end<0>();
+
+        // loop over cells in mesh
+        for (; elemIt != elemEndIt; ++elemIt) {
+
+            // Count only the interior cells.
+            if (elemIt->partitionType() == Dune::InteriorEntity) {
+                numInterior++;
+            }
+        }
+
+        return numInterior;
     }
 } // namespace detail
 } // namespace Opm

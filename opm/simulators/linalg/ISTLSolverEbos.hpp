@@ -24,6 +24,7 @@
 #include <opm/simulators/linalg/MatrixBlock.hpp>
 #include <opm/simulators/linalg/BlackoilAmg.hpp>
 #include <opm/simulators/linalg/CPRPreconditioner.hpp>
+#include <opm/simulators/linalg/getQuasiImpesWeights.hpp>
 #include <opm/simulators/linalg/ParallelRestrictedAdditiveSchwarz.hpp>
 #include <opm/simulators/linalg/ParallelOverlappingILU0.hpp>
 #include <opm/simulators/linalg/ExtractParallelGridInformationToISTL.hpp>
@@ -45,7 +46,9 @@
 
 #include <opm/common/utility/platform_dependent/reenable_warnings.h>
 
+#if HAVE_CUDA
 #include <opm/simulators/linalg/bda/BdaBridge.hpp>
+#endif
 
 BEGIN_PROPERTIES
 
@@ -185,6 +188,108 @@ protected:
   std::shared_ptr< communication_type > comm_;
 };
 
+
+/*!
+   \brief Adapter to turn a matrix into a linear operator.
+   Adapts a matrix to the assembled linear operator interface.
+   We assume parallel ordering, where ghost rows are located after interior rows
+ */
+template<class M, class X, class Y, class WellModel, bool overlapping >
+class WellModelGhostLastMatrixAdapter : public Dune::AssembledLinearOperator<M,X,Y>
+{
+    typedef Dune::AssembledLinearOperator<M,X,Y> BaseType;
+
+public:
+    typedef M matrix_type;
+    typedef X domain_type;
+    typedef Y range_type;
+    typedef typename X::field_type field_type;
+
+#if HAVE_MPI
+    typedef Dune::OwnerOverlapCopyCommunication<int,int> communication_type;
+#else
+    typedef Dune::CollectiveCommunication< int > communication_type;
+#endif
+
+
+    Dune::SolverCategory::Category category() const override
+    {
+        return overlapping ?
+            Dune::SolverCategory::overlapping : Dune::SolverCategory::sequential;
+    }
+    
+    //! constructor: just store a reference to a matrix
+    WellModelGhostLastMatrixAdapter (const M& A,
+                                     const M& A_for_precond,
+                                     const WellModel& wellMod,
+                                     const size_t interiorSize,
+                                     const std::any& parallelInformation OPM_UNUSED_NOMPI = std::any() )
+        : A_( A ), A_for_precond_(A_for_precond), wellMod_( wellMod ), interiorSize_(interiorSize), comm_()
+    {
+#if HAVE_MPI
+        if( parallelInformation.type() == typeid(ParallelISTLInformation) )
+        {
+            const ParallelISTLInformation& info =
+                std::any_cast<const ParallelISTLInformation&>( parallelInformation);
+            comm_.reset( new communication_type( info.communicator() ) );
+        }
+#endif
+    }
+    
+    virtual void apply( const X& x, Y& y ) const override
+    {
+        for (auto row = A_.begin(); row.index() < interiorSize_; ++row)
+        {
+            y[row.index()]=0;
+            auto endc = (*row).end();
+            for (auto col = (*row).begin(); col != endc; ++col)
+                (*col).umv(x[col.index()], y[row.index()]);
+        }
+        
+        // add well model modification to y
+        wellMod_.apply(x, y );
+
+        ghostLastProject( y );
+    }
+
+    // y += \alpha * A * x
+    virtual void applyscaleadd (field_type alpha, const X& x, Y& y) const override
+    {
+        for (auto row = A_.begin(); row.index() < interiorSize_; ++row)
+        {
+            auto endc = (*row).end();
+            for (auto col = (*row).begin(); col != endc; ++col)
+                (*col).usmv(alpha, x[col.index()], y[row.index()]);
+        }
+        // add scaled well model modification to y
+        wellMod_.applyScaleAdd( alpha, x, y );
+        
+        ghostLastProject( y );
+    }
+
+    virtual const matrix_type& getmat() const override { return A_for_precond_; }
+
+    communication_type* comm()
+    {
+        return comm_.operator->();
+    }
+    
+protected:
+    void ghostLastProject(Y& y) const
+    {
+        size_t end = y.size();
+        for (size_t i = interiorSize_; i < end; ++i)
+            y[i] = 0;
+    }
+    
+    const matrix_type& A_ ;
+    const matrix_type& A_for_precond_ ;
+    const WellModel& wellMod_;
+    size_t interiorSize_;
+    
+    std::unique_ptr< communication_type > comm_;
+};
+
     /// This class solves the fully implicit black-oil system by
     /// solving the reduced system (after eliminating well variables)
     /// as a block-structured matrix (one block for all cell variables) for a fixed
@@ -236,15 +341,16 @@ protected:
               converged_(false)
         {
             parameters_.template init<TypeTag>();
+            const auto& gridForConn = simulator_.vanguard().grid();
 #if HAVE_CUDA
-            const bool use_gpu = EWOMS_GET_PARAM(TypeTag, bool, UseGpu);
+            bool use_gpu = EWOMS_GET_PARAM(TypeTag, bool, UseGpu);
+            if (gridForConn.comm().size() > 1 && use_gpu) {
+                OpmLog::warning("Warning cannot use GPU with MPI, GPU is disabled");
+                use_gpu = false;
+            }
             const int maxit = EWOMS_GET_PARAM(TypeTag, int, LinearSolverMaxIter);
             const double tolerance = EWOMS_GET_PARAM(TypeTag, double, LinearSolverReduction);
-            const bool matrix_add_well_contributions = EWOMS_GET_PARAM(TypeTag, bool, MatrixAddWellContributions);
             const int linear_solver_verbosity = parameters_.linear_solver_verbosity_;
-            if (use_gpu && !matrix_add_well_contributions) {
-                OPM_THROW(std::logic_error,"Error cannot use GPU solver if command line parameter --matrix-add-well-contributions is false, because the GPU solver performs a standard bicgstab");
-            }
             bdaBridge.reset(new BdaBridge(use_gpu, linear_solver_verbosity, maxit, tolerance));
 #else
             const bool use_gpu = EWOMS_GET_PARAM(TypeTag, bool, UseGpu);
@@ -253,15 +359,28 @@ protected:
             }
 #endif
             extractParallelGridInformationToISTL(simulator_.vanguard().grid(), parallelInformation_);
-            const auto& gridForConn = simulator_.vanguard().grid();
             const auto wellsForConn = simulator_.vanguard().schedule().getWellsatEnd();
             const bool useWellConn = EWOMS_GET_PARAM(TypeTag, bool, MatrixAddWellContributions);
 
-            detail::setWellConnections(gridForConn, wellsForConn, useWellConn, wellConnectionsGraph_);
-            detail::findOverlapAndInterior(gridForConn, overlapRows_, interiorRows_);
-            if (gridForConn.comm().size() > 1) {
-                noGhostAdjacency();
-                setGhostsInNoGhost(*noGhostMat_);
+            ownersFirst_ = EWOMS_GET_PARAM(TypeTag, bool, OwnerCellsFirst);
+            interiorCellNum_ = detail::numMatrixRowsToUseInSolver(simulator_.vanguard().grid(), ownersFirst_);
+
+            if (!ownersFirst_ || parameters_.linear_solver_use_amg_  || parameters_.use_cpr_ ) {
+                detail::setWellConnections(gridForConn, wellsForConn, useWellConn, wellConnectionsGraph_);
+                // For some reason simulator_.model().elementMapper() is not initialized at this stage
+                // Hence const auto& elemMapper = simulator_.model().elementMapper(); does not work.
+                // Set it up manually
+                using ElementMapper =
+                    Dune::MultipleCodimMultipleGeomTypeMapper<GridView>;
+                ElementMapper elemMapper(simulator_.vanguard().grid().leafGridView(), Dune::mcmgElementLayout());
+                detail::findOverlapAndInterior(gridForConn, elemMapper, overlapRows_, interiorRows_);
+                if (gridForConn.comm().size() > 1) {
+
+                    noGhostAdjacency();
+                    setGhostsInNoGhost(*noGhostMat_);
+                }
+                if (ownersFirst_)
+                    OpmLog::warning("OwnerCellsFirst option is true, but ignored.");
             }
         }
 
@@ -342,13 +461,26 @@ protected:
 
             if( isParallel() )
             {
-                typedef WellModelMatrixAdapter< Matrix, Vector, Vector, WellModel, true > Operator;
+                if ( ownersFirst_ && (!parameters_.linear_solver_use_amg_ || !parameters_.use_cpr_) ) {
+                    typedef WellModelGhostLastMatrixAdapter< Matrix, Vector, Vector, WellModel, true > Operator;
+                    Operator opA(*matrix_, *matrix_, wellModel, interiorCellNum_,
+                                 parallelInformation_ );
+                    
+                    assert( opA.comm() );
+                    solve( opA, x, *rhs_, *(opA.comm()) );
+                }
+                else {
 
-                copyJacToNoGhost(*matrix_, *noGhostMat_);
-                Operator opA(*noGhostMat_, *noGhostMat_, wellModel,
-                             parallelInformation_ );
-                assert( opA.comm() );
-                solve( opA, x, *rhs_, *(opA.comm()) );
+                    typedef WellModelMatrixAdapter< Matrix, Vector, Vector, WellModel, true > Operator;
+
+                    copyJacToNoGhost(*matrix_, *noGhostMat_);
+                    Operator opA(*noGhostMat_, *noGhostMat_, wellModel,
+                                 parallelInformation_ );
+    
+                    assert( opA.comm() );
+                    solve( opA, x, *rhs_, *(opA.comm()) );
+                    
+                }
             }
             else
             {
@@ -440,22 +572,33 @@ protected:
 #endif
             {
                 // tries to solve linear system
-                // solve_system() does nothing if Dune is selected
 #if HAVE_CUDA
-                bdaBridge->solve_system(matrix_.get(), istlb, result);
-
-                if (result.converged) {
-                    // get result vector x from non-Dune backend, iff solve was successful
-                    bdaBridge->get_result(x);
-                } else {
-                    // CPU fallback, or default case for Dune
-                    const bool use_gpu = EWOMS_GET_PARAM(TypeTag, bool, UseGpu);
-                    if (use_gpu) {
-                        OpmLog::warning("cusparseSolver did not converge, now trying Dune to solve current linear system...");
+                bool use_gpu = bdaBridge->getUseGpu();
+                if (use_gpu) {
+                    WellContributions wellContribs;
+                    const bool addWellContribs = EWOMS_GET_PARAM(TypeTag, bool, MatrixAddWellContributions);
+                    if (!addWellContribs) {
+                        simulator_.problem().wellModel().getWellContributions(wellContribs);
                     }
+                    bdaBridge->solve_system(matrix_.get(), istlb, wellContribs, result);
+                    if (result.converged) {
+                        // get result vector x from non-Dune backend, iff solve was successful
+                        bdaBridge->get_result(x);
+                    } else {
+                        // CPU fallback
+                        use_gpu = bdaBridge->getUseGpu();  // update value, BdaBridge might have disabled cusparseSolver
+                        if (use_gpu) {
+                            OpmLog::warning("cusparseSolver did not converge, now trying Dune to solve current linear system...");
+                        }
+
+                        // call Dune
+                        auto precond = constructPrecond(linearOperator, parallelInformation_arg);
+                        solve(linearOperator, x, istlb, *sp, *precond, result);
+                    }
+                } else { // gpu is not selected or disabled
                     auto precond = constructPrecond(linearOperator, parallelInformation_arg);
                     solve(linearOperator, x, istlb, *sp, *precond, result);
-                } // end Dune call
+                }
 #else
                 // Construct preconditioner.
                 auto precond = constructPrecond(linearOperator, parallelInformation_arg);
@@ -502,7 +645,7 @@ protected:
             const MILU_VARIANT ilu_milu  = parameters_.ilu_milu_;
             const bool ilu_redblack = parameters_.ilu_redblack_;
             const bool ilu_reorder_spheres = parameters_.ilu_reorder_sphere_;
-            return Pointer(new ParPreconditioner(opA.getmat(), comm, relax, ilu_milu, ilu_redblack, ilu_reorder_spheres));
+            return Pointer(new ParPreconditioner(opA.getmat(), comm, relax, ilu_milu, interiorCellNum_, ilu_redblack, ilu_reorder_spheres));
         }
 #endif
 
@@ -664,6 +807,12 @@ protected:
         void noGhostAdjacency()
         {
             const auto& grid = simulator_.vanguard().grid();
+            // For some reason simulator_.model().elementMapper() is not initialized at this stage.
+            // Hence const auto& elemMapper = simulator_.model().elementMapper(); does not work.
+            // Set it up manually
+            using ElementMapper =
+                Dune::MultipleCodimMultipleGeomTypeMapper<GridView>;
+            ElementMapper elemMapper(simulator_.vanguard().grid().leafGridView(), Dune::mcmgElementLayout());
             typedef typename Matrix::size_type size_type;
             size_type numCells = grid.size( 0 );
             noGhostMat_.reset(new Matrix(numCells, numCells, Matrix::random));
@@ -671,7 +820,6 @@ protected:
             std::vector<std::set<size_type>> pattern;
             pattern.resize(numCells);
 
-            const auto& lid = grid.localIdSet();
             const auto& gridView = grid.leafGridView();
             auto elemIt = gridView.template begin<0>();
             const auto& elemEndIt = gridView.template end<0>();
@@ -680,7 +828,7 @@ protected:
             for (; elemIt != elemEndIt; ++elemIt)
             {
                 const auto& elem = *elemIt;
-                size_type idx = lid.id(elem);
+                size_type idx = elemMapper.index(elem);
                 pattern[idx].insert(idx);
 
                 // Add well non-zero connections
@@ -699,7 +847,7 @@ protected:
                         //check if face has neighbor
                         if (is->neighbor())
                         {
-                            size_type nid = lid.id(is->outside());
+                            size_type nid = elemMapper.index(is->outside());
                             pattern[idx].insert(nid);
                         }
                     }
@@ -843,29 +991,7 @@ protected:
 
         Vector getQuasiImpesWeights()
         {
-            Matrix& A = *matrix_;
-            Vector weights(rhs_->size());
-            BlockVector rhs(0.0);
-            rhs[pressureVarIndex] = 1;
-            const auto endi = A.end();
-            for (auto i = A.begin(); i!=endi; ++i) {
-                const auto endj = (*i).end();
-                MatrixBlockType diag_block(0.0);
-                for (auto j=(*i).begin(); j!=endj; ++j) {
-                    if (i.index() == j.index()) {
-                        diag_block = (*j);
-                        break;
-                    }
-                }
-                BlockVector bweights;
-                auto diag_block_transpose = Opm::transposeDenseMatrix(diag_block);
-                diag_block_transpose.solve(bweights, rhs);
-                double abs_max =
-                    *std::max_element(bweights.begin(), bweights.end(), [](double a, double b){ return std::abs(a) < std::abs(b); } );
-                bweights /= std::abs(abs_max);
-                weights[i.index()] = bweights;
-            }
-            return weights;
+            return Amg::getQuasiImpesWeights<Matrix,Vector>(*matrix_, pressureVarIndex, /* transpose=*/ true);
         }
 
         Vector getSimpleWeights(const BlockVector& rhs)
@@ -949,6 +1075,10 @@ protected:
         std::vector<int> overlapRows_;
         std::vector<int> interiorRows_;
         std::vector<std::set<int>> wellConnectionsGraph_;
+
+        bool ownersFirst_;
+        size_t interiorCellNum_;
+
         FlowLinearSolverParameters parameters_;
         Vector weights_;
         bool scale_variables_;

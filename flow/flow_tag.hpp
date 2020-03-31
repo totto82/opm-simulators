@@ -33,11 +33,13 @@
 #include <opm/common/OpmLog/EclipsePRTLog.hpp>
 #include <opm/common/OpmLog/LogUtil.hpp>
 
+#include <opm/parser/eclipse/Python/Python.hpp>
 #include <opm/parser/eclipse/Deck/Deck.hpp>
 #include <opm/parser/eclipse/Parser/Parser.hpp>
 #include <opm/parser/eclipse/EclipseState/EclipseState.hpp>
 #include <opm/parser/eclipse/EclipseState/checkDeck.hpp>
 #include <opm/parser/eclipse/EclipseState/Schedule/ArrayDimChecker.hpp>
+#include <opm/parser/eclipse/EclipseState/Schedule/UDQ/UDQAssign.hpp>
 
 //#include <opm/material/fluidsystems/BlackOilFluidSystemSimple.hpp>
 //#include <opm/material/fluidsystems/BlackOilFluidSystemSimple.hpp>
@@ -49,6 +51,11 @@
 #include <dune/fem/misc/mpimanager.hh>
 #else
 #include <dune/common/parallel/mpihelper.hh>
+#endif
+
+#if HAVE_MPI
+#include <opm/simulators/utils/ParallelEclipseState.hpp>
+#include <opm/simulators/utils/ParallelSerialization.hpp>
 #endif
 
 
@@ -65,11 +72,13 @@ END_PROPERTIES
 
 namespace Opm {
   template <class TypeTag>
-  void flowEbosSetDeck(Deck &deck, EclipseState& eclState)
+  void flowEbosSetDeck(Deck *deck, EclipseState& eclState, Schedule& schedule, SummaryConfig& summaryConfig)
   {
     typedef typename GET_PROP_TYPE(TypeTag, Vanguard) Vanguard;
-    Vanguard::setExternalDeck(&deck);
+    Vanguard::setExternalDeck(deck);
     Vanguard::setExternalEclState(&eclState);
+    Vanguard::setExternalSchedule(&schedule);
+    Vanguard::setExternalSummaryConfig(&summaryConfig);
   }
 
 // ----------------- Main program -----------------
@@ -346,6 +355,7 @@ int mainFlow(int argc, char** argv)
             std::cout << "Reading deck file '" << deckFilename << "'\n";
             std::cout.flush();
         }
+        Opm::Python python;
         std::shared_ptr<Opm::Deck> deck;
         std::shared_ptr<Opm::EclipseState> eclipseState;
         std::shared_ptr<Opm::Schedule> schedule;
@@ -371,15 +381,29 @@ int mainFlow(int argc, char** argv)
 
             Opm::FlowMainEbos<PreTypeTag>::printPRTHeader(outputCout);
 
-            deck.reset( new Opm::Deck( parser.parseFile(deckFilename , parseContext, errorGuard)));
-            Opm::MissingFeatures::checkKeywords(*deck, parseContext, errorGuard);
-            if ( outputCout )
-                Opm::checkDeck(*deck, parser, parseContext, errorGuard);
+            if (mpiRank == 0) {
+                deck.reset( new Opm::Deck( parser.parseFile(deckFilename , parseContext, errorGuard)));
+                Opm::MissingFeatures::checkKeywords(*deck, parseContext, errorGuard);
+                if ( outputCout )
+                    Opm::checkDeck(*deck, parser, parseContext, errorGuard);
 
-            eclipseState.reset( new Opm::EclipseState(*deck ));
-            schedule.reset(new Opm::Schedule(*deck, *eclipseState, parseContext, errorGuard));
-            summaryConfig.reset( new Opm::SummaryConfig(*deck, *schedule, eclipseState->getTableManager(), parseContext, errorGuard));
-            setupMessageLimiter(schedule->getMessageLimits(), "STDOUT_LOGGER");
+#if HAVE_MPI
+                eclipseState.reset(new Opm::ParallelEclipseState(*deck));
+#else
+                eclipseState.reset(new Opm::EclipseState(*deck));
+#endif
+                schedule.reset(new Opm::Schedule(*deck, *eclipseState, parseContext, errorGuard, python));
+                setupMessageLimiter(schedule->getMessageLimits(), "STDOUT_LOGGER");
+                summaryConfig.reset( new Opm::SummaryConfig(*deck, *schedule, eclipseState->getTableManager(), parseContext, errorGuard));
+            }
+#if HAVE_MPI
+            else {
+                summaryConfig.reset(new Opm::SummaryConfig);
+                schedule.reset(new Opm::Schedule);
+                eclipseState.reset(new Opm::ParallelEclipseState);
+            }
+            Opm::eclStateBroadcast(*eclipseState, *schedule, *summaryConfig);
+#endif
 
             Opm::checkConsistentArrayDimensions(*eclipseState, *schedule, parseContext, errorGuard);
 
@@ -391,7 +415,7 @@ int mainFlow(int argc, char** argv)
             }
         }
         bool outputFiles = (outputMode != FileOutputMode::OUTPUT_NONE);
-        Opm::flowEbosSetDeck<TypeTag>(*deck, *eclipseState);
+        Opm::flowEbosSetDeck<TypeTag>(deck.get(), *eclipseState, *schedule, *summaryConfig);
         return Opm::flowEbosMain<TypeTag>(argc, argv, outputCout, outputFiles);
     }
   catch (const std::invalid_argument& e)

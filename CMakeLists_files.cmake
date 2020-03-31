@@ -29,7 +29,6 @@ list (APPEND MAIN_SOURCE_FILES
   opm/simulators/flow/MissingFeatures.cpp
   opm/simulators/linalg/ExtractParallelGridInformationToISTL.cpp
   opm/simulators/linalg/setupPropertyTree.cpp
-  opm/simulators/linalg/bda/BdaBridge.cpp
   opm/simulators/timestepping/TimeStepControl.cpp
   opm/simulators/timestepping/AdaptiveSimulatorTimer.cpp
   opm/simulators/timestepping/SimulatorTimer.cpp
@@ -37,7 +36,6 @@ list (APPEND MAIN_SOURCE_FILES
   opm/simulators/utils/DeferredLogger.cpp
   opm/simulators/utils/gatherDeferredLogger.cpp
   opm/simulators/utils/moduleVersion.cpp
-  opm/simulators/utils/ParallelEclipseState.cpp
   opm/simulators/utils/ParallelRestart.cpp
   opm/simulators/wells/VFPProdProperties.cpp
   opm/simulators/wells/VFPInjProperties.cpp
@@ -45,6 +43,12 @@ list (APPEND MAIN_SOURCE_FILES
 
 if(CUDA_FOUND)
   list (APPEND MAIN_SOURCE_FILES opm/simulators/linalg/bda/cusparseSolverBackend.cu)
+  list (APPEND MAIN_SOURCE_FILES opm/simulators/linalg/bda/WellContributions.cu)
+  list (APPEND MAIN_SOURCE_FILES opm/simulators/linalg/bda/BdaBridge.cpp)
+endif()
+if(MPI_FOUND)
+  list(APPEND MAIN_SOURCE_FILES opm/simulators/utils/ParallelEclipseState.cpp
+                                opm/simulators/utils/ParallelSerialization.cpp)
 endif()
 
 # originally generated with the command:
@@ -68,13 +72,13 @@ list (APPEND TEST_SOURCE_FILES
   tests/test_stoppedwells.cpp
   tests/test_relpermdiagnostics.cpp
   tests/test_norne_pvt.cpp
-  tests/test_ParallelRestart.cpp
   tests/test_wellstatefullyimplicitblackoil.cpp
   tests/smooth1Dtransport_immiscible_sofv_ad.cc
   )
 
 if(MPI_FOUND)
-  list(APPEND TEST_SOURCE_FILES tests/test_parallelistlinformation.cpp)
+  list(APPEND TEST_SOURCE_FILES tests/test_parallelistlinformation.cpp
+                                tests/test_ParallelRestart.cpp)
 endif()
 
 list (APPEND TEST_DATA_FILES
@@ -140,6 +144,7 @@ list (APPEND PUBLIC_HEADER_FILES
   opm/simulators/linalg/bda/BdaResult.hpp
   opm/simulators/linalg/bda/cuda_header.hpp
   opm/simulators/linalg/bda/cusparseSolverBackend.hpp
+  opm/simulators/linalg/bda/WellContributions.hpp
   opm/simulators/linalg/BlackoilAmg.hpp
   opm/simulators/linalg/BlackoilAmgCpr.hpp
   opm/simulators/linalg/amgcpr.hh

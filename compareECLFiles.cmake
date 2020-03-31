@@ -255,7 +255,8 @@ add_test_compareECLFiles(CASENAME msw_3d_hfa
                          FILENAME 3D_MSW
                          SIMULATOR flow
                          ABS_TOL ${abs_tol}
-                         REL_TOL ${rel_tol})
+                         REL_TOL ${rel_tol}
+                         TEST_ARGS --tolerance-pressure-ms-wells=10.)
 
 add_test_compareECLFiles(CASENAME polymer_oilwater
                          FILENAME 2D_OILWATER_POLYMER
@@ -296,7 +297,8 @@ add_test_compareECLFiles(CASENAME msw_model_1
                          SIMULATOR flow
                          ABS_TOL ${abs_tol}
                          REL_TOL ${rel_tol}
-                         DIR model1)
+                         DIR model1
+                         TEST_ARGS --solver-max-time-step-in-days=5.0)
 
 add_test_compareECLFiles(CASENAME base_model_1
                          FILENAME BASE_MODEL_1
@@ -310,7 +312,8 @@ add_test_compareECLFiles(CASENAME faults_model_1
                          SIMULATOR flow
                          ABS_TOL ${abs_tol}
                          REL_TOL ${rel_tol}
-                         DIR model1)
+                         DIR model1
+                         TEST_ARGS --solver-max-time-step-in-days=5.0)
 
 add_test_compareECLFiles(CASENAME base_model2
                          FILENAME 0_BASE_MODEL2
@@ -427,13 +430,19 @@ add_test_compare_restarted_simulation(CASENAME spe1
                                       SIMULATOR flow
                                       ABS_TOL ${abs_tol_restart}
                                       REL_TOL ${rel_tol_restart}
-                                      TEST_ARGS --sched-restart=true)
+                                      TEST_ARGS --sched-restart=false)
 add_test_compare_restarted_simulation(CASENAME spe9
                                       FILENAME SPE9_CP_SHORT
                                       SIMULATOR flow
                                       ABS_TOL ${abs_tol_restart}
                                       REL_TOL ${rel_tol_restart}
-                                      TEST_ARGS --sched-restart=true)
+                                      TEST_ARGS --sched-restart=false)
+add_test_compare_restarted_simulation(CASENAME msw_3d_hfa
+                                      FILENAME 3D_MSW
+                                      SIMULATOR flow
+                                      ABS_TOL ${abs_tol_restart}
+                                      REL_TOL ${rel_tol_restart}
+                                      TEST_ARGS --sched-restart=false)
 
 # PORV test
 opm_set_test_driver(${PROJECT_SOURCE_DIR}/tests/run-porv-acceptanceTest.sh "")
@@ -464,7 +473,7 @@ if(MPI_FOUND)
                                                  SIMULATOR flow
                                                  ABS_TOL ${abs_tol_restart}
                                                  REL_TOL ${rel_tol_restart}
-                                                 TEST_ARGS --sched-restart=true)
+                                                 TEST_ARGS --sched-restart=false)
 
 
   opm_set_test_driver(${PROJECT_SOURCE_DIR}/tests/run-parallel-regressionTest.sh "")

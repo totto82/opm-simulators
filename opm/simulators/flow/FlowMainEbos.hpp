@@ -26,7 +26,6 @@
 #include <sys/utsname.h>
 
 #include <opm/simulators/flow/BlackoilModelEbos.hpp>
-#include <opm/simulators/flow/MissingFeatures.hpp>
 #include <opm/simulators/flow/SimulatorFullyImplicitBlackoilEbos.hpp>
 #include <opm/simulators/utils/ParallelFileMerger.hpp>
 #include <opm/simulators/utils/moduleVersion.hpp>
@@ -254,7 +253,7 @@ namespace Opm
                     return status;
 
                 setupParallelism();
-                setupEbosSimulator(output_cout);
+                setupEbosSimulator();
                 runDiagnostics(output_cout);
                 createSimulator();
 
@@ -385,17 +384,13 @@ namespace Opm
                                                      EWOMS_GET_PARAM(TypeTag, bool, EnableLoggingFalloutWarning)));
         }
 
-        void setupEbosSimulator(bool output_cout)
+        void setupEbosSimulator()
         {
             ebosSimulator_.reset(new EbosSimulator(/*verbose=*/false));
             ebosSimulator_->executionTimer().start();
             ebosSimulator_->model().applyInitialSolution();
 
             try {
-                if (output_cout) {
-                    MissingFeatures::checkKeywords(deck());
-                }
-
                 // Possible to force initialization only behavior (NOSIM).
                 const std::string& dryRunString = EWOMS_GET_PARAM(TypeTag, std::string, EnableDryRun);
                 if (dryRunString != "" && dryRunString != "auto") {
@@ -451,13 +446,17 @@ namespace Opm
             if (FluidSystem::numActivePhases() > 1) {
                 RelpermDiagnostics diagnostic;
                 if (mpi_size_ > 1) {
+#if HAVE_MPI
                     this->grid().switchToGlobalView();
                     static_cast<ParallelEclipseState&>(this->eclState()).switchToGlobalProps();
+#endif
                 }
-                diagnostic.diagnosis(eclState(), deck(), this->grid());
+                diagnostic.diagnosis(eclState(), this->grid());
                 if (mpi_size_ > 1) {
+#if HAVE_MPI
                     this->grid().switchToDistributedView();
                     static_cast<ParallelEclipseState&>(this->eclState()).switchToDistributedProps();
+#endif
                 }
             }
         }

@@ -543,24 +543,6 @@ namespace Opm {
             wellsToState(restartValues.wells, phaseUsage, handle_ms_well, well_state_);
         }
 
-        // for ecl compatible restart the current controls are not written
-        const auto& ioCfg = eclState().getIOConfig();
-        const auto ecl_compatible_rst = ioCfg.getEclCompatibleRST();        
-        if (true || ecl_compatible_rst) { // always set the control from the schedule
-            for (int w = 0; w <nw; ++w) {
-                const auto& well = wells_ecl_[w];
-
-                if (well.isProducer()) {
-                    const auto controls = well.productionControls(summaryState);
-                    well_state_.currentProductionControls()[w] = controls.cmode;
-                }
-                else {
-                    const auto controls = well.injectionControls(summaryState);
-                    well_state_.currentInjectionControls()[w] = controls.cmode;
-                }
-            }
-        }
-
         previous_well_state_ = well_state_;
 
         initial_step_ = false;
@@ -918,9 +900,32 @@ namespace Opm {
         }
     }
 
-
-
-
+#if HAVE_CUDA
+    template<typename TypeTag>
+    void
+    BlackoilWellModel<TypeTag>::
+    getWellContributions(WellContributions& wellContribs) const
+    {
+        wellContribs.setBlockSize(StandardWell<TypeTag>::numEq, StandardWell<TypeTag>::numStaticWellEq);
+        for(unsigned int i = 0; i < well_container_.size(); i++){
+            auto& well = well_container_[i];
+            std::shared_ptr<StandardWell<TypeTag> > derived = std::dynamic_pointer_cast<StandardWell<TypeTag> >(well);
+            unsigned int numBlocks;
+            derived->getNumBlocks(numBlocks);
+            wellContribs.addNumBlocks(numBlocks);
+        }
+        wellContribs.alloc();
+        for(unsigned int i = 0; i < well_container_.size(); i++){
+            auto& well = well_container_[i];
+            std::shared_ptr<StandardWell<TypeTag> > derived = std::dynamic_pointer_cast<StandardWell<TypeTag> >(well);
+            if (derived) {
+                derived->addWellContribution(wellContribs);
+            } else {
+                OpmLog::warning("Warning only StandardWell is supported by WellContributions for GPU");
+            }
+        }
+    }
+#endif
 
     // Ax = Ax - alpha * C D^-1 B x
     template<typename TypeTag>
@@ -1563,8 +1568,12 @@ namespace Opm {
             state.bhp()[ well_index ] = well.bhp;
             state.temperature()[ well_index ] = well.temperature;
 
-            //state.currentInjectionControls()[ well_index ] = static_cast<Opm::Well::InjectorCMode>(well.injectionControl);
-            //state.currentProductionControls()[ well_index ] = static_cast<Well::ProducerCMode>(well.productionControl);
+            if (well.current_control.isProducer) {
+                state.currentProductionControls()[ well_index ] = well.current_control.prod;
+            }
+            else {
+                state.currentInjectionControls()[ well_index ] = well.current_control.inj;
+            }
 
             const auto wellrate_index = well_index * np;
             for( size_t i = 0; i < phs.size(); ++i ) {
