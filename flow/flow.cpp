@@ -20,8 +20,6 @@
 */
 #include "config.h"
 
-#include <ebos/eclmpiserializer.hh>
-
 #include <flow/flow_ebos_blackoil.hpp>
 
 #ifndef FLOW_BLACKOIL_ONLY
@@ -36,14 +34,11 @@
 #include <flow/flow_ebos_oilwater_polymer_injectivity.hpp>
 #endif
 
-#include <opm/simulators/flow/SimulatorFullyImplicitBlackoilEbos.hpp>
 #include <opm/simulators/flow/FlowMainEbos.hpp>
 #include <opm/simulators/utils/moduleVersion.hpp>
-#include <opm/simulators/utils/ParallelEclipseState.hpp>
 #include <opm/models/utils/propertysystem.hh>
 #include <opm/models/utils/parametersystem.hh>
 #include <opm/simulators/flow/MissingFeatures.hpp>
-#include <opm/material/common/ResetLocale.hpp>
 
 #include <opm/common/OpmLog/OpmLog.hpp>
 #include <opm/common/OpmLog/EclipsePRTLog.hpp>
@@ -63,12 +58,15 @@
 
 #include <opm/parser/eclipse/EclipseState/Schedule/ArrayDimChecker.hpp>
 
-#include <boost/filesystem.hpp>
-
 #if HAVE_DUNE_FEM
 #include <dune/fem/misc/mpimanager.hh>
 #else
 #include <dune/common/parallel/mpihelper.hh>
+#endif
+
+#if HAVE_MPI
+#include <opm/simulators/utils/ParallelEclipseState.hpp>
+#include <opm/simulators/utils/ParallelSerialization.hpp>
 #endif
 
 BEGIN_PROPERTIES
@@ -265,7 +263,6 @@ int main(int argc, char** argv)
 #if HAVE_DUNE_FEM
     Dune::Fem::MPIManager::initialize(argc, argv);
     int mpiRank = Dune::Fem::MPIManager::rank();
-    const auto& collectiveComm = Dune::Fem::MPIManager::comm();
 #else
     // the design of the plain dune MPIHelper class is quite flawed: there is no way to
     // get the instance without having the argc and argv parameters available and it is
@@ -273,7 +270,6 @@ int main(int argc, char** argv)
     // rank() and size() methods are supposed to be static.)
     const auto& mpiHelper = Dune::MPIHelper::instance(argc, argv);
     int mpiRank = mpiHelper.rank();
-    const auto& collectiveComm = mpiHelper.getCollectiveCommunication();
 #endif
 
     // we always want to use the default locale, and thus spare us the trouble
@@ -315,7 +311,6 @@ int main(int argc, char** argv)
         if ( mpiRank == 0 )
             std::cerr << "Exception received: " << e.what() << ". Try '--help' for a usage description.\n";
 #if HAVE_MPI
-        // this is done in MPIHelper
         MPI_Finalize();
 #endif
         return 1;
@@ -331,6 +326,7 @@ int main(int argc, char** argv)
             std::cout << "Reading deck file '" << deckFilename << "'\n";
             std::cout.flush();
         }
+        Opm::Python python;
         std::shared_ptr<Opm::Deck> deck;
         std::shared_ptr<Opm::EclipseState> eclipseState;
         std::shared_ptr<Opm::Schedule> schedule;
@@ -353,18 +349,14 @@ int main(int argc, char** argv)
 
             Opm::FlowMainEbos<PreTypeTag>::printPRTHeader(outputCout);
 
-#ifdef HAVE_MPI
-            Opm::ParallelEclipseState* parState;
-#endif
             if (mpiRank == 0) {
                 deck.reset( new Opm::Deck( parser.parseFile(deckFilename , parseContext, errorGuard)));
                 Opm::MissingFeatures::checkKeywords(*deck, parseContext, errorGuard);
                 if ( outputCout )
                     Opm::checkDeck(*deck, parser, parseContext, errorGuard);
 
-#ifdef HAVE_MPI
-                parState = new Opm::ParallelEclipseState(*deck);
-                eclipseState.reset(parState);
+#if HAVE_MPI
+                eclipseState.reset(new Opm::ParallelEclipseState(*deck));
 #else
                 eclipseState.reset(new Opm::EclipseState(*deck));
 #endif
@@ -376,34 +368,24 @@ int main(int argc, char** argv)
                 const bool init_from_restart_file = !EWOMS_GET_PARAM(PreTypeTag, bool, SchedRestart);
                 const auto& init_config = eclipseState->getInitConfig();
                 if (init_config.restartRequested() && init_from_restart_file) {
-                    throw std::logic_error("Sorry - the ability to initialize wells and groups from the restart file is currently not ready");
-
                     int report_step = init_config.getRestartStep();
                     const auto& rst_filename = eclipseState->getIOConfig().getRestartFileName( init_config.getRestartRootName(), report_step, false );
                     Opm::EclIO::ERst rst_file(rst_filename);
                     const auto& rst_state = Opm::RestartIO::RstState::load(rst_file, report_step);
-                    schedule.reset(new Opm::Schedule(*deck, *eclipseState, parseContext, errorGuard, &rst_state) );
+                    schedule.reset(new Opm::Schedule(*deck, *eclipseState, parseContext, errorGuard, python, &rst_state) );
                 } else
-                    schedule.reset(new Opm::Schedule(*deck, *eclipseState, parseContext, errorGuard));
+                    schedule.reset(new Opm::Schedule(*deck, *eclipseState, parseContext, errorGuard, python));
 
                 setupMessageLimiter(schedule->getMessageLimits(), "STDOUT_LOGGER");
                 summaryConfig.reset( new Opm::SummaryConfig(*deck, *schedule, eclipseState->getTableManager(), parseContext, errorGuard));
-#ifdef HAVE_MPI
-                Opm::Mpi::packAndSend(*summaryConfig, collectiveComm );
-                Opm::Mpi::packAndSend(*schedule, collectiveComm );
-#endif
             }
-#ifdef HAVE_MPI
+#if HAVE_MPI
             else {
                 summaryConfig.reset(new Opm::SummaryConfig);
                 schedule.reset(new Opm::Schedule);
-                parState = new Opm::ParallelEclipseState;
-                Opm::Mpi::receiveAndUnpack(*summaryConfig, collectiveComm);
-                Opm::Mpi::receiveAndUnpack(*schedule, collectiveComm);
-                eclipseState.reset(parState);
+                eclipseState.reset(new Opm::ParallelEclipseState);
             }
-            Opm::EclMpiSerializer ser(collectiveComm);
-            ser.broadcast(*parState);
+            Opm::eclStateBroadcast(*eclipseState, *schedule, *summaryConfig);
 #endif
 
             Opm::checkConsistentArrayDimensions(*eclipseState, *schedule, parseContext, errorGuard);
