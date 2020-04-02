@@ -718,7 +718,7 @@ namespace WellGroupHelpers
     {
         const double my_guide_rate = guideRate(name, always_included_child);
         const Group& parent_group = schedule_.getGroup(parent(name), report_step_);
-        const double total_guide_rate = guideRateSum(parent_group, always_included_child);
+        const double total_guide_rate = guideRateSum(parent_group, always_included_child, false);
         assert(total_guide_rate >= my_guide_rate);
         const double guide_rate_epsilon = 1e-12;
         return (total_guide_rate > guide_rate_epsilon) ? my_guide_rate / total_guide_rate : 0.0;
@@ -731,7 +731,7 @@ namespace WellGroupHelpers
             return schedule_.getGroup(name, report_step_).parent();
         }
     }
-    double FractionCalculator::guideRateSum(const Group& group, const std::string& always_included_child)
+    double FractionCalculator::guideRateSum(const Group& group, const std::string& always_included_child, const bool include_all_wells)
     {
         double total_guide_rate = 0.0;
         for (const std::string& child_group : group.groups()) {
@@ -744,7 +744,7 @@ namespace WellGroupHelpers
         }
         for (const std::string& child_well : group.wells()) {
             const bool included = (well_state_.isProductionGrup(child_well)) || (child_well == always_included_child);
-            if (included) {
+            if (included || include_all_wells) {
                 total_guide_rate += guideRate(child_well, always_included_child);
             }
         }
@@ -763,7 +763,7 @@ namespace WellGroupHelpers
                     // Compute guide rate by accumulating our children's guide rates.
                     // (only children not under individual control though).
                     const Group& group = schedule_.getGroup(name, report_step_);
-                    return guideRateSum(group, always_included_child);
+                    return guideRateSum(group, always_included_child, true);
                 }
             } else {
                 // No group-controlled subordinate wells.
