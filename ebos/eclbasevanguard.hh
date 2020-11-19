@@ -646,13 +646,13 @@ protected:
         asImp_().updateOutputDir_();
         asImp_().finalizeInit_();
 
-        if (enableExperiments) {
-            if (asImp_().grid().size(0)) //grid not loadbalanced yet for ebos!
+        //if (enableExperiments) {
+            if (asImp_().equilGrid().size(0)) //grid not loadbalanced yet for ebos!
             {
                 Opm::RelpermDiagnostics relpermDiagnostics;
-                relpermDiagnostics.diagnosis(*eclState_, asImp_().grid());
+                relpermDiagnostics.diagnosis(*eclState_, asImp_().equilGrid());
             }
-        }
+        //}
     }
 private:
     void updateOutputDir_()

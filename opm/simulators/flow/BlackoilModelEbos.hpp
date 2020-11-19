@@ -163,6 +163,7 @@ namespace Opm {
         using MaterialLaw = GetPropType<TypeTag, Properties::MaterialLaw>;
         using MaterialLawParams = GetPropType<TypeTag, Properties::MaterialLawParams>;
 
+
         typedef double Scalar;
         static const int numEq = Indices::numEq;
         static const int contiSolventEqIdx = Indices::contiSolventEqIdx;
@@ -217,7 +218,7 @@ namespace Opm {
         , well_model_ (well_model)
         , terminal_output_ (terminal_output)
         , current_relaxation_(1.0)
-        , dx_old_(UgGridHelpers::numCells(grid_))
+        , dx_old_(ebosSimulator_.model().numGridDof())
         {
             // compute global sum of number of cells
             global_nc_ = detail::countGlobalCells(grid_);
@@ -330,7 +331,7 @@ namespace Opm {
                 //residual_.singlePrecision = (unit::convert::to(dt, unit::day) < 20.) ;
 
                 // Compute the nonlinear update.
-                const int nc = UgGridHelpers::numCells(grid_);
+                unsigned nc = ebosSimulator_.model().numGridDof();
                 BVector x(nc);
 
                 // apply the Schur compliment of the well model to the reservoir linearized

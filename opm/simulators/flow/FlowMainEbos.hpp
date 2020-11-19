@@ -32,7 +32,7 @@
 #include <opm/simulators/linalg/ExtractParallelGridInformationToISTL.hpp>
 #include <opm/simulators/utils/ParallelEclipseState.hpp>
 
-#include <opm/core/props/satfunc/RelpermDiagnostics.hpp>
+//#include <opm/core/props/satfunc/RelpermDiagnostics.hpp>
 
 #include <opm/parser/eclipse/Deck/Deck.hpp>
 #include <opm/parser/eclipse/Parser/Parser.hpp>
@@ -551,27 +551,27 @@ namespace Opm
         //   OpmLog singleton.
         void runDiagnostics()
         {
-            if (!this->output_cout_) {
-                return;
-            }
+//            if (!this->output_cout_) {
+//                return;
+//            }
 
-            // Run relperm diagnostics if we have more than one phase.
-            if (FluidSystem::numActivePhases() > 1) {
-                RelpermDiagnostics diagnostic;
-                if (mpi_size_ > 1) {
-#if HAVE_MPI
-                    this->grid().switchToGlobalView();
-                    static_cast<ParallelEclipseState&>(this->eclState()).switchToGlobalProps();
-#endif
-                }
-                diagnostic.diagnosis(eclState(), this->grid());
-                if (mpi_size_ > 1) {
-#if HAVE_MPI
-                    this->grid().switchToDistributedView();
-                    static_cast<ParallelEclipseState&>(this->eclState()).switchToDistributedProps();
-#endif
-                }
-            }
+//            // Run relperm diagnostics if we have more than one phase.
+//            if (FluidSystem::numActivePhases() > 1) {
+//                RelpermDiagnostics diagnostic;
+//                if (mpi_size_ > 1) {
+//#if HAVE_MPI
+//                    this->grid().switchToGlobalView();
+//                    static_cast<ParallelEclipseState&>(this->eclState()).switchToGlobalProps();
+//#endif
+//                }
+//                diagnostic.diagnosis(eclState(), this->grid());
+//                if (mpi_size_ > 1) {
+//#if HAVE_MPI
+//                    this->grid().switchToDistributedView();
+//                    static_cast<ParallelEclipseState&>(this->eclState()).switchToDistributedProps();
+//#endif
+//                }
+//            }
         }
 
         // Run the simulator.

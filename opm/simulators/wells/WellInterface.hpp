@@ -74,7 +74,7 @@ namespace Opm
         static const int Oil = BlackoilPhases::Liquid;
         static const int Gas = BlackoilPhases::Vapour;
 
-        using Grid = GetPropType<TypeTag, Properties::Grid>;
+        //using Grid = GetPropType<TypeTag, Properties::Grid>;
         using Simulator = GetPropType<TypeTag, Properties::Simulator>;
         using FluidSystem = GetPropType<TypeTag, Properties::FluidSystem>;
         using Indices = GetPropType<TypeTag, Properties::Indices>;
@@ -184,6 +184,7 @@ namespace Opm
 
         void setWellEfficiencyFactor(const double efficiency_factor);
 
+        template<class Grid>
         void computeRepRadiusPerfLength(const Grid& grid, const std::vector<int>& cartesian_to_compressed, Opm::DeferredLogger& deferred_logger);
 
         /// using the solution x to recover the solution xw for wells and applying

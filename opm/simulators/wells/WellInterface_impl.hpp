@@ -1166,6 +1166,7 @@ namespace Opm
 
 
     template<typename TypeTag>
+    template<class Grid>
     void
     WellInterface<TypeTag>::
     computeRepRadiusPerfLength(const Grid& grid,

@@ -204,7 +204,7 @@ namespace Opm {
 
             Opm::data::Wells wellData() const
             {
-                auto wsrpt = well_state_.report(phase_usage_, Opm::UgGridHelpers::globalCell(grid()));
+                auto wsrpt = well_state_.report(phase_usage_, ebosSimulator_.vanguard().globalCell().data());
 
                 for (const auto& well : this->wells_ecl_) {
                     auto xwPos = wsrpt.find(well.name());
@@ -364,9 +364,9 @@ namespace Opm {
             // setting the well_solutions_ based on well_state.
             void updatePrimaryVariables(Opm::DeferredLogger& deferred_logger);
 
-            void setupCartesianToCompressed_(const int* global_cell, int local_num__cells);
+            void setupCartesianToCompressed_();
 
-            void computeRepRadiusPerfLength(const Grid& grid, Opm::DeferredLogger& deferred_logger);
+            void computeRepRadiusPerfLength(Opm::DeferredLogger& deferred_logger);
 
 
             void computeAverageFormationFactor(std::vector<Scalar>& B_avg) const;

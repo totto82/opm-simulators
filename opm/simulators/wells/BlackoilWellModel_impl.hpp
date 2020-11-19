@@ -48,10 +48,7 @@ namespace Opm {
         global_num_cells_ = ebosSimulator_.vanguard().globalNumCells();
 
         // Set up cartesian mapping.
-        const auto& grid = ebosSimulator_.vanguard().grid();
-        const auto& cartDims = Opm::UgGridHelpers::cartDims(grid);
-        setupCartesianToCompressed_(Opm::UgGridHelpers::globalCell(grid),
-                                    cartDims[0]*cartDims[1]*cartDims[2]);
+        setupCartesianToCompressed_();
 
         is_shut_or_defunct_ = [&ebosSimulator](const Well& well) {
                 if (well.getStatus() == Well::Status::SHUT)
@@ -101,8 +98,8 @@ namespace Opm {
 
         // Create cartesian to compressed mapping
         const auto& schedule_wells = schedule().getWellsatEnd();
-        const auto& cartesianSize = Opm::UgGridHelpers::cartDims(grid());
-
+        const auto& cartesianSize = ebosSimulator_.vanguard().cartesianDimensions();
+\
         // initialize the additional cell connections introduced by wells.
         for (const auto& well : schedule_wells)
         {
@@ -366,9 +363,8 @@ namespace Opm {
 
             if (has_polymer_)
             {
-                const Grid& grid = ebosSimulator_.vanguard().grid();
                 if (PolymerModule::hasPlyshlog() || getPropValue<TypeTag, Properties::EnablePolymerMW>() ) {
-                        computeRepRadiusPerfLength(grid, local_deferredLogger);
+                    computeRepRadiusPerfLength(local_deferredLogger);
                 }
             }
         } catch (std::exception& e) {
@@ -571,9 +567,8 @@ namespace Opm {
         const int nw = wells_ecl_.size();
         if (nw > 0) {
             const auto phaseUsage = phaseUsageFromDeck(eclState());
-            const size_t numCells = Opm::UgGridHelpers::numCells(grid());
             const bool handle_ms_well = (param_.use_multisegment_well_ && anyMSWellOpenLocal());
-            well_state_.resize(wells_ecl_, schedule(), handle_ms_well, numCells, phaseUsage, well_perf_data_, summaryState, globalNumWells); // Resize for restart step
+            well_state_.resize(wells_ecl_, schedule(), handle_ms_well, local_num_cells_, phaseUsage, well_perf_data_, summaryState, globalNumWells); // Resize for restart step
             wellsToState(restartValues.wells, restartValues.grp_nwrk, phaseUsage, handle_ms_well, well_state_);
         }
 
@@ -591,8 +586,7 @@ namespace Opm {
     BlackoilWellModel<TypeTag>::
     initializeWellPerfData()
     {
-        const auto& grid = ebosSimulator_.vanguard().grid();
-        const auto& cartDims = Opm::UgGridHelpers::cartDims(grid);
+        const auto& cartDims = ebosSimulator_.vanguard().cartesianDimensions();
         well_perf_data_.resize(wells_ecl_.size());
         int well_index = 0;
         for (const auto& well : wells_ecl_) {
@@ -1503,29 +1497,26 @@ namespace Opm {
     template<typename TypeTag>
     void
     BlackoilWellModel<TypeTag>::
-    setupCartesianToCompressed_(const int* global_cell, int number_of_cartesian_cells)
+    setupCartesianToCompressed_()
     {
-        cartesian_to_compressed_.resize(number_of_cartesian_cells, -1);
-        if (global_cell) {
-            for (unsigned i = 0; i < local_num_cells_; ++i) {
-                cartesian_to_compressed_[global_cell[i]] = i;
-            }
-        }
-        else {
-            for (unsigned i = 0; i < local_num_cells_; ++i) {
-                cartesian_to_compressed_[i] = i;
-            }
-        }
+        const auto& cartMapper = ebosSimulator_.vanguard().cartesianIndexMapper();
+        const size_t cartesianSize = cartMapper.cartesianSize();
+        cartesian_to_compressed_.resize(cartesianSize, -1);
 
+        for (unsigned i = 0; i < local_num_cells_; ++i) {
+            unsigned cartesianCellIdx = cartMapper.cartesianIndex(i);
+            cartesian_to_compressed_[cartesianCellIdx] = i;
+        }
     }
 
     template<typename TypeTag>
     void
     BlackoilWellModel<TypeTag>::
-    computeRepRadiusPerfLength(const Grid& grid, Opm::DeferredLogger& deferred_logger)
+    computeRepRadiusPerfLength(Opm::DeferredLogger& deferred_logger)
     {
+        const auto& eqgrid = ebosSimulator_.vanguard().equilGrid();
         for (const auto& well : well_container_) {
-            well->computeRepRadiusPerfLength(grid, cartesian_to_compressed_, deferred_logger);
+            well->computeRepRadiusPerfLength(eqgrid, cartesian_to_compressed_, deferred_logger);
         }
     }
 
@@ -1640,12 +1631,11 @@ namespace Opm {
     void
     BlackoilWellModel<TypeTag>::extractLegacyDepth_()
     {
-        const auto& grid = ebosSimulator_.vanguard().grid();
-        const unsigned numCells = grid.size(/*codim=*/0);
+        const auto& eclProblem = ebosSimulator_.problem();
+        depth_.resize(local_num_cells_);
+        for (unsigned cellIdx = 0; cellIdx < local_num_cells_; ++cellIdx) {
+            depth_[cellIdx] = eclProblem.dofCenterDepth(cellIdx);
 
-        depth_.resize(numCells);
-        for (unsigned cellIdx = 0; cellIdx < numCells; ++cellIdx) {
-            depth_[cellIdx] = Opm::UgGridHelpers::cellCenterDepth( grid, cellIdx );
         }
     }
 

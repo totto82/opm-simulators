@@ -703,7 +703,8 @@ public:
                     bubblePointPressure_[globalDofIdx] = Opm::getValue(FluidSystem::bubblePointPressure(fs, intQuants.pvtRegionIndex()));
                 }
                 catch (const Opm::NumericalIssue&) {
-                    const auto cartesianIdx = elemCtx.simulator().vanguard().grid().globalCell()[globalDofIdx];
+                    const auto cartesianIdx = elemCtx.simulator().vanguard().cartesianIndex(globalDofIdx);
+
                     failedCellsPb_.push_back(cartesianIdx);
                 }
             }
@@ -712,7 +713,8 @@ public:
                     dewPointPressure_[globalDofIdx] = Opm::getValue(FluidSystem::dewPointPressure(fs, intQuants.pvtRegionIndex()));
                 }
                 catch (const Opm::NumericalIssue&) {
-                    const auto cartesianIdx = elemCtx.simulator().vanguard().grid().globalCell()[globalDofIdx];
+                    const auto cartesianIdx = elemCtx.simulator().vanguard().cartesianIndex(globalDofIdx);
+
                     failedCellsPd_.push_back(cartesianIdx);
                 }
             }
@@ -811,7 +813,8 @@ public:
             updateFluidInPlace_(elemCtx, dofIdx);
 
             // Adding block data
-            const auto cartesianIdx = elemCtx.simulator().vanguard().grid().globalCell()[globalDofIdx];
+            const auto cartesianIdx = elemCtx.simulator().vanguard().cartesianIndex(globalDofIdx);
+
             for (auto& val: blockData_) {
                 const auto& key = val.first;
                 int cartesianIdxBlock = key.second - 1;

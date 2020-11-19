@@ -1463,6 +1463,17 @@ public:
     Scalar dofCenterDepth(const Context& context, unsigned spaceIdx, unsigned timeIdx) const
     {
         unsigned globalSpaceIdx = context.globalSpaceIndex(spaceIdx, timeIdx);
+        return dofCenterDepth(globalSpaceIdx);
+    }
+
+    /*!
+     * \brief Returns the depth of an degree of freedom [m]
+     *
+     * For ECL problems this is defined as the average of the depth of an element and is
+     * thus slightly different from the depth of an element's centroid.
+     */
+    Scalar dofCenterDepth(unsigned globalSpaceIdx) const
+    {
         return elementCenterDepth_[globalSpaceIdx];
     }
 

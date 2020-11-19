@@ -180,6 +180,12 @@ public:
         return simulator_.problem().eclTransmissibilities();
     }
 
+    const std::vector<int>& globalCell()
+    {
+        return grid().globalCell();
+    }
+
+
 protected:
     void createGrids_()
     {
