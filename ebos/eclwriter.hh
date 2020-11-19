@@ -486,7 +486,7 @@ private:
 
         const EclTransmissibility<TypeTag>* globalTrans;
 
-        if (!collectToIORank_.isParallel())
+        if (false && !collectToIORank_.isParallel())
         {
             // in the sequential case we must use the transmissibilites defined by
             // the problem. (because in the sequential case, the grid manager does

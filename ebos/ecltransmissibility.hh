@@ -328,8 +328,8 @@ public:
                                                   axisCentroids),
                                   permeability_[outsideElemIdx]);
 
-                applyNtg_(halfTrans1, insideFaceIdx, elemIdx, ntg);
-                applyNtg_(halfTrans2, outsideFaceIdx, outsideElemIdx, ntg);
+                //applyNtg_(halfTrans1, insideFaceIdx, elemIdx, ntg);
+                //applyNtg_(halfTrans2, outsideFaceIdx, outsideElemIdx, ntg);
 
                 // convert half transmissibilities to full face
                 // transmissibilities using the harmonic mean
@@ -384,6 +384,7 @@ public:
                                                        outsideCartElemIdx,
                                                        faceDir);
 
+                //std::cout << elemIdx << " " << outsideElemIdx << std::endl;
                 trans_[isId_(elemIdx, outsideElemIdx)] = trans;
             }
         }
@@ -421,7 +422,10 @@ public:
      * \brief Return the transmissibility for the intersection between two elements.
      */
     Scalar transmissibility(unsigned elemIdx1, unsigned elemIdx2) const
-    { return trans_.at(isId_(elemIdx1, elemIdx2)); }
+    {
+        //std::cout << elemIdx1 << " " << elemIdx2 << std::endl;
+        return trans_.at(isId_(elemIdx1, elemIdx2));
+    }
 
     /*!
      * \brief Return the transmissibility for a given boundary segment.
@@ -843,9 +847,9 @@ private:
 
             for (size_t dofIdx = 0; dofIdx < numElem; ++ dofIdx) {
                 permeability_[dofIdx] = 0.0;
-                permeability_[dofIdx][0][0] = permxData[dofIdx];
-                permeability_[dofIdx][1][1] = permyData[dofIdx];
-                permeability_[dofIdx][2][2] = permzData[dofIdx];
+                permeability_[dofIdx][0][0] = permxData[0];
+                permeability_[dofIdx][1][1] = permyData[0];
+                permeability_[dofIdx][2][2] = permzData[0];
             }
 
             // for now we don't care about non-diagonal entries

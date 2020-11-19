@@ -1572,7 +1572,7 @@ class InitialStateComputer
 {
     using FluidSystem = GetPropType<TypeTag, Properties::FluidSystem>;
     using Simulator = GetPropType<TypeTag, Properties::Simulator>;
-    using Grid = GetPropType<TypeTag, Properties::Grid>;
+    using Grid = GetPropType<TypeTag, Properties::EquilGrid>;
 
 public:
     template<class MaterialLawManager>

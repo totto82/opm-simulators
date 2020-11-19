@@ -47,10 +47,7 @@ namespace Opm {
         global_num_cells_ = ebosSimulator_.vanguard().globalNumCells();
 
         // Set up cartesian mapping.
-        const auto& grid = ebosSimulator_.vanguard().grid();
-        const auto& cartDims = Opm::UgGridHelpers::cartDims(grid);
-        setupCartesianToCompressed_(Opm::UgGridHelpers::globalCell(grid),
-                                    cartDims[0]*cartDims[1]*cartDims[2]);
+        setupCartesianToCompressed_();
 
         is_shut_or_defunct_ = [&ebosSimulator](const Well& well) {
                 if (well.getStatus() == Well::Status::SHUT)
@@ -92,6 +89,31 @@ namespace Opm {
     template<typename TypeTag>
     void
     BlackoilWellModel<TypeTag>::
+    gridChanged()
+    {
+        local_num_cells_ = ebosSimulator_.gridView().size(0);
+        // Number of cells the global grid view
+        global_num_cells_ = ebosSimulator_.vanguard().globalNumCells();
+
+        extractLegacyCellPvtRegionIndex_();
+        extractLegacyDepth_();
+
+        setupCartesianToCompressed_();
+        is_cell_perforated_.resize(local_num_cells_, false);
+
+        // Compute reservoir volumes for RESV controls.
+        rateConverter_.reset(new RateConverterType (phase_usage_,
+                                                    std::vector<int>(local_num_cells_, 0)));
+        rateConverter_->template defineState<ElementContext>(ebosSimulator_);
+
+
+
+
+    }
+
+    template<typename TypeTag>
+    void
+    BlackoilWellModel<TypeTag>::
     addNeighbors(std::vector<NeighborSet>& neighbors) const
     {
         if (!param_.matrix_add_well_contributions_) {
@@ -100,8 +122,7 @@ namespace Opm {
 
         // Create cartesian to compressed mapping
         const auto& schedule_wells = schedule().getWellsatEnd();
-        const auto& cartesianSize = Opm::UgGridHelpers::cartDims(grid());
-
+        const auto& cartesianSize = ebosSimulator_.vanguard().cartesianDimensions();
         // initialize the additional cell connections introduced by wells.
         for (const auto& well : schedule_wells)
         {
@@ -199,7 +220,7 @@ namespace Opm {
         }
 
         // Communicate across processes if a well was shut.
-        well_was_shut = ebosSimulator_.vanguard().grid().comm().max(well_was_shut);
+        well_was_shut = grid().comm().max(well_was_shut);
 
         // Only log a message on the output rank.
         if (terminal_output_ && well_was_shut) {
@@ -231,7 +252,6 @@ namespace Opm {
         Opm::DeferredLogger local_deferredLogger;
         report_step_starts_ = true;
 
-        const Grid& grid = ebosSimulator_.vanguard().grid();
         const auto& summaryState = ebosSimulator_.vanguard().summaryState();
         int globalNumWells = 0;
         // Make wells_ecl_ contain only this partition's non-shut wells.
@@ -241,7 +261,7 @@ namespace Opm {
         // Wells are active if they are active wells on at least
         // one process.
         wells_active_ = localWellsActive() ? 1 : 0;
-        wells_active_ = grid.comm().max(wells_active_);
+        wells_active_ = grid().comm().max(wells_active_);
 
         // The well state initialize bhp with the cell pressure in the top cell.
         // We must therefore provide it with updated cell pressures
@@ -365,9 +385,8 @@ namespace Opm {
 
             if (has_polymer_)
             {
-                const Grid& grid = ebosSimulator_.vanguard().grid();
                 if (PolymerModule::hasPlyshlog() || getPropValue<TypeTag, Properties::EnablePolymerMW>() ) {
-                        computeRepRadiusPerfLength(grid, local_deferredLogger);
+                        computeRepRadiusPerfLength(grid(), local_deferredLogger);
                 }
             }
         } catch (std::exception& e) {
@@ -403,7 +422,7 @@ namespace Opm {
         }
 
         //compute well guideRates
-        const auto& comm = ebosSimulator_.vanguard().grid().comm();
+        const auto& comm = grid().comm();
         WellGroupHelpers::updateGuideRatesForWells(schedule(), phase_usage_, reportStepIdx, simulationTime, well_state_, comm, guideRate_.get());
         logAndCheckForExceptionsAndThrow(local_deferredLogger,
             exception_thrown, "beginTimeStep() failed.", terminal_output_);
@@ -570,9 +589,8 @@ namespace Opm {
         const int nw = wells_ecl_.size();
         if (nw > 0) {
             const auto phaseUsage = phaseUsageFromDeck(eclState());
-            const size_t numCells = Opm::UgGridHelpers::numCells(grid());
             const bool handle_ms_well = (param_.use_multisegment_well_ && anyMSWellOpenLocal());
-            well_state_.resize(wells_ecl_, schedule(), handle_ms_well, numCells, phaseUsage, well_perf_data_, summaryState, globalNumWells); // Resize for restart step
+            well_state_.resize(wells_ecl_, schedule(), handle_ms_well, local_num_cells_, phaseUsage, well_perf_data_, summaryState, globalNumWells); // Resize for restart step
             wellsToState(restartValues.wells, restartValues.grp_nwrk, phaseUsage, handle_ms_well, well_state_);
         }
 
@@ -590,8 +608,7 @@ namespace Opm {
     BlackoilWellModel<TypeTag>::
     initializeWellPerfData()
     {
-        const auto& grid = ebosSimulator_.vanguard().grid();
-        const auto& cartDims = Opm::UgGridHelpers::cartDims(grid);
+        const auto& cartDims = ebosSimulator_.vanguard().cartesianDimensions();
         well_perf_data_.resize(wells_ecl_.size());
         int well_index = 0;
         for (const auto& well : wells_ecl_) {
@@ -1313,7 +1330,7 @@ namespace Opm {
 
         // This builds some necessary lookup structures, so it must be called
         // before we copy to well_state_nupcol_.
-        const auto& comm = ebosSimulator_.vanguard().grid().comm();
+        const auto& comm = grid().comm();
         well_state_.updateGlobalIsGrup(schedule(), reportStepIdx, comm);
 
         if (iterationIdx < nupcol) {
@@ -1499,20 +1516,16 @@ namespace Opm {
     template<typename TypeTag>
     void
     BlackoilWellModel<TypeTag>::
-    setupCartesianToCompressed_(const int* global_cell, int number_of_cartesian_cells)
+    setupCartesianToCompressed_()
     {
-        cartesian_to_compressed_.resize(number_of_cartesian_cells, -1);
-        if (global_cell) {
-            for (unsigned i = 0; i < local_num_cells_; ++i) {
-                cartesian_to_compressed_[global_cell[i]] = i;
-            }
-        }
-        else {
-            for (unsigned i = 0; i < local_num_cells_; ++i) {
-                cartesian_to_compressed_[i] = i;
-            }
-        }
+        const auto& cartMapper = ebosSimulator_.vanguard().cartesianIndexMapper();
+        const size_t cartesianSize = cartMapper.cartesianSize();
+        cartesian_to_compressed_.resize(cartesianSize, -1);
 
+        for (unsigned i = 0; i < local_num_cells_; ++i) {
+            unsigned cartesianCellIdx = cartMapper.cartesianIndex(i);
+            cartesian_to_compressed_[cartesianCellIdx] = i;
+        }
     }
 
     template<typename TypeTag>
@@ -1534,6 +1547,7 @@ namespace Opm {
     BlackoilWellModel<TypeTag>::
     computeAverageFormationFactor(std::vector<Scalar>& B_avg) const
     {
+
         const auto& grid = ebosSimulator_.vanguard().grid();
         const auto& gridView = grid.leafGridView();
         ElementContext elemCtx(ebosSimulator_);
@@ -1591,12 +1605,10 @@ namespace Opm {
     void
     BlackoilWellModel<TypeTag>::extractLegacyCellPvtRegionIndex_()
     {
-        const auto& grid = ebosSimulator_.vanguard().grid();
         const auto& eclProblem = ebosSimulator_.problem();
-        const unsigned numCells = grid.size(/*codim=*/0);
 
-        pvt_region_idx_.resize(numCells);
-        for (unsigned cellIdx = 0; cellIdx < numCells; ++cellIdx) {
+        pvt_region_idx_.resize(local_num_cells_);
+        for (unsigned cellIdx = 0; cellIdx < local_num_cells_; ++cellIdx) {
             pvt_region_idx_[cellIdx] =
                 eclProblem.pvtRegionIndex(cellIdx);
         }
@@ -1636,12 +1648,10 @@ namespace Opm {
     void
     BlackoilWellModel<TypeTag>::extractLegacyDepth_()
     {
-        const auto& grid = ebosSimulator_.vanguard().grid();
-        const unsigned numCells = grid.size(/*codim=*/0);
-
-        depth_.resize(numCells);
-        for (unsigned cellIdx = 0; cellIdx < numCells; ++cellIdx) {
-            depth_[cellIdx] = Opm::UgGridHelpers::cellCenterDepth( grid, cellIdx );
+        const auto& eclProblem = ebosSimulator_.problem();
+        depth_.resize(local_num_cells_);
+        for (unsigned cellIdx = 0; cellIdx < local_num_cells_; ++cellIdx) {
+            depth_[cellIdx] = eclProblem.dofCenterDepth(cellIdx );
         }
     }
 
@@ -1666,6 +1676,15 @@ namespace Opm {
             elemCtx.updatePrimaryIntensiveQuantities(/*timeIdx=*/0);
         }
     }
+
+    template<typename TypeTag>
+    bool
+    BlackoilWellModel<TypeTag>::
+    isCellPerforated(unsigned elemIdx) const {
+
+        return is_cell_perforated_[elemIdx];
+    }
+
 
 
     // convert well data from opm-common to well state from opm-core
@@ -1950,7 +1969,7 @@ namespace Opm {
 
         const int reportStepIdx = ebosSimulator_.episodeIndex();
         const auto& summaryState = ebosSimulator_.vanguard().summaryState();
-        const auto& comm = ebosSimulator_.vanguard().grid().comm();
+        const auto& comm = grid().comm();
         const auto& well_state = well_state_;
 
         const auto controls = group.productionControls(summaryState);
@@ -2056,7 +2075,7 @@ namespace Opm {
 
         const int reportStepIdx = ebosSimulator_.episodeIndex();
         const auto& summaryState = ebosSimulator_.vanguard().summaryState();
-        const auto& comm = ebosSimulator_.vanguard().grid().comm();
+        const auto& comm = grid().comm();
         const auto& well_state = well_state_;
 
         int phasePos;
@@ -2175,7 +2194,7 @@ namespace Opm {
         std::ostringstream ss;
 
         const auto& summaryState = ebosSimulator_.vanguard().summaryState();
-        const auto& comm = ebosSimulator_.vanguard().grid().comm();
+        const auto& comm = grid().comm();
 
         const auto& gconsale = schedule().gConSale(reportStepIdx).get(group.name(), summaryState);
         const Group::ProductionCMode& oldProductionControl = well_state.currentProductionGroupControl(group.name());
@@ -2392,7 +2411,7 @@ namespace Opm {
         const auto& summaryState = ebosSimulator_.vanguard().summaryState();
 
         std::vector<double> rates(phase_usage_.num_phases, 0.0);
-        const auto& comm = ebosSimulator_.vanguard().grid().comm();
+        const auto& comm = grid().comm();
 
         const bool skip = switched_groups.count(group.name()) || group.name() == "FIELD";
 
@@ -2496,7 +2515,7 @@ namespace Opm {
             double gasProductionRate = WellGroupHelpers::sumWellRates(groupRein, schedule, wellState, reportStepIdx, gasPos, /*isInjector*/false);
             double solventProductionRate = WellGroupHelpers::sumSolventRates(groupRein, schedule, wellState, reportStepIdx, /*isInjector*/false);
 
-            const auto& comm = ebosSimulator_.vanguard().grid().comm();
+            const auto& comm = grid().comm();
             solventProductionRate = comm.sum(solventProductionRate);
             gasProductionRate = comm.sum(gasProductionRate);
 

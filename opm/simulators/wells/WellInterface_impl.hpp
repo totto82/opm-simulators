@@ -1171,70 +1171,71 @@ namespace Opm
                                Opm::DeferredLogger& deferred_logger
                                )
     {
-        const int* cart_dims = Opm::UgGridHelpers::cartDims(grid);
-        auto cell_to_faces = Opm::UgGridHelpers::cell2Faces(grid);
-        auto begin_face_centroids = Opm::UgGridHelpers::beginFaceCentroids(grid);
 
-        const int nperf = number_of_perforations_;
+//        const int* cart_dims = Opm::UgGridHelpers::cartDims(grid);
+//        auto cell_to_faces = Opm::UgGridHelpers::cell2Faces(grid);
+//        auto begin_face_centroids = Opm::UgGridHelpers::beginFaceCentroids(grid);
 
-        perf_rep_radius_.clear();
-        perf_length_.clear();
-        bore_diameters_.clear();
+//        const int nperf = number_of_perforations_;
 
-        perf_rep_radius_.reserve(nperf);
-        perf_length_.reserve(nperf);
-        bore_diameters_.reserve(nperf);
+//        perf_rep_radius_.clear();
+//        perf_length_.clear();
+//        bore_diameters_.clear();
 
-        // COMPDAT handling
-        const auto& connectionSet = well_ecl_.getConnections();
-        for (size_t c=0; c<connectionSet.size(); c++) {
-            const auto& connection = connectionSet.get(c);
-            if (connection.state() == Connection::State::OPEN) {
-                const int i = connection.getI();
-                const int j = connection.getJ();
-                const int k = connection.getK();
+//        perf_rep_radius_.reserve(nperf);
+//        perf_length_.reserve(nperf);
+//        bore_diameters_.reserve(nperf);
 
-                const int* cpgdim = cart_dims;
-                const int cart_grid_indx = i + cpgdim[0]*(j + cpgdim[1]*k);
-                const int cell = cartesian_to_compressed[cart_grid_indx];
+//        // COMPDAT handling
+//        const auto& connectionSet = well_ecl_.getConnections();
+//        for (size_t c=0; c<connectionSet.size(); c++) {
+//            const auto& connection = connectionSet.get(c);
+//            if (connection.state() == Connection::State::OPEN) {
+//                const int i = connection.getI();
+//                const int j = connection.getJ();
+//                const int k = connection.getK();
 
-                if (cell < 0) {
-                    OPM_DEFLOG_THROW(std::runtime_error, "Cell with i,j,k indices " << i << ' ' << j << ' '
-                              << k << " not found in grid (well = " << name() << ')', deferred_logger);
-                }
+//                const int* cpgdim = cart_dims;
+//                const int cart_grid_indx = i + cpgdim[0]*(j + cpgdim[1]*k);
+//                const int cell = cartesian_to_compressed[cart_grid_indx];
 
-                {
-                    double radius = connection.rw();
-                    const std::array<double, 3> cubical =
-                        wellhelpers::getCubeDim<3>(cell_to_faces, begin_face_centroids, cell);
+//                if (cell < 0) {
+//                    OPM_DEFLOG_THROW(std::runtime_error, "Cell with i,j,k indices " << i << ' ' << j << ' '
+//                              << k << " not found in grid (well = " << name() << ')', deferred_logger);
+//                }
 
-                    double re; // area equivalent radius of the grid block
-                    double perf_length; // the length of the well perforation
+//                {
+//                    double radius = connection.rw();
+//                    const std::array<double, 3> cubical =
+//                        wellhelpers::getCubeDim<3>(cell_to_faces, begin_face_centroids, cell);
 
-                    switch (connection.dir()) {
-                        case Opm::Connection::Direction::X:
-                            re = std::sqrt(cubical[1] * cubical[2] / M_PI);
-                            perf_length = cubical[0];
-                            break;
-                        case Opm::Connection::Direction::Y:
-                            re = std::sqrt(cubical[0] * cubical[2] / M_PI);
-                            perf_length = cubical[1];
-                            break;
-                        case Opm::Connection::Direction::Z:
-                            re = std::sqrt(cubical[0] * cubical[1] / M_PI);
-                            perf_length = cubical[2];
-                            break;
-                        default:
-                            OPM_DEFLOG_THROW(std::runtime_error, " Dirtecion of well is not supported ", deferred_logger);
-                    }
+//                    double re; // area equivalent radius of the grid block
+//                    double perf_length; // the length of the well perforation
 
-                    const double repR = std::sqrt(re * radius);
-                    perf_rep_radius_.push_back(repR);
-                    perf_length_.push_back(perf_length);
-                    bore_diameters_.push_back(2. * radius);
-                }
-            }
-        }
+//                    switch (connection.dir()) {
+//                        case Opm::Connection::Direction::X:
+//                            re = std::sqrt(cubical[1] * cubical[2] / M_PI);
+//                            perf_length = cubical[0];
+//                            break;
+//                        case Opm::Connection::Direction::Y:
+//                            re = std::sqrt(cubical[0] * cubical[2] / M_PI);
+//                            perf_length = cubical[1];
+//                            break;
+//                        case Opm::Connection::Direction::Z:
+//                            re = std::sqrt(cubical[0] * cubical[1] / M_PI);
+//                            perf_length = cubical[2];
+//                            break;
+//                        default:
+//                            OPM_DEFLOG_THROW(std::runtime_error, " Dirtecion of well is not supported ", deferred_logger);
+//                    }
+
+//                    const double repR = std::sqrt(re * radius);
+//                    perf_rep_radius_.push_back(repR);
+//                    perf_length_.push_back(perf_length);
+//                    bore_diameters_.push_back(2. * radius);
+//                }
+//            }
+//        }
     }
 
     template<typename TypeTag>
@@ -1420,6 +1421,9 @@ namespace Opm
             if (cells()[perfIdx] == cellIdx) {
                 for (int i = 0; i < RateVector::dimension; ++i) {
                     rates[i] += connectionRates_[perfIdx][i];
+                    //if (name() == "INJ" && i == 1)
+                        //rates[i] = 0.00184015;
+                    std::cout << name() << " " << rates[i] << std::endl;
                 }
             }
         }

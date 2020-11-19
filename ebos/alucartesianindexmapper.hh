@@ -188,8 +188,13 @@ public:
     /** \brief return index of the cells in the logical Cartesian grid */
     int cartesianIndex(const int compressedElementIndex) const
     {
-        assert(compressedElementIndex < compressedSize());
-        return cartesianIndex_[compressedElementIndex];
+        if(compressedElementIndex < compressedSize())
+            return cartesianIndex_[compressedElementIndex];
+
+
+        return 0;
+
+
     }
 
     /** \brief return index of the cells in the logical Cartesian grid */

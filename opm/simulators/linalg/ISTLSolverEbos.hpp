@@ -149,11 +149,11 @@ namespace Opm
             extractParallelGridInformationToISTL(simulator_.vanguard().grid(), parallelInformation_);
 
             // For some reason simulator_.model().elementMapper() is not initialized at this stage
-            // Hence const auto& elemMapper = simulator_.model().elementMapper(); does not work.
+            const auto& elemMapper = simulator_.model().elementMapper(); //does not work.
             // Set it up manually
-            using ElementMapper =
-                Dune::MultipleCodimMultipleGeomTypeMapper<GridView>;
-            ElementMapper elemMapper(simulator_.vanguard().grid().leafGridView(), Dune::mcmgElementLayout());
+            //using ElementMapper =
+            //    Dune::MultipleCodimMultipleGeomTypeMapper<GridView>;
+            //ElementMapper elemMapper(simulator_.vanguard().grid().leafGridView(), Dune::mcmgElementLayout());
             detail::findOverlapAndInterior(simulator_.vanguard().grid(), elemMapper, overlapRows_, interiorRows_);
 
             useWellConn_ = EWOMS_GET_PARAM(TypeTag, bool, MatrixAddWellContributions);
@@ -213,7 +213,7 @@ namespace Opm
                 makeOverlapRowsInvalid(getMatrix());
             }
             prepareFlexibleSolver();
-            firstcall = false;
+            firstcall = true;
         }
 
 

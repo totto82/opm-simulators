@@ -28,11 +28,20 @@
 #define EWOMS_ECL_ALU_GRID_VANGUARD_HH
 
 #include "eclbasevanguard.hh"
+#include "ecltransmissibility.hh"
 #include "alucartesianindexmapper.hh"
+#include "eclrestrictprolong.hh"
 
 #include <dune/alugrid/grid.hh>
 #include <dune/alugrid/common/fromtogridfactory.hh>
 #include <opm/grid/CpGrid.hpp>
+#include <opm/simulators/utils/ParallelEclipseState.hpp>
+#include <opm/simulators/utils/PropsCentroidsDataHandle.hpp>
+
+//#include <opm/grid/cpgrid/GridHelpers.hpp>
+//#include <opm/grid/polyhedralgrid/gridhelpersAlu.hh>
+#include <dune/grid/common/mcmgmapper.hh>
+
 
 namespace Opm {
 template <class TypeTag>
@@ -86,6 +95,8 @@ public:
     using Grid = GetPropType<TypeTag, Properties::Grid>;
     using EquilGrid = GetPropType<TypeTag, Properties::EquilGrid>;
     using GridView = GetPropType<TypeTag, Properties::GridView>;
+    //using DataHandle = typename CartesianIndexMapper::GlobalIndexContainer;
+    //typedef CopyRestrictProlong< Grid, DataHandle > RestrictProlongOperator;
 
 private:
     typedef Opm::AluCartesianIndexMapper<Grid> CartesianIndexMapper;
@@ -95,7 +106,7 @@ private:
 
 public:
     EclAluGridVanguard(Simulator& simulator)
-        : EclBaseVanguard<TypeTag>(simulator)
+        : EclBaseVanguard<TypeTag>(simulator), mpiRank()
     {
         this->callImplementationInit();
     }
@@ -163,6 +174,23 @@ public:
         grid().communicate(*dataHandle,
                            Dune::InteriorBorder_All_Interface,
                            Dune::ForwardCommunication );
+
+        if (grid().size(0))
+        {
+            globalTrans_.reset(new EclTransmissibility<TypeTag>(*this));
+            globalTrans_->update(false);
+        }
+    }
+
+
+    /*!
+     * \brief Free the memory occupied by the global transmissibility object.
+     *
+     * After writing the initial solution, this array should not be necessary anymore.
+     */
+    void releaseGlobalTransmissibilities()
+    {
+        globalTrans_.reset();
     }
 
     /*!
@@ -178,12 +206,34 @@ public:
     const EquilCartesianIndexMapper& equilCartesianIndexMapper() const
     { return *equilCartesianIndexMapper_; }
 
+    const EclTransmissibility<TypeTag>& globalTransmissibility() const
+    {
+        assert( globalTrans_ != nullptr );
+        return *globalTrans_;
+    }
+
+    void releaseGlobalTransmissibility()
+    {
+        globalTrans_.reset();
+    }
+
+    const std::vector<int>& globalCell()
+    {
+        return cartesianCellId_;
+    }
+
+    ///*!
+    // * \brief \copydoc FvBaseProblem::restrictProlongOperator
+    // */
+    //RestrictProlongOperator restrictProlongOperator()
+    //{
+    //    auto gridView = grid().leafGridView();
+    //    auto dataHandle = cartesianIndexMapper_->dataHandle(gridView);
+    //    return RestrictProlongOperator( dataHandle);
+    //}
 protected:
     void createGrids_()
     {
-        const auto& gridProps = this->eclState().get3DProperties();
-        const std::vector<double>& porv = gridProps.getDoubleGridProperty("PORV").getData();
-
         // we use separate grid objects: one for the calculation of the initial condition
         // via EQUIL and one for the actual simulation. The reason is that the EQUIL code
         // cannot cope with arbitrary Dune grids and is also allergic to distributed
@@ -193,12 +243,14 @@ protected:
         // create the EQUIL grid
         /////
         equilGrid_ = new EquilGrid();
-        equilGrid_->processEclipseFormat(&(this->eclState().getInputGrid()),
-                                         /*isPeriodic=*/false,
-                                         /*flipNormals=*/false,
-                                         /*clipZ=*/false,
-                                         porv);
-
+        equilGrid_->processEclipseFormat(mpiRank == 0 ? &this->eclState().getInputGrid()
+                                                 : nullptr,
+                                    /*isPeriodic=*/false,
+                                    /*flipNormals=*/false,
+                                    /*clipZ=*/false,
+                                    mpiRank == 0 ? this->eclState().fieldProps().porv(true)
+                                                 : std::vector<double>(),
+                                    this->eclState().getInputNNC());
         cartesianCellId_ = equilGrid_->globalCell();
 
         for (unsigned i = 0; i < dimension; ++i)
@@ -227,6 +279,9 @@ protected:
     std::array<int,dimension> cartesianDimension_;
     CartesianIndexMapper* cartesianIndexMapper_;
     EquilCartesianIndexMapper* equilCartesianIndexMapper_;
+    std::unique_ptr<EclTransmissibility<TypeTag> > globalTrans_;
+    int mpiRank;
+
 };
 
 } // namespace Opm

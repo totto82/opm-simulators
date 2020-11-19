@@ -650,7 +650,7 @@ protected:
             if (asImp_().grid().size(0)) //grid not loadbalanced yet for ebos!
             {
                 Opm::RelpermDiagnostics relpermDiagnostics;
-                relpermDiagnostics.diagnosis(*eclState_, asImp_().grid());
+                relpermDiagnostics.diagnosis(*eclState_, asImp_().equilGrid());
             }
         }
     }

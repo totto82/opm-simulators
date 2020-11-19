@@ -92,7 +92,7 @@ protected:
     inline void initializeConnections() override
     {
         const auto& eclState = this->ebos_simulator_.vanguard().eclState();
-        const auto& ugrid = this->ebos_simulator_.vanguard().grid();
+        const auto& ugrid = this->ebos_simulator_.vanguard().equilGrid();
         const auto& grid = eclState.getInputGrid();
 
         auto globalCellIdx = ugrid.globalCell();
