@@ -27,6 +27,7 @@ option(BUILD_EBOS "Build the research oriented ebos simulator?" ON)
 option(BUILD_EBOS_EXTENSIONS "Build the variants for various extensions of ebos by default?" OFF)
 option(BUILD_EBOS_DEBUG_EXTENSIONS "Build the ebos variants which are purely for debugging by default?" OFF)
 option(BUILD_FLOW_POLY_GRID "Build flow blackoil with polyhedral grid" OFF)
+option(BUILD_FLOW_ALU_GRID "Build flow blackoil with alu grid" OFF)
 
 if(SIBLING_SEARCH AND NOT opm-common_DIR)
   # guess the sibling dir
@@ -284,6 +285,24 @@ opm_add_test(flow_poly
   flow/flow_blackoil_poly.cpp
   $<TARGET_OBJECTS:moduleVersion>)
 target_compile_definitions(flow_poly PRIVATE USE_POLYHEDRALGRID)
+
+if (NOT BUILD_FLOW_ALU_GRID)
+  set(FLOW_ALUGRID_ONLY_DEFAULT_ENABLE_IF "FALSE")
+else()
+  set(FLOW_ALUGRID_ONLY_DEFAULT_ENABLE_IF "TRUE")
+endif()
+
+# the production oriented general-purpose ECL simulator
+opm_add_test(flow_alugrid
+  ONLY_COMPILE
+  ALWAYS_ENABLE
+  DEFAULT_ENABLE_IF ${FLOW_ALUGRID_ONLY_DEFAULT_ENABLE_IF}
+  DEPENDS opmsimulators
+  LIBRARIES opmsimulators
+  SOURCES
+  flow/flow_blackoil_alugrid.cpp
+  $<TARGET_OBJECTS:moduleVersion>)
+target_compile_definitions(flow_alugrid PRIVATE USE_ALUGRID)
 
 
 if (NOT BUILD_FLOW_VARIANTS)
