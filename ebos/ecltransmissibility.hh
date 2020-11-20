@@ -866,9 +866,10 @@ private:
 
             for (size_t dofIdx = 0; dofIdx < numElem; ++ dofIdx) {
                 permeability_[dofIdx] = 0.0;
-                permeability_[dofIdx][0][0] = permxData[dofIdx];
-                permeability_[dofIdx][1][1] = permyData[dofIdx];
-                permeability_[dofIdx][2][2] = permzData[dofIdx];
+                size_t inputDofIdx = vanguard_.gridIdxToEquilGridIdx(dofIdx);
+                permeability_[dofIdx][0][0] = permxData[inputDofIdx];
+                permeability_[dofIdx][1][1] = permyData[inputDofIdx];
+                permeability_[dofIdx][2][2] = permzData[inputDofIdx];
             }
 
             // for now we don't care about non-diagonal entries

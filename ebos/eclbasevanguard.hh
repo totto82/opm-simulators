@@ -327,9 +327,9 @@ public:
     EclBaseVanguard(Simulator& simulator)
         : ParentType(simulator)
     {
-        int myRank = 0;
+        myRank_ = 0;
 #if HAVE_MPI
-        MPI_Comm_rank(MPI_COMM_WORLD, &myRank);
+        MPI_Comm_rank(MPI_COMM_WORLD, &myRank_);
 #endif
 
         std::string fileName = EWOMS_GET_PARAM(TypeTag, std::string, EclDeckFileName);
@@ -402,7 +402,7 @@ public:
             parseContext_ = createParseContext();
         }
 
-        readDeck(myRank, fileName, deck_, eclState_, eclSchedule_,
+        readDeck(myRank_, fileName, deck_, eclState_, eclSchedule_,
                  eclSummaryConfig_, std::move(errorGuard), python,
                  std::move(parseContext_), /* initFromRestart = */ false,
                  /* checkDeck = */ enableExperiments);
@@ -646,13 +646,13 @@ protected:
         asImp_().updateOutputDir_();
         asImp_().finalizeInit_();
 
-        //if (enableExperiments) {
+        if (myRank_ == 0) {
             if (asImp_().equilGrid().size(0)) //grid not loadbalanced yet for ebos!
             {
                 Opm::RelpermDiagnostics relpermDiagnostics;
                 relpermDiagnostics.diagnosis(*eclState_, asImp_().equilGrid());
             }
-        //}
+        }
     }
 private:
     void updateOutputDir_()
@@ -718,6 +718,7 @@ private:
     Dune::EdgeWeightMethod edgeWeightsMethod_;
     bool ownersFirst_;
     bool serialPartitioning_;
+    int myRank_;
 
 protected:
     /*! \brief The cell centroids after loadbalance was called.

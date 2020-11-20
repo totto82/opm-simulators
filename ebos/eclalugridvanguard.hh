@@ -177,6 +177,23 @@ public:
         }
     }
 
+    template<class DataHandle>
+    void scatterData(DataHandle& handle) const
+    {
+
+    }
+
+    template<class DataHandle>
+    void gatherData(DataHandle& handle) const
+    {
+
+    }
+
+    template<class DataHandle, class InterfaceType, class CommunicationDirection>
+    void communicate (DataHandle& data, InterfaceType iftype, CommunicationDirection dir) const
+    {
+
+    }
 
     /*!
      * \brief Free the memory occupied by the global transmissibility object.
@@ -217,6 +234,15 @@ public:
         return cartesianCellId_;
     }
 
+    unsigned int gridEquilIdxToGridIdx(unsigned int elemIndex) const {
+        return equilGridToGrid_[elemIndex];
+    }
+
+    unsigned int gridIdxToEquilGridIdx(unsigned int elemIndex) const {
+        return ordering_[elemIndex];
+    }
+
+
 protected:
     void createGrids_()
     {
@@ -248,7 +274,13 @@ protected:
         // create the simulation grid
         /////
         Dune::FromToGridFactory<Grid> factory;
-        grid_ = factory.convert(*equilGrid_, cartesianCellId_);
+        grid_ = factory.convert(*equilGrid_, cartesianCellId_, ordering_);
+
+        equilGridToGrid_.resize(ordering_.size());
+        for (size_t index = 0; index<ordering_.size(); ++index) {
+            equilGridToGrid_[ordering_[index]] = index;
+        }
+
 
         cartesianIndexMapper_ =
             new CartesianIndexMapper(*grid_, cartesianDimension_, cartesianCellId_);
@@ -262,6 +294,8 @@ protected:
     Grid* grid_;
     EquilGrid* equilGrid_;
     std::vector<int> cartesianCellId_;
+    std::vector<unsigned int> ordering_;
+    std::vector<unsigned int> equilGridToGrid_;
     std::array<int,dimension> cartesianDimension_;
     CartesianIndexMapper* cartesianIndexMapper_;
     EquilCartesianIndexMapper* equilCartesianIndexMapper_;

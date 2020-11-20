@@ -372,7 +372,7 @@ public:
             this->eclOutputModule_.addRftDataToWells(localWellData, reportStepNum);
         }
 
-        if (this->collectToIORank_.isParallel()) {
+        if (this->collectToIORank_.isParallel() || this->collectToIORank_.doesNeedReordering() ) {
             collectToIORank_.collect(localCellData, eclOutputModule_.getBlockData(),
                                      localWellData, localGroupAndNetworkData);
         }
@@ -425,6 +425,7 @@ public:
             Opm::Action::State& actionState = simulator_.vanguard().actionState();
             auto restartValues = loadParallelRestart(eclIO_.get(), actionState, summaryState, solutionKeys, extraKeys,
                                                      gridView.grid().comm());
+            const auto& cartMapper = simulator_.vanguard().cartesianIndexMapper();
             for (unsigned elemIdx = 0; elemIdx < numElements; ++elemIdx) {
                 unsigned globalIdx = collectToIORank_.localIdxToGlobalIdx(elemIdx);
                 eclOutputModule_.setRestart(restartValues.solution, elemIdx, globalIdx);
@@ -525,6 +526,9 @@ private:
                 int gc1 = std::min(cartIdx1, cartIdx2);
                 int gc2 = std::max(cartIdx1, cartIdx2);
 
+                c1 = simulator_.vanguard().gridEquilIdxToGridIdx(c1);
+                c2 = simulator_.vanguard().gridEquilIdxToGridIdx(c2);
+
                 if (gc2 - gc1 == 1 && cartDims[0] > 1 ) {
                     tranx.data[gc1] = globalTrans->transmissibility(c1, c2);
                     continue; // skip other if clauses as they are false, last one needs some computation
@@ -619,6 +623,9 @@ private:
                     std::swap(cc1, cc2);
 
                 auto cellDiff = cc2 - cc1;
+
+                c1 = simulator_.vanguard().gridEquilIdxToGridIdx(c1);
+                c2 = simulator_.vanguard().gridEquilIdxToGridIdx(c2);
 
                 if (cellDiff != 1 &&
                     cellDiff != nx &&
@@ -740,10 +747,12 @@ private:
     {
         const Scalar curTime = simulator_.time() + simulator_.timeStepSize();
         const Scalar nextStepSize = simulator_.problem().nextTimeStepSize();
-        const auto isParallel = this->collectToIORank_.isParallel();
+        const bool isParallel = this->collectToIORank_.isParallel();
+        const bool needsReordring = this->collectToIORank_.doesNeedReordering();
+
 
         Opm::RestartValue restartValue {
-            isParallel ? this->collectToIORank_.globalCellData()
+            (isParallel || needsReordring )? this->collectToIORank_.globalCellData()
                        : std::move(localCellData),
 
             isParallel ? this->collectToIORank_.globalWellData()

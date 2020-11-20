@@ -951,6 +951,8 @@ public:
         if (enableEclOutput_)
             eclWriter_->writeInit();
 
+        //eclWriter_->writeOutput(false);
+
         simulator.vanguard().releaseGlobalTransmissibilities();
 
         // after finishing the initialization and writing the initial solution, we move

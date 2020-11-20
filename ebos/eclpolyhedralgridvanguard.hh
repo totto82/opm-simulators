@@ -146,6 +146,18 @@ public:
     void loadBalance()
     { /* do nothing: PolyhedralGrid is not parallel! */ }
 
+    template<class DataHandle>
+    void scatterData(DataHandle& handle) const
+    {
+        grid().scatterData(handle);
+    }
+
+    template<class DataHandle>
+    void gatherData(DataHandle& handle) const
+    {
+        grid().gatherData(handle);
+    }
+
     /*!
      * \brief Returns the object which maps a global element index of the simulation grid
      *        to the corresponding element index of the logically Cartesian index.
