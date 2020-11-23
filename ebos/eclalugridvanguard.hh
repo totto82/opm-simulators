@@ -108,7 +108,7 @@ public:
 
     ~EclAluGridVanguard()
     {
-        delete cartesianIndexMapper_;
+        //delete cartesianIndexMapper_;
         delete equilCartesianIndexMapper_;
         delete grid_;
         delete equilGrid_;
@@ -175,6 +175,11 @@ public:
             globalTrans_.reset(new EclTransmissibility<TypeTag>(*this));
             globalTrans_->update(false);
         }
+
+        auto& parallelEclState = dynamic_cast<ParallelEclipseState&>(this->eclState());
+        // reset cartesian index mapper for auto creation of field properties
+        parallelEclState.resetCartesianMapper(cartesianIndexMapper_.get());
+        parallelEclState.switchToDistributedProps();
     }
 
     template<class DataHandle>
@@ -282,8 +287,7 @@ protected:
         }
 
 
-        cartesianIndexMapper_ =
-            new CartesianIndexMapper(*grid_, cartesianDimension_, cartesianCellId_);
+        cartesianIndexMapper_.reset(new CartesianIndexMapper(*grid_, cartesianDimension_, cartesianCellId_));
     }
 
     void filterConnections_()
@@ -297,7 +301,7 @@ protected:
     std::vector<unsigned int> ordering_;
     std::vector<unsigned int> equilGridToGrid_;
     std::array<int,dimension> cartesianDimension_;
-    CartesianIndexMapper* cartesianIndexMapper_;
+    std::unique_ptr<CartesianIndexMapper> cartesianIndexMapper_;
     EquilCartesianIndexMapper* equilCartesianIndexMapper_;
     std::unique_ptr<EclTransmissibility<TypeTag> > globalTrans_;
     int mpiRank;

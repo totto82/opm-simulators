@@ -247,8 +247,8 @@ void ParallelEclipseState::switchToGlobalProps()
 void ParallelEclipseState::switchToDistributedProps()
 {
     const auto& comm = Dune::MPIHelper::getCollectiveCommunication();
-    if (comm.size() == 1) // No need for the parallel frontend
-        return;
+    //if (comm.size() == 1) // No need for the parallel frontend
+    //    return;
 
     m_parProps = true;
 }
