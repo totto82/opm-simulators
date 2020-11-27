@@ -119,10 +119,12 @@ namespace Opm
     init(const PhaseUsage* phase_usage_arg,
          const std::vector<double>& /* depth_arg */,
          const double gravity_arg,
-         const int /* num_cells */)
+         const int /* num_cells */,
+         const std::vector< Scalar >& B_avg)
     {
         phase_usage_ = phase_usage_arg;
         gravity_ = gravity_arg;
+        B_avg_ = B_avg;
     }
 
 
@@ -914,6 +916,7 @@ namespace Opm
                                 WellTestState& well_test_state,
                                 Opm::DeferredLogger& deferred_logger) const
     {
+        std::cout << name() << " " << isOperable() << " " << wellIsStopped_ << std::endl;
         if (!isOperable() || wellIsStopped_) {
             if (well_test_state.hasWellClosed(name(), WellTestConfig::Reason::ECONOMIC) ||
                 well_test_state.hasWellClosed(name(), WellTestConfig::Reason::PHYSICAL) ) {

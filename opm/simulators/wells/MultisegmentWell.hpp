@@ -111,7 +111,8 @@ namespace Opm
         virtual void init(const PhaseUsage* phase_usage_arg,
                           const std::vector<double>& depth_arg,
                           const double gravity_arg,
-                          const int num_cells) override;
+                          const int num_cells,
+                          const std::vector< Scalar >& B_avg) override;
 
 
         virtual void initPrimaryVariablesEvaluation() const override;
@@ -313,6 +314,15 @@ namespace Opm
 
         std::vector<std::vector<EvalWell>> segment_phase_viscosities_;
 
+        // the vectors used to describe the inflow performance relationship (IPR)
+        // Q = IPR_A - BHP * IPR_B
+        // TODO: it minght need to go to WellInterface, let us implement it in StandardWell first
+        // it is only updated and used for producers for now
+        mutable std::vector<double> ipr_a_;
+        mutable std::vector<double> ipr_b_;
+
+        bool changed_to_stopped_this_step_ = false;
+
 
         void initMatrixAndVectors(const int num_cells) const;
 
@@ -511,6 +521,22 @@ namespace Opm
         void assembleValvePressureEq(const int seg, WellState& well_state) const;
 
         EvalWell pressureDropValve(const int seg) const;
+
+        // check whether the well is operable under the current reservoir condition
+        // mostly related to BHP limit and THP limit
+        void updateWellOperability(const Simulator& ebos_simulator,
+                                   const WellState& well_state,
+                                   Opm::DeferredLogger& deferred_logger);
+
+        // check whether the well is operable under BHP limit with current reservoir condition
+        void checkOperabilityUnderBHPLimitProducer(const WellState& well_state, const Simulator& ebos_simulator, Opm::DeferredLogger& deferred_logger);
+
+        // check whether the well is operable under THP limit with current reservoir condition
+        void checkOperabilityUnderTHPLimitProducer(const Simulator& ebos_simulator, const WellState& well_state, Opm::DeferredLogger& deferred_logger);
+
+        // updating the inflow based on the current reservoir condition
+        void updateIPR(const Simulator& ebos_simulator, Opm::DeferredLogger& deferred_logger) const;
+
     };
 
 }

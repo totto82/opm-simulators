@@ -156,7 +156,8 @@ namespace Opm
         virtual void init(const PhaseUsage* phase_usage_arg,
                           const std::vector<double>& depth_arg,
                           const double gravity_arg,
-                          const int num_cells);
+                          const int num_cells,
+                          const std::vector< Scalar >& B_avg);
 
         virtual void initPrimaryVariablesEvaluation() const = 0;
 
@@ -406,6 +407,8 @@ namespace Opm
         double wsolvent_;
 
         std::optional<double> dynamic_thp_limit_;
+
+        std::vector< Scalar > B_avg_;
 
         const PhaseUsage& phaseUsage() const;
 

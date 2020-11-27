@@ -54,6 +54,8 @@ namespace Opm
     , upwinding_segments_(numberOfSegments(), 0)
     , segment_phase_fractions_(numberOfSegments(), std::vector<EvalWell>(num_components_, 0.0)) // number of phase here?
     , segment_phase_viscosities_(numberOfSegments(), std::vector<EvalWell>(num_components_, 0.0)) // number of phase here?
+    , ipr_a_(number_of_phases_)
+    , ipr_b_(number_of_phases_)
     {
         // not handling solvent or polymer for now with multisegment well
         if (has_solvent) {
@@ -132,9 +134,10 @@ namespace Opm
     init(const PhaseUsage* phase_usage_arg,
          const std::vector<double>& depth_arg,
          const double gravity_arg,
-         const int num_cells)
+         const int num_cells,
+         const std::vector< Scalar >& B_avg)
     {
-        Base::init(phase_usage_arg, depth_arg, gravity_arg, num_cells);
+        Base::init(phase_usage_arg, depth_arg, gravity_arg, num_cells, B_avg);
 
         // TODO: for StandardWell, we need to update the perf depth here using depth_arg.
         // for MultisegmentWell, it is much more complicated.
@@ -621,6 +624,8 @@ namespace Opm
     MultisegmentWell<TypeTag>::
     apply(const BVector& x, BVector& Ax) const
     {
+        if (!this->isOperable() && !this->wellIsStopped()) return;
+
         if ( param_.matrix_add_well_contributions_ )
         {
             // Contributions are already in the matrix itself
@@ -646,6 +651,8 @@ namespace Opm
     MultisegmentWell<TypeTag>::
     apply(BVector& r) const
     {
+        if (!this->isOperable() && !this->wellIsStopped()) return;
+
         // invDrw_ = duneD^-1 * resWell_
         const BVectorWell invDrw = mswellhelpers::applyUMFPack(duneD_, duneDSolver_, resWell_);
         // r = r - duneC_^T * invDrw
@@ -723,6 +730,8 @@ namespace Opm
                                           WellState& well_state,
                                           Opm::DeferredLogger& deferred_logger) const
     {
+        if (!this->isOperable() && !this->wellIsStopped()) return;
+
         BVectorWell xw(1);
         recoverSolutionWell(x, xw);
         updateWellState(xw, well_state, deferred_logger);
@@ -829,8 +838,13 @@ namespace Opm
     {
         // creating a copy of the well itself, to avoid messing up the explicit informations
         // during this copy, the only information not copied properly is the well controls
+        std::cout << "start copy " << std::endl;
+
         MultisegmentWell<TypeTag> well_copy(*this);
         well_copy.debug_cost_counter_ = 0;
+        
+        std::cout << "finish copy " << std::endl;
+
 
         // store a copy of the well state, we don't want to update the real well state
         WellState well_state_copy = ebosSimulator.problem().wellModel().wellState();
@@ -853,11 +867,16 @@ namespace Opm
             well_state_copy.currentProductionControls()[index_of_well_] = Well::ProducerCMode::BHP;
         }
         well_state_copy.bhp()[well_copy.index_of_well_] = bhp;
+                std::cout << "calc explicit " << std::endl;
+
         well_copy.calculateExplicitQuantities(ebosSimulator, well_state_copy, deferred_logger);
         const double dt = ebosSimulator.timeStepSize();
+        std::cout << "start iter " << std::endl;
         // iterate to get a solution at the given bhp.
         well_copy.iterateWellEqWithControl(ebosSimulator, B_avg, dt, inj_controls, prod_controls, well_state_copy,
                                            deferred_logger);
+        std::cout << "finish iter " << std::endl;
+
 
         // compute the potential and store in the flux vector.
         well_flux.clear();
@@ -929,6 +948,7 @@ namespace Opm
     {
         // TODO: to test using rate conversion coefficients to see if it will be better than
         // this default one
+        if (!this->isOperable() && !this->wellIsStopped()) return;
 
         const Well& well = Base::wellEcl();
 
@@ -1002,6 +1022,8 @@ namespace Opm
     MultisegmentWell<TypeTag>::
     recoverSolutionWell(const BVector& x, BVectorWell& xw) const
     {
+        if (!this->isOperable() && !this->wellIsStopped()) return;
+
         BVectorWell resWell = resWell_;
         // resWell = resWell - B * x
         duneB_.mmv(x, resWell);
@@ -1018,6 +1040,8 @@ namespace Opm
     MultisegmentWell<TypeTag>::
     solveEqAndUpdateWellState(WellState& well_state, Opm::DeferredLogger& deferred_logger)
     {
+        if (!this->isOperable() && !this->wellIsStopped()) return;
+
         // We assemble the well equations, then we check the convergence,
         // which is why we do not put the assembleWellEq here.
         const BVectorWell dx_well = mswellhelpers::applyUMFPack(duneD_, duneDSolver_, resWell_);
@@ -1110,6 +1134,8 @@ namespace Opm
                     Opm::DeferredLogger& deferred_logger,
                     const double relaxation_factor) const
     {
+        if (!this->isOperable() && !this->wellIsStopped()) return;
+
         const double dFLimit = param_.dwell_fraction_max_;
         const double max_pressure_change = param_.max_pressure_change_ms_wells_;
         const std::vector<std::array<double, numWellEq> > old_primary_variables = primary_variables_;
@@ -1169,9 +1195,17 @@ namespace Opm
                                 Opm::DeferredLogger& deferred_logger)
     {
         updatePrimaryVariables(well_state, deferred_logger);
+                std::cout << "updatePrimaryVariables done " << std::endl;
+
         initPrimaryVariablesEvaluation();
+                std::cout << "initPrimaryVariablesEvaluation done " << std::endl;
+
         computePerfCellPressDiffs(ebosSimulator);
+                std::cout << "computePerfCellPressDiffs done " << std::endl;
+
         computeInitialSegmentFluids(ebosSimulator);
+                std::cout << "computeInitialSegmentFluids done " << std::endl;
+
     }
 
 
@@ -2371,8 +2405,8 @@ namespace Opm
     template <typename TypeTag>
     void
     MultisegmentWell<TypeTag>::
-    checkWellOperability(const Simulator& /* ebos_simulator */,
-                         const WellState& /* well_state */,
+    checkWellOperability(const Simulator& ebos_simulator,
+                         const WellState& well_state,
                          Opm::DeferredLogger& deferred_logger)
     {
         const bool checkOperability = EWOMS_GET_PARAM(TypeTag, bool, EnableWellOperabilityCheck);
@@ -2389,9 +2423,262 @@ namespace Opm
             return;
         }
 
-        const std::string msg = "Support of well operability checking for multisegment wells is not implemented "
-                                "yet, checkWellOperability() for " + name() + " will do nothing";
-        deferred_logger.warning("NO_OPERATABILITY_CHECKING_MS_WELLS", msg);
+        if (this->wellIsStopped() && !changed_to_stopped_this_step_) {
+            return;
+        }
+
+        const bool old_well_operable = this->operability_status_.isOperable();
+        //try {
+        updateWellOperability(ebos_simulator, well_state, deferred_logger);
+        //} catch (...) {
+
+        //}
+
+        const bool well_operable = this->operability_status_.isOperable();
+
+        if (!well_operable && old_well_operable) {
+            if (well_ecl_.getAutomaticShutIn()) {
+                deferred_logger.info(" well " + name() + " gets SHUT during iteration ");
+            } else {
+                if (!this->wellIsStopped()) {
+                    deferred_logger.info(" well " + name() + " gets STOPPED during iteration ");
+                    this->stopWell();
+                    changed_to_stopped_this_step_ = true;
+                }
+            }
+        } else if (well_operable && !old_well_operable) {
+            deferred_logger.info(" well " + name() + " gets REVIVED during iteration ");
+            this->openWell();
+            changed_to_stopped_this_step_ = false;
+        }
+    }
+
+    template<typename TypeTag>
+    void
+    MultisegmentWell<TypeTag>::
+    updateWellOperability(const Simulator& ebos_simulator,
+                          const WellState& well_state,
+                          Opm::DeferredLogger& deferred_logger)
+    {
+        this->operability_status_.reset();
+
+        std::cout << "update well operability " << name() << " " << this->operability_status_.isOperable() << std::endl;
+        updateIPR(ebos_simulator, deferred_logger);
+        std::cout << "updateIPR done " << std::endl;
+
+
+        // checking the BHP limit related
+        checkOperabilityUnderBHPLimitProducer(well_state, ebos_simulator, deferred_logger);
+
+        std::cout << "check well operability bhp done " << name() << " " << this->operability_status_.isOperable()<< std::endl;
+
+        const auto& summaryState = ebos_simulator.vanguard().summaryState();
+
+        // checking whether the well can operate under the THP constraints.
+        if (this->wellHasTHPConstraints(summaryState)) {
+            checkOperabilityUnderTHPLimitProducer(ebos_simulator, well_state, deferred_logger);
+        }
+        std::cout << "check well operability thp done " << name() << " " << this->operability_status_.isOperable()<< std::endl;
+
+    }
+
+    template<typename TypeTag>
+    void
+    MultisegmentWell<TypeTag>::
+    checkOperabilityUnderBHPLimitProducer(const WellState& well_state, const Simulator& ebos_simulator, Opm::DeferredLogger& deferred_logger)
+    {
+        const auto& summaryState = ebos_simulator.vanguard().summaryState();
+        const double bhp_limit = Base::mostStrictBhpFromBhpLimits(summaryState);
+        // Crude but works: default is one atmosphere.
+        // TODO: a better way to detect whether the BHP is defaulted or not
+        const bool bhp_limit_not_defaulted = bhp_limit > 1.5 * unit::barsa;
+        if ( bhp_limit_not_defaulted || !this->wellHasTHPConstraints(summaryState) ) {
+            // if the BHP limit is not defaulted or the well does not have a THP limit
+            // we need to check the BHP limit
+
+            for (int p = 0; p < number_of_phases_; ++p) {
+                const double temp = ipr_a_[p] - ipr_b_[p] * bhp_limit;
+                std::cout << name() << " " << p << " " << temp << " " << ipr_a_[p] << " " << ipr_b_[p] << " " << bhp_limit <<std::endl;
+                if (temp < 0.) {
+                    this->operability_status_.operable_under_only_bhp_limit = false;
+                    break;
+                }
+            }
+
+            // checking whether running under BHP limit will violate THP limit
+            if (this->operability_status_.operable_under_only_bhp_limit && this->wellHasTHPConstraints(summaryState)) {
+                // option 1: calculate well rates based on the BHP limit.
+                // option 2: stick with the above IPR curve
+                // we use IPR here
+                std::vector<double> well_rates_bhp_limit;
+                std::cout << Base::B_avg_.size() << std::endl;
+                computeWellRatesWithBhp(ebos_simulator, Base::B_avg_, bhp_limit, well_rates_bhp_limit, deferred_logger);
+                std::cout << "computeWellRatesWithBhp done" << std::endl;
+
+                const double thp = calculateThpFromBhp(well_rates_bhp_limit, bhp_limit, deferred_logger);
+                std::cout << "calculateThpFromBhp done" << std::endl;
+
+                const double thp_limit = this->getTHPConstraint(summaryState);
+
+                if (thp < thp_limit) {
+                    this->operability_status_.obey_thp_limit_under_bhp_limit = false;
+                }
+            }
+        } else {
+            // defaulted BHP and there is a THP constraint
+            // default BHP limit is about 1 atm.
+            // when applied the hydrostatic pressure correction dp,
+            // most likely we get a negative value (bhp + dp)to search in the VFP table,
+            // which is not desirable.
+            // we assume we can operate under defaulted BHP limit and will violate the THP limit
+            // when operating under defaulted BHP limit.
+            this->operability_status_.operable_under_only_bhp_limit = true;
+            this->operability_status_.obey_thp_limit_under_bhp_limit = false;
+        }
+    }
+
+
+
+    template<typename TypeTag>
+    void
+    MultisegmentWell<TypeTag>::
+    updateIPR(const Simulator& ebos_simulator, Opm::DeferredLogger& deferred_logger) const
+    {
+        // TODO: not handling solvent related here for now
+
+        // TODO: it only handles the producers for now
+        // the formular for the injectors are not formulated yet
+        if (this->isInjector()) {
+            return;
+        }
+
+        // initialize all the values to be zero to begin with
+        std::fill(ipr_a_.begin(), ipr_a_.end(), 0.);
+        std::fill(ipr_b_.begin(), ipr_b_.end(), 0.);
+
+        const int nseg = numberOfSegments();
+        double seg_bhp_press_diff = 0;
+        double ref_depth = ref_depth_;
+        for (int seg = 0; seg < nseg; ++seg) {
+            // calculating the perforation rate for each perforation that belongs to this segment
+            const double segment_depth = segmentSet()[seg].depth();
+            const double dp = wellhelpers::computeHydrostaticCorrection(ref_depth, segment_depth, segment_densities_[seg].value(), gravity_);
+            ref_depth = segment_depth;
+            seg_bhp_press_diff += dp;
+            for (const int perf : segment_perforations_[seg]) {
+            //std::vector<EvalWell> mob(num_components_, {numWellEq_ + numEq, 0.0});
+            std::vector<EvalWell> mob(num_components_, 0.0);
+
+            // TODO: mabye we should store the mobility somewhere, so that we only need to calculate it one per iteration
+            getMobility(ebos_simulator, perf, mob);
+
+            const int cell_idx = well_cells_[perf];
+            const auto& int_quantities = *(ebos_simulator.model().cachedIntensiveQuantities(cell_idx, /*timeIdx=*/ 0));
+            const auto& fs = int_quantities.fluidState();
+            // the pressure of the reservoir grid block the well connection is in
+                    // pressure difference between the segment and the perforation
+            const double perf_seg_press_diff = gravity_ * segment_densities_[seg].value() * perforation_segment_depth_diffs_[perf];
+            // pressure difference between the perforation and the grid cell
+            const double cell_perf_press_diff = cell_perforation_pressure_diffs_[perf];
+            const double pressure_cell = fs.pressure(FluidSystem::oilPhaseIdx).value();
+
+            // calculating the b for the connection
+            std::vector<double> b_perf(num_components_);
+            for (size_t phase = 0; phase < FluidSystem::numPhases; ++phase) {
+                if (!FluidSystem::phaseIsActive(phase)) {
+                    continue;
+                }
+                const unsigned comp_idx = Indices::canonicalToActiveComponentIndex(FluidSystem::solventComponentIndex(phase));
+                b_perf[comp_idx] = fs.invB(phase).value();
+            }
+
+            // the pressure difference between the connection and BHP
+            const double h_perf = cell_perf_press_diff + perf_seg_press_diff + seg_bhp_press_diff;
+            const double pressure_diff = pressure_cell - h_perf;
+
+            // Let us add a check, since the pressure is calculated based on zero value BHP
+            // it should not be negative anyway. If it is negative, we might need to re-formulate
+            // to taking into consideration the crossflow here.
+            if (pressure_diff <= 0.) {
+                deferred_logger.warning("NON_POSITIVE_DRAWDOWN_IPR",
+                                "non-positive drawdown found when updateIPR for well " + name());
+            }
+
+            // the well index associated with the connection
+            const double tw_perf = well_index_[perf]*ebos_simulator.problem().template rockCompTransMultiplier<double>(int_quantities, cell_idx);
+
+            // TODO: there might be some indices related problems here
+            // phases vs components
+            // ipr values for the perforation
+            std::vector<double> ipr_a_perf(ipr_a_.size());
+            std::vector<double> ipr_b_perf(ipr_b_.size());
+            for (int p = 0; p < number_of_phases_; ++p) {
+                const double tw_mob = tw_perf * mob[p].value() * b_perf[p];
+                ipr_a_perf[p] += tw_mob * pressure_diff;
+                ipr_b_perf[p] += tw_mob;
+            }
+
+            // we need to handle the rs and rv when both oil and gas are present
+            if (FluidSystem::phaseIsActive(FluidSystem::oilPhaseIdx) && FluidSystem::phaseIsActive(FluidSystem::gasPhaseIdx)) {
+                const unsigned oil_comp_idx = Indices::canonicalToActiveComponentIndex(FluidSystem::oilCompIdx);
+                const unsigned gas_comp_idx = Indices::canonicalToActiveComponentIndex(FluidSystem::gasCompIdx);
+                const double rs = (fs.Rs()).value();
+                const double rv = (fs.Rv()).value();
+
+                const double dis_gas_a = rs * ipr_a_perf[oil_comp_idx];
+                const double vap_oil_a = rv * ipr_a_perf[gas_comp_idx];
+
+                ipr_a_perf[gas_comp_idx] += dis_gas_a;
+                ipr_a_perf[oil_comp_idx] += vap_oil_a;
+
+                const double dis_gas_b = rs * ipr_b_perf[oil_comp_idx];
+                const double vap_oil_b = rv * ipr_b_perf[gas_comp_idx];
+
+                ipr_b_perf[gas_comp_idx] += dis_gas_b;
+                ipr_b_perf[oil_comp_idx] += vap_oil_b;
+            }
+
+            for (int p = 0; p < number_of_phases_; ++p) {
+                // TODO: double check the indices here
+                ipr_a_[ebosCompIdxToFlowCompIdx(p)] += ipr_a_perf[p];
+                ipr_b_[ebosCompIdxToFlowCompIdx(p)] += ipr_b_perf[p];
+            }
+            }
+        }
+    }
+
+    template<typename TypeTag>
+    void
+    MultisegmentWell<TypeTag>::
+    checkOperabilityUnderTHPLimitProducer(const Simulator& ebos_simulator, const WellState& well_state, Opm::DeferredLogger& deferred_logger)
+    {
+        const auto& summaryState = ebos_simulator.vanguard().summaryState();
+        const auto obtain_bhp = computeBhpAtThpLimitProd(ebos_simulator, Base::B_avg_, summaryState, deferred_logger);
+
+        if (obtain_bhp) {
+            this->operability_status_.can_obtain_bhp_with_thp_limit = true;
+
+            const double  bhp_limit = Base::mostStrictBhpFromBhpLimits(summaryState);
+            this->operability_status_.obey_bhp_limit_with_thp_limit = (*obtain_bhp >= bhp_limit);
+
+            const double thp_limit = this->getTHPConstraint(summaryState);
+            if (*obtain_bhp < thp_limit) {
+                const std::string msg = " obtained bhp " + std::to_string(unit::convert::to(*obtain_bhp, unit::barsa))
+                                        + " bars is SMALLER than thp limit "
+                                        + std::to_string(unit::convert::to(thp_limit, unit::barsa))
+                                        + " bars as a producer for well " + name();
+                deferred_logger.debug(msg);
+            }
+        } else {
+            //this->operability_status_.can_obtain_bhp_with_thp_limit = false;
+            //this->operability_status_.obey_bhp_limit_with_thp_limit = false;
+            if (!this->wellIsStopped()) {
+                const double thp_limit = this->getTHPConstraint(summaryState);
+                deferred_logger.debug(" could not find bhp value at thp limit "
+                                      + std::to_string(unit::convert::to(thp_limit, unit::barsa))
+                                      + " bar for well " + name() + ", the well might need to be closed ");
+            }
+        }
     }
 
 
@@ -2494,6 +2781,8 @@ namespace Opm
                              WellState& well_state,
                              Opm::DeferredLogger& deferred_logger)
     {
+        if (!this->isOperable() && !this->wellIsStopped()) return true;
+
         const int max_iter_number = param_.max_inner_iter_ms_wells_;
         const WellState well_state0 = well_state;
         const std::vector<Scalar> residuals0 = getWellResiduals(B_avg);
@@ -2616,6 +2905,11 @@ namespace Opm
 
         // calculate the fluid properties needed.
         computeSegmentFluidProperties(ebosSimulator);
+        
+        checkWellOperability(ebosSimulator, well_state, deferred_logger);
+        
+        if (!this->isOperable() && !this->wellIsStopped()) return;
+
 
         // clear all entries
         duneB_ = 0.0;
