@@ -264,6 +264,8 @@ namespace Opm
                    Opm::DeferredLogger& deferred_logger)
     {
 
+        checkWellOperability(ebosSimulator, well_state, deferred_logger);
+
         const bool use_inner_iterations = param_.use_inner_iterations_ms_wells_;
         if (use_inner_iterations) {
             this->iterateWellEquations(ebosSimulator, B_avg, dt, well_state, deferred_logger);
@@ -838,14 +840,9 @@ namespace Opm
     {
         // creating a copy of the well itself, to avoid messing up the explicit informations
         // during this copy, the only information not copied properly is the well controls
-        std::cout << "start copy " << std::endl;
-
         MultisegmentWell<TypeTag> well_copy(*this);
         well_copy.debug_cost_counter_ = 0;
         
-        std::cout << "finish copy " << std::endl;
-
-
         // store a copy of the well state, we don't want to update the real well state
         WellState well_state_copy = ebosSimulator.problem().wellModel().wellState();
 
@@ -867,16 +864,12 @@ namespace Opm
             well_state_copy.currentProductionControls()[index_of_well_] = Well::ProducerCMode::BHP;
         }
         well_state_copy.bhp()[well_copy.index_of_well_] = bhp;
-                std::cout << "calc explicit " << std::endl;
 
         well_copy.calculateExplicitQuantities(ebosSimulator, well_state_copy, deferred_logger);
         const double dt = ebosSimulator.timeStepSize();
-        std::cout << "start iter " << std::endl;
         // iterate to get a solution at the given bhp.
         well_copy.iterateWellEqWithControl(ebosSimulator, B_avg, dt, inj_controls, prod_controls, well_state_copy,
                                            deferred_logger);
-        std::cout << "finish iter " << std::endl;
-
 
         // compute the potential and store in the flux vector.
         well_flux.clear();
@@ -1195,16 +1188,12 @@ namespace Opm
                                 Opm::DeferredLogger& deferred_logger)
     {
         updatePrimaryVariables(well_state, deferred_logger);
-                std::cout << "updatePrimaryVariables done " << std::endl;
 
         initPrimaryVariablesEvaluation();
-                std::cout << "initPrimaryVariablesEvaluation done " << std::endl;
 
         computePerfCellPressDiffs(ebosSimulator);
-                std::cout << "computePerfCellPressDiffs done " << std::endl;
 
         computeInitialSegmentFluids(ebosSimulator);
-                std::cout << "computeInitialSegmentFluids done " << std::endl;
 
     }
 
@@ -2511,7 +2500,6 @@ namespace Opm
                 // option 2: stick with the above IPR curve
                 // we use IPR here
                 std::vector<double> well_rates_bhp_limit;
-                std::cout << Base::B_avg_.size() << std::endl;
                 computeWellRatesWithBhp(ebos_simulator, Base::B_avg_, bhp_limit, well_rates_bhp_limit, deferred_logger);
                 std::cout << "computeWellRatesWithBhp done" << std::endl;
 
@@ -2900,16 +2888,13 @@ namespace Opm
                                    Opm::DeferredLogger& deferred_logger)
     {
 
+        if (!this->isOperable() && !this->wellIsStopped()) return;
+
         // update the upwinding segments
         updateUpwindingSegments();
 
         // calculate the fluid properties needed.
         computeSegmentFluidProperties(ebosSimulator);
-        
-        checkWellOperability(ebosSimulator, well_state, deferred_logger);
-        
-        if (!this->isOperable() && !this->wellIsStopped()) return;
-
 
         // clear all entries
         duneB_ = 0.0;
