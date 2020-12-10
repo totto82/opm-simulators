@@ -530,6 +530,19 @@ namespace Opm
             const int seg_index = top_segment_index + seg;
             well_state.segPress()[seg_index] *= bhp/unscaled_top_seg_pressure;
         }
+        for (int phase = 0; phase < number_of_phases_; ++phase) {
+            const double well_phase_rate = well_state.wellRates()[number_of_phases_*index_of_well_ + phase];
+            const double unscaled_top_seg_rate = well_state.segRates()[number_of_phases_*top_segment_index + phase];
+            if (std::abs(unscaled_top_seg_rate) > 1e-6)
+            {
+                for (int seg = 0; seg < numberOfSegments(); ++seg) {
+                    const int seg_index = top_segment_index + seg;
+                    well_state.segRates()[number_of_phases_*seg_index + phase] *= well_phase_rate/unscaled_top_seg_rate;
+                }
+            }
+        }
+
+        return;
 
         double sumTw = 0;
         for (int perf = 0; perf < number_of_perforations_; ++perf) {
