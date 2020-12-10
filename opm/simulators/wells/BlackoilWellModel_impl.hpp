@@ -384,8 +384,7 @@ namespace Opm {
 
         // calculate the well potentials
         try {
-            std::vector<double> well_potentials;
-            computeWellPotentials(well_potentials, reportStepIdx, local_deferredLogger);
+            updateWellPotentials(reportStepIdx, /*updateAll*/false, local_deferredLogger);
         } catch ( std::runtime_error& e ) {
             const std::string msg = "A zero well potential is returned for output purposes. ";
             local_deferredLogger.warning("WELL_POTENTIAL_CALCULATION_FAILED", msg);
@@ -500,9 +499,7 @@ namespace Opm {
 
         // calculate the well potentials
         try {
-            std::vector<double> well_potentials;
-
-            computeWellPotentials(well_potentials, reportStepIdx, local_deferredLogger);
+            updateWellPotentials(reportStepIdx, /*updateAll*/true, local_deferredLogger);
         } catch ( std::runtime_error& e ) {
             const std::string msg = "A zero well potential is returned for output purposes. ";
             local_deferredLogger.warning("WELL_POTENTIAL_CALCULATION_FAILED", msg);
@@ -1466,13 +1463,10 @@ namespace Opm {
     template<typename TypeTag>
     void
     BlackoilWellModel<TypeTag>::
-    computeWellPotentials(std::vector<double>& well_potentials, const int reportStepIdx, Opm::DeferredLogger& deferred_logger)
+    updateWellPotentials(const int reportStepIdx, bool updateAll, Opm::DeferredLogger& deferred_logger)
     {
         // number of wells and phases
-        const int nw = numLocalWells();
         const int np = numPhases();
-        well_potentials.resize(nw * np, 0.0);
-
         auto well_state_copy = well_state_;
 
         // average B factors are required for the convergence checking of well equations
@@ -1493,26 +1487,22 @@ namespace Opm {
                                                   summaryConfig.hasSummaryKey( "WOPP:" + well->name()) ||
                                                   summaryConfig.hasSummaryKey( "WGPP:" + well->name())) && well->isProducer());
 
-                bool needPotentialsForGuideRate = true;//eclWell.getGuideRatePhase() == Well::GuideRateTarget::UNDEFINED;
-                if (write_restart_file || needed_for_summary || needPotentialsForGuideRate)
+                //bool needPotentialsForGuideRate = true;//eclWell.getGuideRatePhase() == Well::GuideRateTarget::UNDEFINED;
+                const bool compute_potential = updateAll || well_state_.effectiveEventsOccurred(well->indexOfWell());
+                if (compute_potential)
                 {
                     std::vector<double> potentials;
                     well->computeWellPotentials(ebosSimulator_, B_avg, well_state_copy, potentials, deferred_logger);
-                    // putting the sucessfully calculated potentials to the well_potentials
+                    // Store it in the well state
                     for (int p = 0; p < np; ++p) {
-                        well_potentials[well->indexOfWell() * np + p] = std::abs(potentials[p]);
+                        well_state_.wellPotentials()[well->indexOfWell() * np + p] = std::abs(potentials[p]);
                     }
                 }
-            } // end of for (int w = 0; w < nw; ++w)
+            }
         } catch (std::exception& e) {
             exception_thrown = 1;
         }
-
         logAndCheckForExceptionsAndThrow(deferred_logger, exception_thrown, "computeWellPotentials() failed.", terminal_output_);
-
-        // Store it in the well state
-        well_state_.wellPotentials() = well_potentials;
-
     }
 
 

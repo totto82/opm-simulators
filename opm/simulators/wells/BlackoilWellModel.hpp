@@ -400,7 +400,7 @@ namespace Opm {
             void computeAverageFormationFactor(std::vector<Scalar>& B_avg) const;
 
             // Calculating well potentials for each well
-            void computeWellPotentials(std::vector<double>& well_potentials, const int reportStepIdx, Opm::DeferredLogger& deferred_logger);
+            void updateWellPotentials(const int reportStepIdx, const bool updateAll, Opm::DeferredLogger& deferred_logger);
 
             const std::vector<double>& wellPerfEfficiencyFactors() const;
 
