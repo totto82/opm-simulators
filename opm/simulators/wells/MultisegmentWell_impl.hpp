@@ -893,8 +893,12 @@ namespace Opm
         well_state_copy.bhp()[well_copy.index_of_well_] = bhp;
 
         const int np = number_of_phases_;
+        const double sign = well_copy.well_ecl_.isInjector()? 1.0:-1.0;
+
         for (int phase = 0; phase < np; ++phase){
-            well_state_copy.wellRates()[well_copy.index_of_well_*np + phase] = well_state_copy.wellPotentials()[well_copy.index_of_well_*np + phase];
+            //std::cout << name() << " " << phase << " " << well_state_copy.wellRates()[well_copy.index_of_well_*np + phase] << " " <<
+            //                       well_state_copy.wellPotentials()[well_copy.index_of_well_*np + phase] << std::endl;
+            well_state_copy.wellRates()[well_copy.index_of_well_*np + phase] = sign*well_state_copy.wellPotentials()[well_copy.index_of_well_*np + phase];
         }
         initSegmentRatesWithWellRates(well_state_copy);
 
@@ -2722,6 +2726,7 @@ namespace Opm
         if (!this->isOperable() && !this->wellIsStopped()) return true;
 
         const int max_iter_number = param_.max_inner_iter_ms_wells_;
+        const bool writeExtensiveDebug = false;
         const WellState well_state0 = well_state;
         const std::vector<Scalar> residuals0 = getWellResiduals(B_avg);
         std::vector<std::vector<Scalar> > residual_history;
@@ -2770,7 +2775,8 @@ namespace Opm
                         if (reportStag.converged()) {
                             converged = true;
                             sstr << " well " << name() << " manages to get converged with relaxed tolerances in " << it << " inner iterations";
-                            deferred_logger.debug(sstr.str());
+                            if (writeExtensiveDebug)
+                                deferred_logger.debug(sstr.str());
                             return converged;
                         }
                     }
@@ -2781,15 +2787,17 @@ namespace Opm
                 relaxation_factor = std::max(relaxation_factor * reduction_mutliplier, min_relaxation_factor);
 
                 // debug output
-                if (is_stagnate) {
-                    sstr << " well " << name() << " observes stagnation in inner iteration " << it << "\n";
+                if (writeExtensiveDebug) {
+                    if (is_stagnate) {
+                        sstr << " well " << name() << " observes stagnation in inner iteration " << it << "\n";
 
+                    }
+                    if (is_oscillate) {
+                        sstr << " well " << name() << " observes oscillation in inner iteration " << it << "\n";
+                    }
+                    sstr << " relaxation_factor is " << relaxation_factor << " now\n";
+                    deferred_logger.debug(sstr.str());
                 }
-                if (is_oscillate) {
-                    sstr << " well " << name() << " observes oscillation in inner iteration " << it << "\n";
-                }
-                sstr << " relaxation_factor is " << relaxation_factor << " now\n";
-                deferred_logger.debug(sstr.str());
             }
             updateWellState(dx_well, well_state, deferred_logger, relaxation_factor);
             initPrimaryVariablesEvaluation();
