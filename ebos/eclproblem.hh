@@ -620,6 +620,7 @@ class EclProblem : public GetPropType<TypeTag, Properties::BaseProblem>
     enum { enableExtbo = getPropValue<TypeTag, Properties::EnableExtbo>() };
     enum { enableTemperature = getPropValue<TypeTag, Properties::EnableTemperature>() };
     enum { enableEnergy = getPropValue<TypeTag, Properties::EnableEnergy>() };
+    enum { enableDiffusion = getPropValue<TypeTag, Properties::EnableDiffusion>() };
     enum { enableThermalFluxBoundaries = getPropValue<TypeTag, Properties::EnableThermalFluxBoundaries>() };
     enum { enableApiTracking = getPropValue<TypeTag, Properties::EnableApiTracking>() };
     enum { gasPhaseIdx = FluidSystem::gasPhaseIdx };
@@ -1365,6 +1366,18 @@ public:
     {
         assert(fromDofLocalIdx == 0);
         return pffDofData_.get(context.element(), toDofLocalIdx).transmissibility;
+    }
+
+    /*!
+     * \copydoc EclTransmissiblity::diffusivity
+     */
+    template <class Context>
+    Scalar diffusivity(const Context& context,
+                       unsigned OPM_OPTIM_UNUSED fromDofLocalIdx,
+                       unsigned toDofLocalIdx) const
+    {
+        assert(fromDofLocalIdx == 0);
+        return *pffDofData_.get(context.element(), toDofLocalIdx).diffusivity;
     }
 
     /*!
@@ -3067,6 +3080,8 @@ private:
     struct PffDofData_
     {
         Opm::ConditionalStorage<enableEnergy, Scalar> thermalHalfTrans;
+        Opm::ConditionalStorage<enableDiffusion, Scalar> diffusivity;
+        //Scalar diffusivity;
         Scalar transmissibility;
     };
 
@@ -3088,6 +3103,8 @@ private:
 
                 if (enableEnergy)
                     *dofData.thermalHalfTrans = transmissibilities_.thermalHalfTrans(globalCenterElemIdx, globalElemIdx);
+                if (enableDiffusion)
+                    *dofData.diffusivity = transmissibilities_.diffusivity(globalCenterElemIdx, globalElemIdx);
             }
         };
 
