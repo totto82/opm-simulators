@@ -27,7 +27,12 @@ struct EclFlowCo2Problem {
 }
 
 template<class TypeTag>
-struct EnableDiffusion<TypeTag, TTag::EclFlowProblem> {
+struct EnableDiffusion<TypeTag, TTag::EclFlowCo2Problem> {
+    static constexpr bool value = true;
+};
+
+template<class TypeTag>
+struct EnableEnergy<TypeTag, TTag::EclFlowCo2Problem> {
     static constexpr bool value = true;
 };
 
