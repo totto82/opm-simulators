@@ -215,7 +215,7 @@ calculateBhpWithTHPTarget(const std::vector<double>& ipr_a,
 
     std::vector<detail::RateBhpPair> ratebhp_samples;
     for (size_t i = 0; i < flo_samples.size(); ++i) {
-        ratebhp_samples.push_back( detail::RateBhpPair{flo_samples[i], bhp_flo_samples[i]} );
+        ratebhp_samples.push_back( detail::RateBhpPair{-flo_samples[i], bhp_flo_samples[i]} );
     }
 
     const std::array<detail::RateBhpPair, 2> ratebhp_twopoints_ipr {detail::RateBhpPair{flo_bhp_middle, bhp_middle},
