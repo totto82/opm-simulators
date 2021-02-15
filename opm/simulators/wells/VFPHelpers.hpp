@@ -43,8 +43,7 @@ static double threshold = 1e-8;
  * @return Production rate of oil, gas or liquid.
  */
 template <typename T>
-static T getFlo(const VFPProdTable& table, const T& aqua, const T& liquid, const T& vapour) {
-    auto type = table.getFloType();
+static T getFlo(const T& aqua, const T& liquid, const T& vapour, VFPProdTable::FLO_TYPE type) {
     switch (type) {
     case VFPProdTable::FLO_TYPE::FLO_OIL:
         //Oil = liquid phase
@@ -68,8 +67,7 @@ static T getFlo(const VFPProdTable& table, const T& aqua, const T& liquid, const
  * @return Production rate of oil, gas or liquid.
  */
 template <typename T>
-static T getFlo(const VFPInjTable& table, const T& aqua, const T& liquid, const T& vapour) {
-    auto type = table.getFloType();
+static T getFlo(const T& aqua, const T& liquid, const T& vapour, VFPInjTable::FLO_TYPE type) {
     switch (type) {
     case VFPInjTable::FLO_TYPE::FLO_OIL:
         //Oil = liquid phase
@@ -96,23 +94,22 @@ static T getFlo(const VFPInjTable& table, const T& aqua, const T& liquid, const 
  * @return Production rate of oil, gas or liquid.
  */
 template <typename T>
-static T getWFR(const VFPProdTable& table, const T& aqua, const T& liquid, const T& vapour) {
-    auto type = table.getWFRType();
+static T getWFR(const T& aqua, const T& liquid, const T& vapour, VFPProdTable::WFR_TYPE type) {
     switch(type) {
-        case VFPProdTable::WFR_TYPE::WFR_WOR: {
+        case VFPProdTable::WFR_WOR: {
             //Water-oil ratio = water / oil
             T wor = Opm::abs(aqua) / Opm::max(threshold, Opm::abs(liquid));
             return wor;
         }
-        case VFPProdTable::WFR_TYPE::WFR_WCT:
+        case VFPProdTable::WFR_WCT:
             //Water cut = water / (water + oil)
             return Opm::abs(aqua) / Opm::max(threshold, Opm::abs(aqua + liquid));
-        case VFPProdTable::WFR_TYPE::WFR_WGR:
+        case VFPProdTable::WFR_WGR:
             //Water-gas ratio = water / gas
             return Opm::abs(aqua) / Opm::max(threshold, Opm::abs(vapour));
-
+        case VFPProdTable::WFR_INVALID: //Intentional fall-through
         default:
-        throw std::logic_error("Invalid WFR_TYPE");
+            OPM_THROW(std::logic_error, "Invalid WFR_TYPE: '" << type << "'");
     }
 }
 
@@ -126,8 +123,7 @@ static T getWFR(const VFPProdTable& table, const T& aqua, const T& liquid, const
  * @return Production rate of oil, gas or liquid.
  */
 template <typename T>
-static T getGFR(const T& aqua, const T& liquid, const T& vapour,
-                  const VFPProdTable::GFR_TYPE& type) {
+static T getGFR(const T& aqua, const T& liquid, const T& vapour, VFPProdTable::GFR_TYPE type) {
     switch(type) {
         case VFPProdTable::GFR_GOR:
             // Gas-oil ratio = gas / oil
