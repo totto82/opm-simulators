@@ -43,7 +43,8 @@ static double threshold = 1e-8;
  * @return Production rate of oil, gas or liquid.
  */
 template <typename T>
-static T getFlo(const T& aqua, const T& liquid, const T& vapour, VFPProdTable::FLO_TYPE type) {
+static T getFlo(const VFPProdTable& table, const T& aqua, const T& liquid, const T& vapour) {
+    auto type = table.getFloType();
     switch (type) {
     case VFPProdTable::FLO_TYPE::FLO_OIL:
         //Oil = liquid phase
@@ -67,7 +68,8 @@ static T getFlo(const T& aqua, const T& liquid, const T& vapour, VFPProdTable::F
  * @return Production rate of oil, gas or liquid.
  */
 template <typename T>
-static T getFlo(const T& aqua, const T& liquid, const T& vapour, VFPInjTable::FLO_TYPE type) {
+static T getFlo(const VFPInjTable& table, const T& aqua, const T& liquid, const T& vapour) {
+    auto type = table.getFloType();
     switch (type) {
     case VFPInjTable::FLO_TYPE::FLO_OIL:
         //Oil = liquid phase
@@ -94,7 +96,8 @@ static T getFlo(const T& aqua, const T& liquid, const T& vapour, VFPInjTable::FL
  * @return Production rate of oil, gas or liquid.
  */
 template <typename T>
-static T getWFR(const T& aqua, const T& liquid, const T& vapour, VFPProdTable::WFR_TYPE type) {
+static T getWFR(const VFPProdTable& table, const T& aqua, const T& liquid, const T& vapour) {
+    auto type = table.getWFRType();
     switch(type) {
         case VFPProdTable::WFR_WOR: {
             //Water-oil ratio = water / oil
@@ -123,7 +126,8 @@ static T getWFR(const T& aqua, const T& liquid, const T& vapour, VFPProdTable::W
  * @return Production rate of oil, gas or liquid.
  */
 template <typename T>
-static T getGFR(const T& aqua, const T& liquid, const T& vapour, VFPProdTable::GFR_TYPE type) {
+static T getGFR(const VFPProdTable& table, const T& aqua, const T& liquid, const T& vapour) {
+    auto type = table.getGFRType();
     switch(type) {
         case VFPProdTable::GFR_GOR:
             // Gas-oil ratio = gas / oil
@@ -473,7 +477,7 @@ inline VFPEvaluation bhp(const VFPProdTable& table,
         const double& thp,
         const double& alq) {
     //Find interpolation variables
-    double flo = detail::getFlo(aqua, liquid, vapour, table.getFloType());
+    double flo = detail::getFlo(table, aqua, liquid, vapour);
     double wfr = detail::getWFR(aqua, liquid, vapour, table.getWFRType());
     double gfr = detail::getGFR(aqua, liquid, vapour, table.getGFRType());
 
@@ -500,7 +504,7 @@ inline VFPEvaluation bhp(const VFPInjTable& table,
         const double& vapour,
         const double& thp) {
     //Find interpolation variables
-    double flo = detail::getFlo(aqua, liquid, vapour, table.getFloType());
+    double flo = detail::getFlo(table, aqua, liquid, vapour);
 
     //First, find the values to interpolate between
     auto flo_i = detail::findInterpData(flo, table.getFloAxis());
