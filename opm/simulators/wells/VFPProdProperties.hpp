@@ -88,8 +88,7 @@ public:
 
         detail::VFPEvaluation bhp_val = detail::interpolate(table, flo_i, thp_i, wfr_i, gfr_i, alq_i);
 
-        flo = Opm::max(-flo, 0.0);
-        bhp = (bhp_val.dwfr * wfr) + (bhp_val.dgfr * gfr) + (bhp_val.dflo * flo);
+        bhp = (bhp_val.dwfr * wfr) + (bhp_val.dgfr * gfr) - (bhp_val.dflo * flo);
         bhp.setValue(bhp_val.value);
         return bhp;
     }
