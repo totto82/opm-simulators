@@ -99,20 +99,18 @@ template <typename T>
 static T getWFR(const VFPProdTable& table, const T& aqua, const T& liquid, const T& vapour) {
     auto type = table.getWFRType();
     switch(type) {
-        case VFPProdTable::WFR_WOR: {
-            //Water-oil ratio = water / oil
-            T wor = Opm::abs(aqua) / Opm::max(threshold, Opm::abs(liquid));
-            return wor;
-        }
-        case VFPProdTable::WFR_WCT:
-            //Water cut = water / (water + oil)
-            return Opm::abs(aqua) / Opm::max(threshold, Opm::abs(aqua + liquid));
-        case VFPProdTable::WFR_WGR:
-            //Water-gas ratio = water / gas
-            return Opm::abs(aqua) / Opm::max(threshold, Opm::abs(vapour));
-        case VFPProdTable::WFR_INVALID: //Intentional fall-through
-        default:
-            OPM_THROW(std::logic_error, "Invalid WFR_TYPE: '" << type << "'");
+    case VFPProdTable::WFR_TYPE::WFR_WOR: {
+        //Water-oil ratio = water / oil
+        return Opm::abs(aqua) / Opm::max(threshold, Opm::abs(liquid));
+    }
+    case VFPProdTable::WFR_TYPE::WFR_WCT:
+        //Water cut = water / (water + oil)
+        return Opm::abs(aqua) / Opm::max(threshold, Opm::abs(aqua + liquid));
+    case VFPProdTable::WFR_TYPE::WFR_WGR:
+        //Water-gas ratio = water / gas
+        return Opm::abs(aqua) / Opm::max(threshold, Opm::abs(vapour));
+    default:
+        throw std::logic_error("Invalid WFR_TYPE");
     }
 }
 
@@ -129,18 +127,17 @@ template <typename T>
 static T getGFR(const VFPProdTable& table, const T& aqua, const T& liquid, const T& vapour) {
     auto type = table.getGFRType();
     switch(type) {
-        case VFPProdTable::GFR_GOR:
-            // Gas-oil ratio = gas / oil
-            return Opm::abs(vapour) / Opm::max(threshold, Opm::abs(liquid));
-        case VFPProdTable::GFR_GLR:
-            // Gas-liquid ratio = gas / (oil + water)
-            return Opm::abs(vapour) / Opm::max(threshold, Opm::abs(liquid + aqua));
-        case VFPProdTable::GFR_OGR:
-            // Oil-gas ratio = oil / gas
-            return Opm::abs(liquid) / Opm::max(threshold, Opm::abs(vapour));
-        case VFPProdTable::GFR_INVALID: //Intentional fall-through
-        default:
-            OPM_THROW(std::logic_error, "Invalid GFR_TYPE: '" << type << "'");
+    case VFPProdTable::GFR_TYPE::GFR_GOR:
+        // Gas-oil ratio = gas / oil
+        return Opm::abs(vapour) / Opm::max(threshold, Opm::abs(liquid));
+    case VFPProdTable::GFR_TYPE::GFR_GLR:
+        // Gas-liquid ratio = gas / (oil + water)
+        return Opm::abs(vapour) / Opm::max(threshold, Opm::abs(liquid + aqua));
+    case VFPProdTable::GFR_TYPE::GFR_OGR:
+        // Oil-gas ratio = oil / gas
+        return Opm::abs(liquid) / Opm::max(threshold, Opm::abs(vapour));
+    default:
+        throw std::logic_error("Invalid GFR_TYPE");
     }
 }
 
@@ -478,8 +475,8 @@ inline VFPEvaluation bhp(const VFPProdTable& table,
         const double& alq) {
     //Find interpolation variables
     double flo = detail::getFlo(table, aqua, liquid, vapour);
-    double wfr = detail::getWFR(aqua, liquid, vapour, table.getWFRType());
-    double gfr = detail::getGFR(aqua, liquid, vapour, table.getGFRType());
+    double wfr = detail::getWFR(table, aqua, liquid, vapour);
+    double gfr = detail::getGFR(table, aqua, liquid, vapour);
 
     //First, find the values to interpolate between
     //Recall that flo is negative in Opm, so switch sign.
