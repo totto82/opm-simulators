@@ -174,8 +174,8 @@ inline InterpData findInterpData(const double& value_in, const std::vector<doubl
 
     // chopping the value to be zero, which means we do not
     // extrapolate the table towards nagative ranges
-    const double value = value_in < 0.? 0. : value_in;
-
+    double value = value_in < 0.? 0. : value_in;
+    bool extrapolate = false;
     //If we only have one value in our vector, return that
     if (values.size() == 1) {
         retval.ind_[0] = 0;
@@ -189,11 +189,13 @@ inline InterpData findInterpData(const double& value_in, const std::vector<doubl
         if (value < values.front()) {
             retval.ind_[0] = 0;
             retval.ind_[1] = 1;
+            extrapolate = true;
         }
         //If value is greater than all values, use last interval
         else if (value >= values.back()) {
             retval.ind_[0] = nvalues-2;
             retval.ind_[1] = nvalues-1;
+            extrapolate = true;
         }
         else {
             //Search internal intervals
@@ -206,15 +208,24 @@ inline InterpData findInterpData(const double& value_in, const std::vector<doubl
             }
         }
 
-        const double start = values[retval.ind_[0]];
-        const double end   = values[retval.ind_[1]];
+        double start = values[retval.ind_[0]];
+        double end   = values[retval.ind_[1]];
 
         //Find interpolation ratio
         if (end > start) {
-            //FIXME: Possible source for floating point error here if value and floor are large,
-            //but very close to each other
-            retval.inv_dist_ = 1.0 / (end-start);
-            retval.factor_ = (value-start) * retval.inv_dist_;
+            if (extrapolate) {
+                end = std::log(end);
+                start = std::log(start);
+                value = std::log(value);
+
+                retval.inv_dist_ = 1.0 / std::exp(end-start);
+                retval.factor_ = std::exp(value-start) * retval.inv_dist_;
+            } else {
+                //FIXME: Possible source for floating point error here if value and floor are large,
+                //but very close to each other
+                retval.inv_dist_ = 1.0 / (end-start);
+                retval.factor_ = (value-start) * retval.inv_dist_;
+            }
         }
         else {
             retval.inv_dist_ = 0.0;
@@ -225,9 +236,9 @@ inline InterpData findInterpData(const double& value_in, const std::vector<doubl
     // Disallow extrapolation with higher factor than 3.0.
     // The factor 3.0 has been chosen because it works well
     // with certain testcases, and may not be optimal.
-    if (retval.factor_ > 3.0) {
-        retval.factor_ = 3.0;
-    }
+    //if (retval.factor_ > 3.0) {
+    //    retval.factor_ = 3.0;
+    //}
 
     return retval;
 }
@@ -578,6 +589,41 @@ VFPInjTable::FLO_TYPE getType(const VFPInjTable& table) {
     return table.getFloType();
 }
 
+/**
+ * Helper function that finds x for a given value of y for a line
+ * *NOTE ORDER OF ARGUMENTS*
+ */
+inline double findXlog(double x0,
+        double x1,
+        double y0,
+        double y1,
+        double y) {
+    x0 = std::log(x0);
+    x1 = std::log(x1);
+    y0 = std::log(y0);
+    y1 = std::log(y1);
+
+    const double dx = x1 - x0;
+    const double dy = y1 - y0;
+
+    /**
+     *       y = y0 + (dy / dx) * (x - x0)
+     *   =>  x = x0 + (y - y0) * (dx / dy)
+     *
+     * If dy is zero, use x1 as the value.
+     */
+
+    double x = 0.0;
+
+    if (dy != 0.0) {
+        x = x0 + (y-y0) * (dx/dy);
+    }
+    else {
+        x = x1;
+    }
+
+    return std::exp(x);
+}
 
 /**
  * Helper function that finds x for a given value of y for a line
@@ -650,7 +696,7 @@ inline double findTHP(
             const double& x1 = thp_array[1];
             const double& y0 = bhp_array[0];
             const double& y1 = bhp_array[1];
-            thp = detail::findX(x0, x1, y0, y1, bhp);
+            thp = detail::findXlog(x0, x1, y0, y1, bhp);
         }
         //Target bhp greater than all values in array, extrapolate
         else if (bhp > bhp_array[nthp-1]) {
@@ -659,7 +705,7 @@ inline double findTHP(
             const double& x1 = thp_array[nthp-1];
             const double& y0 = bhp_array[nthp-2];
             const double& y1 = bhp_array[nthp-1];
-            thp = detail::findX(x0, x1, y0, y1, bhp);
+            thp = detail::findXlog(x0, x1, y0, y1, bhp);
         }
         //Target bhp within table ranges, interpolate
         else {
@@ -720,7 +766,7 @@ inline double findTHP(
             const double& x1 = thp_array[1];
             const double& y0 = bhp_array[0];
             const double& y1 = bhp_array[1];
-            thp = detail::findX(x0, x1, y0, y1, bhp);
+            thp = detail::findXlog(x0, x1, y0, y1, bhp);
         }
         //Target bhp greater than all values in array, extrapolate
         else if (bhp > bhp_array[nthp-1]) {
@@ -729,7 +775,7 @@ inline double findTHP(
             const double& x1 = thp_array[nthp-1];
             const double& y0 = bhp_array[nthp-2];
             const double& y1 = bhp_array[nthp-1];
-            thp = detail::findX(x0, x1, y0, y1, bhp);
+            thp = detail::findXlog(x0, x1, y0, y1, bhp);
         }
         else {
             OPM_THROW(std::logic_error, "Programmer error: Unable to find THP in THP array");
