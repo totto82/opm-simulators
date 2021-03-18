@@ -3663,6 +3663,10 @@ namespace Opm
                     assert(f_high < 0.0);
                     bhp_max = high;
                 }
+            } else if (f_high == 0.0){
+                deferred_logger.warning("FAILED_ROBUST_BHP_THP_SOLVE_INOPERABLE",
+                                        "Robust bhp(thp) solve failed due to inoperability for well " + name());
+                return std::optional<double>();
             } else {
                 // Bisect to find a bhp point where we produce, but
                 // not a large amount ('eps' below).
