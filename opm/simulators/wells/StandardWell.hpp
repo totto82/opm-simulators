@@ -296,6 +296,8 @@ namespace Opm
             DeferredLogger& deferred_logger,
             double alq_value) const;
 
+        double maxPerfPress(const Simulator& ebos_simulator) const;
+
         // NOTE: Cannot be protected since it is used by GasLiftRuntime
         void computeWellRatesWithBhp(
             const Simulator& ebosSimulator,

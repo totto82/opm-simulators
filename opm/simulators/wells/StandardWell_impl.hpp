@@ -3742,134 +3742,170 @@ namespace Opm
             return rates;
         };
 
-        // Get the flo samples, add extra samples at low rates and bhp
-        // limit point if necessary. Then the sign must be flipped
-        // since the VFP code expects that production flo values are
-        // negative.
-        std::vector<double> flo_samples = table.getFloAxis();
-        if (flo_samples[0] > 0.0) {
-            const double f0 = flo_samples[0];
-            flo_samples.insert(flo_samples.begin(), { f0/20.0, f0/10.0, f0/5.0, f0/2.0 });
-        }
-        const double flo_bhp_limit = -flo(frates(controls.bhp_limit));
-        if (flo_samples.back() < flo_bhp_limit) {
-            flo_samples.push_back(flo_bhp_limit);
-        }
-        for (double& x : flo_samples) {
-            x = -x;
-        }
-
-        // Find bhp values for inflow relation corresponding to flo samples.
-        std::vector<double> bhp_samples;
-        for (double flo_sample : flo_samples) {
-            if (flo_sample < -flo_bhp_limit) {
-                // We would have to go under the bhp limit to obtain a
-                // flow of this magnitude. We associate all such flows
-                // with simply the bhp limit. The first one
-                // encountered is considered valid, the rest not. They
-                // are therefore skipped.
-                bhp_samples.push_back(controls.bhp_limit);
-                break;
+        // Find the bhp-point where production becomes nonzero.
+        double bhp_max = 0.0;
+        {
+            auto fflo = [&flo, &frates](double bhp) { return flo(frates(bhp)); };
+            double low = controls.bhp_limit;
+            double high = maxPerfPress(ebos_simulator) + 1.0 * unit::barsa;
+            double f_low = fflo(low);
+            double f_high = fflo(high);
+            deferred_logger.debug("computeBhpAtThpLimitProd(): well = " + name() +
+                                  "  low = " + std::to_string(low) +
+                                  "  high = " + std::to_string(high) +
+                                  "  f(low) = " + std::to_string(f_low) +
+                                  "  f(high) = " + std::to_string(f_high));
+            int adjustments = 0;
+            const int max_adjustments = 10;
+            const double adjust_amount = 5.0 * unit::barsa;
+            while (f_low * f_high > 0.0 && adjustments < max_adjustments) {
+                // Same sign, adjust high to see if we can flip it.
+                high += adjust_amount;
+                f_high = fflo(high);
+                ++adjustments;
             }
-            auto eq = [&flo, &frates, flo_sample](double bhp) {
-                return flo(frates(bhp)) - flo_sample;
-            };
-            // TODO: replace hardcoded low/high limits.
-            const double low = 10.0 * unit::barsa;
-            const double high = 600.0 * unit::barsa;
-            const int max_iteration = 50;
-            const double flo_tolerance = 1e-6 * std::fabs(flo_samples.back());
-            int iteration = 0;
-            try {
-                const double solved_bhp = RegulaFalsiBisection<>::
-                    solve(eq, low, high, max_iteration, flo_tolerance, iteration);
-                bhp_samples.push_back(solved_bhp);
+            if (f_low * f_high > 0.0) {
+                if (f_low > 0.0) {
+                    // Even at the BHP limit, we are injecting.
+                    // There will be no solution here, return an
+                    // empty optional.
+                    deferred_logger.warning("FAILED_ROBUST_BHP_THP_SOLVE_INOPERABLE",
+                                            "Robust bhp(thp) solve failed due to inoperability for well " + name());
+                    return std::optional<double>();
+                } else {
+                    // Still producing, even at high bhp.
+                    assert(f_high < 0.0);
+                    bhp_max = high;
+                }
+            } else if (f_high == 0.0){
+                deferred_logger.warning("FAILED_ROBUST_BHP_THP_SOLVE_INOPERABLE",
+                                        "Robust bhp(thp) solve failed due to inoperability for well " + name());
+                return std::optional<double>();
+            } else {
+                // Bisect to find a bhp point where we produce, but
+                // not a large amount ('eps' below).
+                const double eps = 0.1 * std::fabs(table.getFloAxis().front());
+                const int maxit = 50;
+                int it = 0;
+                while (std::fabs(f_low) > eps && it < maxit) {
+                    const double curr = 0.5*(low + high);
+                    const double f_curr = fflo(curr);
+                    if (f_curr * f_low > 0.0) {
+                        low = curr;
+                        f_low = f_curr;
+                    } else {
+                        high = curr;
+                        f_high = f_curr;
+                    }
+                    ++it;
+                }
+                bhp_max = low;
             }
-            catch (...) {
-                // Use previous value (or max value if at start) if we failed.
-                bhp_samples.push_back(bhp_samples.empty() ? high : bhp_samples.back());
-                deferred_logger.warning("FAILED_ROBUST_BHP_THP_SOLVE_EXTRACT_SAMPLES",
-                                        "Robust bhp(thp) solve failed extracting bhp values at flo samples for well " + name());
-            }
+            deferred_logger.debug("computeBhpAtThpLimitProd(): well = " + name() +
+                                  "  low = " + std::to_string(low) +
+                                  "  high = " + std::to_string(high) +
+                                  "  f(low) = " + std::to_string(f_low) +
+                                  "  f(high) = " + std::to_string(f_high) +
+                                  "  bhp_max = " + std::to_string(bhp_max));
         }
-
-        // Find bhp values for VFP relation corresponding to flo samples.
-        const int num_samples = bhp_samples.size(); // Note that this can be smaller than flo_samples.size()
-        std::vector<double> fbhp_samples(num_samples);
-        for (int ii = 0; ii < num_samples; ++ii) {
-            fbhp_samples[ii] = fbhp(frates(bhp_samples[ii]));
-        }
-// #define EXTRA_THP_DEBUGGING
-#ifdef EXTRA_THP_DEBUGGING
-        std::string dbgmsg;
-        dbgmsg += "flo: ";
-        for (int ii = 0; ii < num_samples; ++ii) {
-            dbgmsg += "  " + std::to_string(flo_samples[ii]);
-        }
-        dbgmsg += "\nbhp: ";
-        for (int ii = 0; ii < num_samples; ++ii) {
-            dbgmsg += "  " + std::to_string(bhp_samples[ii]);
-        }
-        dbgmsg += "\nfbhp: ";
-        for (int ii = 0; ii < num_samples; ++ii) {
-            dbgmsg += "  " + std::to_string(fbhp_samples[ii]);
-        }
-        OpmLog::debug(dbgmsg);
-#endif // EXTRA_THP_DEBUGGING
-
-        // Look for sign changes for the (fbhp_samples - bhp_samples) piecewise linear curve.
-        // We only look at the valid
-        int sign_change_index = -1;
-        for (int ii = 0; ii < num_samples - 1; ++ii) {
-            const double curr = fbhp_samples[ii] - bhp_samples[ii];
-            const double next = fbhp_samples[ii + 1] - bhp_samples[ii + 1];
-            if (curr * next < 0.0) {
-                // Sign change in the [ii, ii + 1] interval.
-                sign_change_index = ii; // May overwrite, thereby choosing the highest-flo solution.
-            }
-        }
-
-        // Handle the no solution case.
-        if (sign_change_index == -1) {
-            return std::optional<double>();
-        }
-
-        // Solve for the proper solution in the given interval.
+        // Define the equation we want to solve.
         auto eq = [&fbhp, &frates](double bhp) {
             return fbhp(frates(bhp)) - bhp;
         };
-        // TODO: replace hardcoded low/high limits.
-        const double low = bhp_samples[sign_change_index + 1];
-        const double high = bhp_samples[sign_change_index];
-        const int max_iteration = 50;
+
+        // Find appropriate brackets for the solution.
+        double low = controls.bhp_limit;
+        double high = bhp_max;
+        {
+            double eq_high = eq(high);
+            double eq_low = eq(low);
+            const double eq_bhplimit = eq_low;
+            deferred_logger.debug("computeBhpAtThpLimitProd(): well = " + name() +
+                                  "  low = " + std::to_string(low) +
+                                  "  high = " + std::to_string(high) +
+                                  "  eq(low) = " + std::to_string(eq_low) +
+                                  "  eq(high) = " + std::to_string(eq_high));
+            if (eq_low * eq_high > 0.0) {
+                // Failed to bracket the zero.
+                // If this is due to having two solutions, bisect until bracketed.
+                double abs_low = std::fabs(eq_low);
+                double abs_high = std::fabs(eq_high);
+                int bracket_attempts = 0;
+                const int max_bracket_attempts = 20;
+                double interval = high - low;
+                const double min_interval = 1.0 * unit::barsa;
+                while (eq_low * eq_high > 0.0 && bracket_attempts < max_bracket_attempts && interval > min_interval) {
+                    if (abs_high < abs_low) {
+                        low = 0.5 * (low + high);
+                        eq_low = eq(low);
+                        abs_low = std::fabs(eq_low);
+                    } else {
+                        high = 0.5 * (low + high);
+                        eq_high = eq(high);
+                        abs_high = std::fabs(eq_high);
+                    }
+                    ++bracket_attempts;
+                }
+                if (eq_low * eq_high > 0.0) {
+                    // Still failed bracketing!
+                    const double limit = 3.0 * unit::barsa;
+                    if (std::min(abs_low, abs_high) < limit) {
+                        // Return the least bad solution if less off than 3 bar.
+                        deferred_logger.warning("FAILED_ROBUST_BHP_THP_SOLVE_BRACKETING_FAILURE",
+                                                "Robust bhp(thp) not solved precisely for well " + name());
+                        return abs_low < abs_high ? low : high;
+                    } else {
+                        // Return failure.
+                        deferred_logger.warning("FAILED_ROBUST_BHP_THP_SOLVE_BRACKETING_FAILURE",
+                                                "Robust bhp(thp) solve failed due to bracketing failure for well " + name());
+                        return std::optional<double>();
+                    }
+                }
+            }
+            // We have a bracket!
+            // Now, see if (bhplimit, low) is a bracket in addition to (low, high).
+            // If so, that is the bracket we shall use, choosing the solution with the
+            // highest flow.
+            if (eq_low * eq_bhplimit <= 0.0) {
+                high = low;
+                low = controls.bhp_limit;
+            }
+        }
+
+        // Solve for the proper solution in the given interval.
+        const int max_iteration = 100;
         const double bhp_tolerance = 0.01 * unit::barsa;
         int iteration = 0;
-        if (low == high) {
-            // We are in the high flow regime where the bhp_samples
-            // are all equal to the bhp_limit.
-            assert(low == controls.bhp_limit);
-            deferred_logger.warning("FAILED_ROBUST_BHP_THP_SOLVE",
-                                    "Robust bhp(thp) solve failed for well " + name());
-            return std::optional<double>();
-        }
         try {
-            const double solved_bhp = RegulaFalsiBisection<>::
+            const double solved_bhp = RegulaFalsiBisection<ThrowOnError>::
                 solve(eq, low, high, max_iteration, bhp_tolerance, iteration);
-#ifdef EXTRA_THP_DEBUGGING
-            OpmLog::debug("*****    " + name() + "    solved_bhp = " + std::to_string(solved_bhp)
-                          + "    flo_bhp_limit = " + std::to_string(flo_bhp_limit));
-#endif // EXTRA_THP_DEBUGGING
             return solved_bhp;
         }
         catch (...) {
             deferred_logger.warning("FAILED_ROBUST_BHP_THP_SOLVE",
                                     "Robust bhp(thp) solve failed for well " + name());
             return std::optional<double>();
-        }
-
     }
 
 
+    }
+
+    template<typename TypeTag>
+    double
+    StandardWell<TypeTag>::
+    maxPerfPress(const Simulator& ebos_simulator) const
+    {
+        double max_pressure = 0.0;
+        const int nperf = number_of_perforations_;
+        for (int perf = 0; perf < nperf; ++perf) {
+            const int cell_idx = well_cells_[perf];
+            const auto& int_quants = *(ebos_simulator.model().cachedIntensiveQuantities(cell_idx, /*timeIdx=*/ 0));
+            const auto& fs = int_quants.fluidState();
+            double pressure_cell = fs.pressure(FluidSystem::oilPhaseIdx).value();
+            max_pressure = std::max(max_pressure, pressure_cell);
+        }
+        return max_pressure;
+    }
 
     template<typename TypeTag>
     std::optional<double>
