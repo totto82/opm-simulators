@@ -286,6 +286,9 @@ namespace Opm
             std::vector<double> &potentials,
             double alq) const;
 
+        double maxPerfPress(const Simulator& ebos_simulator) const;
+
+
         // NOTE: Cannot be protected since it is used by GasLiftRuntime
         std::optional<double> computeBhpAtThpLimitProdWithAlq(
             const Simulator& ebos_simulator,
