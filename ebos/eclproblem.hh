@@ -832,11 +832,12 @@ public:
         ExtboModule::initFromState(vanguard.eclState());
 
         // create the ECL writer
-        eclWriter_.reset(new EclWriterType(simulator));
+        enableEclOutput_ = EWOMS_GET_PARAM(TypeTag, bool, EnableEclOutput);
+        if (enableEclOutput_)
+            eclWriter_.reset(new EclWriterType(simulator));
 
         enableDriftCompensation_ = EWOMS_GET_PARAM(TypeTag, bool, EclEnableDriftCompensation);
 
-        enableEclOutput_ = EWOMS_GET_PARAM(TypeTag, bool, EnableEclOutput);
 
         if (enableExperiments)
             enableAquifers_ = EWOMS_GET_PARAM(TypeTag, bool, EclEnableAquifers);
@@ -1232,9 +1233,10 @@ public:
                     drift_[globalDofIdx] *= this->model().dofTotalVolume(globalDofIdx);
             }
         }
-
         bool isSubStep = !EWOMS_GET_PARAM(TypeTag, bool, EnableWriteAllSolutions) && !this->simulator().episodeWillBeOver();
-        eclWriter_->evalSummaryState(isSubStep);
+
+        if (enableEclOutput_)
+            eclWriter_->evalSummaryState(isSubStep);
 
         auto& schedule = simulator.vanguard().schedule();
         auto& ecl_state = simulator.vanguard().eclState();
@@ -1300,7 +1302,8 @@ public:
     void finalizeOutput() {
         // this will write all pending output to disk
         // to avoid corruption of output files
-        eclWriter_.reset();
+        if (enableEclOutput_)
+            eclWriter_.reset();
     }
 
 
@@ -2757,17 +2760,18 @@ private:
         referencePorosity_[/*timeIdx=*/0].resize(numDof);
 
         const auto& fp = eclState.fieldProps();
-        const std::vector<double> porvData = fp.porv(false);
-        const std::vector<int> actnumData = fp.actnum();
+        const std::vector<double> poro = fp.get_double("PORO");
+
+        //const std::vector<int> actnumData = fp.actnum();
         for (size_t dofIdx = 0; dofIdx < numDof; ++ dofIdx) {
-            Scalar poreVolume = porvData[dofIdx];
+            Scalar porosity = poro[dofIdx];
 
             // we define the porosity as the accumulated pore volume divided by the
             // geometric volume of the element. Note that -- in pathetic cases -- it can
             // be larger than 1.0!
             Scalar dofVolume = simulator.model().dofTotalVolume(dofIdx);
             assert(dofVolume > 0.0);
-            referencePorosity_[/*timeIdx=*/0][dofIdx] = poreVolume/dofVolume;
+            referencePorosity_[/*timeIdx=*/0][dofIdx] = porosity; //poreVolume/dofVolume;
         }
     }
 
@@ -2826,6 +2830,9 @@ private:
 
     void readEclRestartSolution_()
     {
+        if (!enableEclOutput_)
+            return;
+
         // Set the start time of the simulation
         auto& simulator = this->simulator();
         const auto& schedule = simulator.vanguard().schedule();

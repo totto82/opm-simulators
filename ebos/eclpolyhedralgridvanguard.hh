@@ -31,6 +31,10 @@
 #include "ecltransmissibility.hh"
 
 #include <opm/grid/polyhedralgrid.hh>
+#include <opm/grid/cpgrid/dgfparser.hh>
+#include <opm/grid/polyhedralgrid/dgfparser.hh>
+#include <opm/grid/utility/OpmParserIncludes.hpp>
+
 
 namespace Opm {
 template <class TypeTag>
@@ -144,7 +148,12 @@ public:
      * (For parallel simulation runs.)
      */
     void loadBalance()
-    { /* do nothing: PolyhedralGrid is not parallel! */ }
+    {
+        cartesianIndexMapper_ = new CartesianIndexMapper(*grid_);
+        this->updateCartesianToCompressedMapping_();
+        this->updateCellDepths_();
+        /* do nothing: PolyhedralGrid is not parallel! */
+    }
 
     /*!
      * \brief Returns the object which maps a global element index of the simulation grid
@@ -183,14 +192,17 @@ public:
 protected:
     void createGrids_()
     {
-        grid_ = new Grid(this->eclState().getInputGrid(), this->eclState().fieldProps().porv(true));
-        cartesianIndexMapper_ = new CartesianIndexMapper(*grid_);
-        this->updateCartesianToCompressedMapping_();
-        this->updateCellDepths_();
+        //grid_ = new Grid(this->eclState().getInputGrid(), this->eclState().fieldProps().porv(true));
+
+        const std::string dgfFileName = "test1.dgf";
+        //grid_ = new Grid(dgfFileName);
+        Dune::GridPtr< Grid > gridPoly( dgfFileName );
+        grid_ = gridPoly.release();
     }
 
     void filterConnections_()
     {
+
         // not handling the removal of completions for this type of grid yet.
     }
 

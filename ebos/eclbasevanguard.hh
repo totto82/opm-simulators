@@ -791,7 +791,7 @@ protected:
         size_t num_cells = asImp_().grid().leafGridView().size(0);
         cartesianToCompressed_.resize(cartesianSize(), -1);
         for (unsigned i = 0; i < num_cells; ++i) {
-            unsigned cartesianCellIdx = cartesianIndex(i);
+            unsigned cartesianCellIdx = i; //cartesianIndex(i);
             cartesianToCompressed_[cartesianCellIdx] = i;
         }
     }
@@ -893,6 +893,8 @@ private:
         Scalar zz = 0.0;
 
         const Geometry& geometry = element.geometry();
+        return geometry.center()[zCoord];
+
         const int corners = geometry.corners();
         for (int i=0; i < corners; ++i)
             zz += geometry.corner(i)[zCoord];
