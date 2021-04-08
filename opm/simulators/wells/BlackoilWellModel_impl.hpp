@@ -50,7 +50,7 @@ namespace Opm {
         const auto& grid = ebosSimulator_.vanguard().grid();
         const auto& cartDims = Opm::UgGridHelpers::cartDims(grid);
         setupCartesianToCompressed_(Opm::UgGridHelpers::globalCell(grid),
-                                    cartDims[0]*cartDims[1]*cartDims[2]);
+                                    global_num_cells_);
         auto& parallel_wells = ebosSimulator.vanguard().parallelWells();
         parallel_well_info_.assign(parallel_wells.begin(), parallel_wells.end());
         const auto& pwell_info = parallel_well_info_;

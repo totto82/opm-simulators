@@ -853,7 +853,7 @@ public:
         maxFails_ = EWOMS_GET_PARAM(TypeTag, unsigned, MaxTimeStepDivisions);
 
         Opm::RelpermDiagnostics relpermDiagnostics;
-        relpermDiagnostics.diagnosis(vanguard.eclState(), vanguard.cartesianIndexMapper());
+        //relpermDiagnostics.diagnosis(vanguard.eclState(), vanguard.cartesianIndexMapper());
     }
 
     /*!

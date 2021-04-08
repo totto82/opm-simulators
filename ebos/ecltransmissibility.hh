@@ -450,14 +450,14 @@ public:
         // Create mapping from global to local index
         const size_t cartesianSize = cartMapper.cartesianSize();
         // reserve memory
-        std::vector<int> globalToLocal(cartesianSize, -1);
+        std::vector<int> globalToLocal(numElements, -1);
 
         // loop over all elements (global grid) and store Cartesian index
         elemIt = vanguard_.grid().leafGridView().template begin<0>();
 
         for (; elemIt != elemEndIt; ++elemIt) {
             int elemIdx = elemMapper.index(*elemIt);
-            int cartElemIdx = vanguard_.cartesianIndexMapper().cartesianIndex(elemIdx);
+            int cartElemIdx = vanguard_.cartesianIndex(elemIdx);
             globalToLocal[cartElemIdx] = elemIdx;
         }
         applyEditNncToGridTrans_(globalToLocal);

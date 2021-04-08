@@ -3253,6 +3253,7 @@ namespace Opm
         // TODO: not considering solvent yet
         // 0.95 is a experimental value, which remains to be optimized
         double relaxation_factor = 1.0;
+        return relaxation_factor;
 
         if (FluidSystem::numActivePhases() > 1) {
             if (FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx)) {

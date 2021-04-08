@@ -663,7 +663,7 @@ public:
      * \brief Returns the Cartesian cell id for identifaction with ECL data
      */
     unsigned cartesianIndex(unsigned compressedCellIdx) const
-    { return asImp_().cartesianIndexMapper().cartesianIndex(compressedCellIdx); }
+    { return compressedCellIdx;} //asImp_().cartesianIndexMapper().cartesianIndex(compressedCellIdx); }
 
     /*!
      * \brief Return the index of the cells in the logical Cartesian grid
@@ -789,7 +789,7 @@ protected:
     void updateCartesianToCompressedMapping_()
     {
         size_t num_cells = asImp_().grid().leafGridView().size(0);
-        cartesianToCompressed_.resize(cartesianSize(), -1);
+        cartesianToCompressed_.resize(num_cells, -1);
         for (unsigned i = 0; i < num_cells; ++i) {
             unsigned cartesianCellIdx = i; //cartesianIndex(i);
             cartesianToCompressed_[cartesianCellIdx] = i;
