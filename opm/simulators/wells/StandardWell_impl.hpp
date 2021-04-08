@@ -1032,12 +1032,14 @@ namespace Opm
                                        : 1.0;
 
         // update the second and third well variable (The flux fractions)
+        /*
         if (FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx)) {
             const int sign2 = dwells[0][WFrac] > 0 ? 1: -1;
             const double dx2_limited = sign2 * std::min(std::abs(dwells[0][WFrac] * relaxation_factor_fractions), dFLimit);
             // primary_variables_[WFrac] = old_primary_variables[WFrac] - dx2_limited;
             primary_variables_[WFrac] = old_primary_variables[WFrac] - dx2_limited;
         }
+        */
 
         if (FluidSystem::phaseIsActive(FluidSystem::gasPhaseIdx)) {
             const int sign3 = dwells[0][GFrac] > 0 ? 1: -1;
@@ -1188,10 +1190,11 @@ namespace Opm
                 F[pu.phase_pos[Oil]] = 0.0;
             }
         }
-
+        /*
         if (FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx)) {
             primary_variables_[WFrac] = F[pu.phase_pos[Water]];
         }
+        */
         if (FluidSystem::phaseIsActive(FluidSystem::gasPhaseIdx)) {
             primary_variables_[GFrac] = F[pu.phase_pos[Gas]];
         }
@@ -2925,9 +2928,11 @@ namespace Opm
         }
 
         if (std::abs(total_well_rate) > 0.) {
+            /*
             if (FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx)) {
                 primary_variables_[WFrac] = scalingFactor(pu.phase_pos[Water]) * well_state.wellRates()[np*well_index + pu.phase_pos[Water]] / total_well_rate;
             }
+            */
             if (FluidSystem::phaseIsActive(FluidSystem::gasPhaseIdx)) {
                 primary_variables_[GFrac] = scalingFactor(pu.phase_pos[Gas]) * (well_state.wellRates()[np*well_index + pu.phase_pos[Gas]]
                                                  - (has_solvent ? well_state.solventWellRate(well_index) : 0.0) ) / total_well_rate ;
@@ -3228,6 +3233,11 @@ namespace Opm
         // 0.95 is a experimental value, which remains to be optimized
         double relaxation_factor = 1.0;
 
+        if (FluidSystem::phaseIsActive(FluidSystem::gasPhaseIdx)) {
+                const double relaxation_factor_g = relaxationFactorFraction(primary_variables[GFrac], dwells[0][GFrac]);
+                relaxation_factor = std::min(relaxation_factor, relaxation_factor_g);
+            }
+        /*
         if (FluidSystem::numActivePhases() > 1) {
             if (FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx)) {
                 const double relaxation_factor_w = relaxationFactorFraction(primary_variables[WFrac], dwells[0][WFrac]);
@@ -3253,9 +3263,9 @@ namespace Opm
                     relaxation_factor *= further_relaxation_factor;
                 }
             }
-
             assert(relaxation_factor >= 0.0 && relaxation_factor <= 1.0);
         }
+        */
         return relaxation_factor;
     }
 

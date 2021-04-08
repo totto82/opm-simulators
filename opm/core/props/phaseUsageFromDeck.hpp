@@ -56,9 +56,9 @@ namespace Opm
 
         // We need oil systems, since we do not support the keywords needed for
         // water-gas systems.
-        if (!pu.phase_used[BlackoilPhases::Liquid] && !(pu.num_phases == 1)) {
-            OPM_THROW(std::runtime_error, "Cannot handle cases with no OIL, i.e. water-gas systems.");
-        }
+        //if (!pu.phase_used[BlackoilPhases::Liquid] && !(pu.num_phases == 1)) {
+        //    OPM_THROW(std::runtime_error, "Cannot handle cases with no OIL, i.e. water-gas systems.");
+        //}
 
         // Add solvent info
         pu.has_solvent = phases.active(Phase::SOLVENT);
