@@ -135,11 +135,6 @@ namespace Opm
             // Not implemented yet
         }
 
-        virtual void assembleWellEq(const Simulator& ebosSimulator,
-                                    const double dt,
-                                    WellState& well_state,
-                                    Opm::DeferredLogger& deferred_logger) override;
-
         /// updating the well state based the current control mode
         virtual void updateWellStateWithTarget(const Simulator& ebos_simulator,
                                                WellState& well_state,

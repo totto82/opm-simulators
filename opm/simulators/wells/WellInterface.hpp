@@ -182,11 +182,11 @@ namespace Opm
 
         virtual void solveEqAndUpdateWellState(WellState& well_state, Opm::DeferredLogger& deferred_logger) = 0;
 
-        virtual void assembleWellEq(const Simulator& ebosSimulator,
+        void assembleWellEq(const Simulator& ebosSimulator,
                                     const double dt,
                                     WellState& well_state,
                                     Opm::DeferredLogger& deferred_logger
-                                    ) = 0;
+                                    );
 
         virtual void gasLiftOptimizationStage1 (
             WellState& well_state,
@@ -655,7 +655,7 @@ namespace Opm
     WellInterface<TypeTag>::
     OperabilityStatus {
         bool isOperable() const {
-            if (!operable_under_only_bhp_limit) {
+            if (!operable_under_only_bhp_limit || !solvable) {
                 return false;
             } else {
                 return ( (isOperableUnderBHPLimit() || isOperableUnderTHPLimit()) );
@@ -675,6 +675,7 @@ namespace Opm
             obey_thp_limit_under_bhp_limit = true;
             can_obtain_bhp_with_thp_limit = true;
             obey_bhp_limit_with_thp_limit = true;
+            solvable = true;
         }
 
         // whether the well can be operated under bhp limit
@@ -688,6 +689,8 @@ namespace Opm
         bool can_obtain_bhp_with_thp_limit = true;
         // whether the well obey bhp limit when operated under thp limit
         bool obey_bhp_limit_with_thp_limit = true;
+        // the well is solveable
+        bool solvable = true;
 
     };
 

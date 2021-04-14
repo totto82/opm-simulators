@@ -1017,14 +1017,6 @@ namespace Opm {
 
             // Set the well primary variables based on the value of well solutions
             initPrimaryVariablesEvaluation();
-
-            if (param_.solve_welleq_initially_ && iterationIdx == 0) {
-                for (auto& well : well_container_) {
-                    well->solveWellEquation(ebosSimulator_, this->wellState(), local_deferredLogger);
-                }
-                updateWellControls(local_deferredLogger, /* check group controls */ false);
-            }
-
             maybeDoGasLiftOptimize(local_deferredLogger);
             assembleWellEq(dt, local_deferredLogger);
         } catch (const std::runtime_error& e) {
@@ -1610,15 +1602,17 @@ namespace Opm {
         std::string exc_msg;
         try {
             for (const auto& well : well_container_) {
+                const bool old_well_operable = well->isOperable();
                 well->checkWellOperability(ebosSimulator_, this->wellState(), deferred_logger);
-            }
-            // since the controls are all updated, we should update well_state accordingly
-            for (const auto& well : well_container_) {
-                const int w = well->indexOfWell();
-                if (!well->isOperable() ) continue;
 
+                // since the controls are all updated, we should update well_state accordingly
+                const int w = well->indexOfWell();
                 if (this->wellState().effectiveEventsOccurred(w) ) {
                     well->updateWellStateWithTarget(ebosSimulator_, this->wellState(), deferred_logger);
+                }
+
+                if (param_.solve_welleq_initially_) {
+                    well->solveWellEquation(ebosSimulator_, this->wellState(), deferred_logger);
                 }
 
                 // there is no new well control change input within a report step,
@@ -1630,6 +1624,23 @@ namespace Opm {
                 if (this->wellState().effectiveEventsOccurred(w) ) {
                     this->wellState().setEffectiveEventsOccurred(w, false);
                 }
+
+                const bool well_operable = well->isOperable();
+                if (!well_operable && old_well_operable) {
+                    const Well& well_ecl = getWellEcl(well->name());
+                    if (well_ecl.getAutomaticShutIn()) {
+                        deferred_logger.info(" well " + well->name() + " gets SHUT at the beginning of the time step ");
+                    } else {
+                        if (!well->wellIsStopped()) {
+                            deferred_logger.info(" well " + well->name() + " gets STOPPED at the beginning of the time step ");
+                            well->stopWell();
+                        }
+                    }
+                } else if (well_operable && !old_well_operable) {
+                    deferred_logger.info(" well " + well->name() + " gets REVIVED at the beginning of the time step ");
+                    well->openWell();
+                }
+
             }  // end of for (const auto& well : well_container_)
             updatePrimaryVariables(deferred_logger);
         } catch (const std::runtime_error& e) {

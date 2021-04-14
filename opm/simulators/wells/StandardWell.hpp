@@ -181,11 +181,6 @@ namespace Opm
 
         virtual void initPrimaryVariablesEvaluation() const override;
 
-        virtual void assembleWellEq(const Simulator& ebosSimulator,
-                                    const double dt,
-                                    WellState& well_state,
-                                    Opm::DeferredLogger& deferred_logger) override;
-
         virtual void updateWellStateWithTarget(const Simulator& ebos_simulator,
                                                WellState& well_state,
                                                Opm::DeferredLogger& deferred_logger) const override;

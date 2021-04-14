@@ -538,30 +538,6 @@ namespace Opm
 
 
 
-    template<typename TypeTag>
-    void
-    StandardWell<TypeTag>::
-    assembleWellEq(const Simulator& ebosSimulator,
-                   const double dt,
-                   WellState& well_state,
-                   Opm::DeferredLogger& deferred_logger)
-    {
-        checkWellOperability(ebosSimulator, well_state, deferred_logger);
-
-        const bool use_inner_iterations = param_.use_inner_iterations_wells_;
-        if (use_inner_iterations) {
-            this->iterateWellEquations(ebosSimulator, dt, well_state, deferred_logger);
-        }
-
-        // TODO: inj_controls and prod_controls are not used in the following function for now
-        const auto& summary_state = ebosSimulator.vanguard().summaryState();
-        const auto inj_controls = well_ecl_.isInjector() ? well_ecl_.injectionControls(summary_state) : Well::InjectionControls(0);
-        const auto prod_controls = well_ecl_.isProducer() ? well_ecl_.productionControls(summary_state) : Well::ProductionControls(0);
-        assembleWellEqWithoutIteration(ebosSimulator, dt, inj_controls, prod_controls, well_state, deferred_logger);
-    }
-
-
-
 
     template<typename TypeTag>
     void
@@ -4109,6 +4085,7 @@ namespace Opm
         const int max_iter = param_.max_inner_iter_wells_;
         int it = 0;
         bool converged;
+        initPrimaryVariablesEvaluation();
         do {
             assembleWellEqWithoutIteration(ebosSimulator, dt, inj_controls, prod_controls, well_state, deferred_logger);
 

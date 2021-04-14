@@ -520,6 +520,10 @@ namespace Opm
             return false;
         }
 
+        if ( !this->isOperable() ) {
+            return false;
+        }
+
         const auto& summaryState = ebos_simulator.vanguard().summaryState();
         const auto& schedule = ebos_simulator.vanguard().schedule();
         const auto& well = well_ecl_;
@@ -1352,6 +1356,50 @@ namespace Opm
     template<typename TypeTag>
     void
     WellInterface<TypeTag>::
+    assembleWellEq(const Simulator& ebosSimulator,
+                   const double dt,
+                   WellState& well_state,
+                   Opm::DeferredLogger& deferred_logger)
+    {
+        const bool old_well_operable = this->operability_status_.isOperable();
+        checkWellOperability(ebosSimulator, well_state, deferred_logger);
+
+        // try to solve the well seperated from the reservoir to
+        // 1) get a better initial solution, 2) avoid adding non-converged well solution that
+        // messes up the full linear system.
+        bool converged = this->iterateWellEquations(ebosSimulator, dt, well_state, deferred_logger);
+
+        // unsolvable wells are treated as not operable and will not be solved for in this iteration.
+        if (!converged) {
+            if (!this->isInjector()) // the well operability system currently works only for producers.
+                this->operability_status_.solvable = false;
+        }
+        const bool well_operable = this->operability_status_.isOperable();
+        if (!well_operable && old_well_operable) {
+            if (well_ecl_.getAutomaticShutIn()) {
+                deferred_logger.info(" well " + name() + " gets SHUT during iteration ");
+            } else {
+                if (!this->wellIsStopped()) {
+                    deferred_logger.info(" well " + name() + " gets STOPPED during iteration ");
+                    this->stopWell();
+                    changed_to_stopped_this_step_ = true;
+                }
+            }
+        } else if (well_operable && !old_well_operable) {
+            deferred_logger.info(" well " + name() + " gets REVIVED during iteration ");
+            this->openWell();
+            changed_to_stopped_this_step_ = false;
+        }
+
+        const auto& summary_state = ebosSimulator.vanguard().summaryState();
+        const auto inj_controls = well_ecl_.isInjector() ? well_ecl_.injectionControls(summary_state) : Well::InjectionControls(0);
+        const auto prod_controls = well_ecl_.isProducer() ? well_ecl_.productionControls(summary_state) : Well::ProductionControls(0);
+        assembleWellEqWithoutIteration(ebosSimulator, dt, inj_controls, prod_controls, well_state, deferred_logger);
+    }
+
+    template<typename TypeTag>
+    void
+    WellInterface<TypeTag>::
     solveWellForTesting(const Simulator& ebosSimulator, WellState& well_state,
                         Opm::DeferredLogger& deferred_logger)
     {
@@ -1359,9 +1407,7 @@ namespace Opm
         const WellState well_state0 = well_state;
         const double dt = ebosSimulator.timeStepSize();
         const bool converged = iterateWellEquations(ebosSimulator, dt, well_state, deferred_logger);
-        if (converged) {
-            deferred_logger.debug("WellTest: Well equation for well " + name() +  " converged");
-        } else {
+        if (!converged) {
             const int max_iter = param_.max_welleq_iter_;
             deferred_logger.debug("WellTest: Well equation for well " +name() + " failed converging in "
                           + std::to_string(max_iter) + " iterations");
@@ -1383,12 +1429,14 @@ namespace Opm
         const WellState well_state0 = well_state;
         const double dt = ebosSimulator.timeStepSize();
         const bool converged = iterateWellEquations(ebosSimulator, dt, well_state, deferred_logger);
-        if (converged) {
-            deferred_logger.debug("Compute initial well solution for well " + name() +  ". Converged");
-        } else {
+        if (!converged) {
             const int max_iter = param_.max_welleq_iter_;
             deferred_logger.debug("Compute initial well solution for well " +name() + ". Failed to converge in "
                                   + std::to_string(max_iter) + " iterations");
+
+            if (!this->isInjector()) // the well operability system currently works only for producers.
+                this->operability_status_.solvable = false;
+
             well_state = well_state0;
         }
     }
@@ -1509,27 +1557,7 @@ namespace Opm
             return;
         }
 
-        const bool old_well_operable = this->operability_status_.isOperable();
-
         updateWellOperability(ebos_simulator, well_state, deferred_logger);
-
-        const bool well_operable = this->operability_status_.isOperable();
-
-        if (!well_operable && old_well_operable) {
-            if (well_ecl_.getAutomaticShutIn()) {
-                deferred_logger.info(" well " + name() + " gets SHUT during iteration ");
-            } else {
-                if (!this->wellIsStopped()) {
-                    deferred_logger.info(" well " + name() + " gets STOPPED during iteration ");
-                    this->stopWell();
-                    changed_to_stopped_this_step_ = true;
-                }
-            }
-        } else if (well_operable && !old_well_operable) {
-            deferred_logger.info(" well " + name() + " gets REVIVED during iteration ");
-            this->openWell();
-            changed_to_stopped_this_step_ = false;
-        }
     }
 
 
