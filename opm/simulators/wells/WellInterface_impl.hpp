@@ -1367,7 +1367,9 @@ namespace Opm
         // try to solve the well seperated from the reservoir to
         // 1) get a better initial solution, 2) avoid adding non-converged well solution that
         // messes up the full linear system.
-        bool converged = this->iterateWellEquations(ebosSimulator, dt, well_state, deferred_logger);
+        bool converged = false;
+        if (!this->wellIsStopped())
+            converged = this->iterateWellEquations(ebosSimulator, dt, well_state, deferred_logger);
 
         // unsolvable wells are treated as not operable and will not be solved for in this iteration.
         if (!converged) {

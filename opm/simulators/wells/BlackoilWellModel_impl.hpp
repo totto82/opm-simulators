@@ -833,7 +833,7 @@ namespace Opm {
 
                 // If a production well disallows crossflow and its
                 // (prediction type) rate control is zero, then it is effectively shut.
-                if (!well_ecl.getAllowCrossFlow() && well_ecl.isProducer() && well_ecl.predictionMode()) {
+                if (well_ecl.isProducer()) {
                     const auto& summaryState = ebosSimulator_.vanguard().summaryState();
                     const auto prod_controls = well_ecl.productionControls(summaryState);
 
@@ -860,9 +860,16 @@ namespace Opm {
                         zero_rate_control = is_zero(prod_controls.liquid_rate);
                         break;
 
-                    case Well::ProducerCMode::RESV:
-                        zero_rate_control = is_zero(prod_controls.resv_rate);
+                    case Well::ProducerCMode::RESV:{
+                        if(well_ecl.predictionMode())
+                            zero_rate_control = is_zero(prod_controls.resv_rate);
+                        else {
+                            zero_rate_control = is_zero(prod_controls.oil_rate)
+                                    && is_zero(prod_controls.water_rate)
+                                    && is_zero(prod_controls.gas_rate);
+                        }
                         break;
+                    }
 
                     default:
                         // Might still have zero rate controls, but is pressure controlled.
@@ -871,9 +878,14 @@ namespace Opm {
                     }
 
                     if (zero_rate_control) {
-                        // Treat as shut, do not add to container.
-                        local_deferredLogger.info("  Well shut due to zero rate control and disallowing crossflow: " + well_ecl.name());
-                        this->wellState().shutWell(w);
+                        if (well_ecl.getAllowCrossFlow()) {
+                            this->wellState().stopWell(w);
+                            wellIsStopped = true;
+                        } else {
+                            // Treat as shut, do not add to container.
+                            local_deferredLogger.info("  Well shut due to zero rate control and disallowing crossflow: " + well_ecl.name());
+                            this->wellState().shutWell(w);
+                        }
                         continue;
                     }
                 }
