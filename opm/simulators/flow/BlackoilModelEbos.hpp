@@ -713,7 +713,19 @@ namespace Opm {
                 }
 
                 if constexpr (has_energy_) {
-                    B_avg[ contiEnergyEqIdx ] += 1.0;
+                    // TODO rename B_avg to scaling factor
+                    // Scale residual with one over enthalpy 1 / [J / kg]
+                    // in order to make it more comperable to the mass balance error tolerances
+                    int first_active_phase = -1;
+                    for (unsigned phaseIdx = 0; phaseIdx < FluidSystem::numPhases; ++phaseIdx)
+                    {
+                        if (FluidSystem::phaseIsActive(phaseIdx)) {
+                            first_active_phase = phaseIdx;
+                            break;
+                        }
+                    }
+                    assert(first_active_phase >= 0);
+                    B_avg[ contiEnergyEqIdx ] += 1.0 / fs.enthalpy(first_active_phase).value();
                     const auto R2 = ebosResid[cell_idx][contiEnergyEqIdx];
                     R_sum[ contiEnergyEqIdx ] += R2;
                     maxCoeff[ contiEnergyEqIdx ] = std::max( maxCoeff[ contiEnergyEqIdx ], std::abs( R2 ) / pvValue );
