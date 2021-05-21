@@ -256,19 +256,21 @@ namespace WellGroupHelpers
             if(!group.hasInjectionControl(phase))
                 continue;
 
-            double guideRateValue = 0.0;
             const auto& controls = group.injectionControls(phase, summaryState);
             switch (controls.guide_rate_def){
             case Group::GuideRateInjTarget::RATE:
+                // use the value given in the GCONINJE
+                guideRate->compute(group.name(), phase, reportStepIdx);
                 break;
             case Group::GuideRateInjTarget::VOID:
-            {
-                guideRateValue = group_state.injection_vrep_rate(group.name());
+            {                
+                double guideRateValue = group_state.injection_vrep_rate(group.name());
+                guideRate->compute(group.name(), phase, reportStepIdx, guideRateValue);
                 break;
             }
             case Group::GuideRateInjTarget::NETV:
             {
-                guideRateValue = group_state.injection_vrep_rate(group.name());
+                double guideRateValue = group_state.injection_vrep_rate(group.name());
                 const std::vector<double>& injRES = group_state.injection_reservoir_rates(group.name());
                 if (phase != Phase::OIL && pu.phase_used[BlackoilPhases::Liquid])
                     guideRateValue -= injRES[pu.phase_pos[BlackoilPhases::Liquid]];
@@ -276,6 +278,8 @@ namespace WellGroupHelpers
                     guideRateValue -= injRES[pu.phase_pos[BlackoilPhases::Vapour]];
                 if (phase != Phase::WATER && pu.phase_used[BlackoilPhases::Aqua])
                     guideRateValue -= injRES[pu.phase_pos[BlackoilPhases::Aqua]];
+
+                guideRate->compute(group.name(), phase, reportStepIdx, guideRateValue);
                 break;
             }
             case Group::GuideRateInjTarget::RESV:
@@ -289,7 +293,6 @@ namespace WellGroupHelpers
                                  "Invalid GuideRateInjTarget in updateGuideRatesForInjectionGroups",
                                  deferred_logger);
             }
-            guideRate->compute(group.name(), phase, reportStepIdx, guideRateValue);
         }
     }
 
