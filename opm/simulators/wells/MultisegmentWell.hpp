@@ -146,7 +146,8 @@ namespace Opm
             DeferredLogger&,
             GLiftProdWells &,
             GLiftOptWells &,
-            GLiftWellStateMap &
+            GLiftWellStateMap &,
+            GasLiftGroupInfo &
         ) const override {
             // Not implemented yet
         }

@@ -50,6 +50,8 @@
 #include <opm/simulators/wells/BlackoilWellModelGeneric.hpp>
 #include <opm/simulators/wells/GasLiftSingleWell.hpp>
 #include <opm/simulators/wells/GasLiftWellState.hpp>
+#include <opm/simulators/wells/GasLiftStage2.hpp>
+#include <opm/simulators/wells/GasLiftGroupInfo.hpp>
 #include <opm/simulators/wells/PerforationData.hpp>
 #include <opm/simulators/wells/VFPInjProperties.hpp>
 #include <opm/simulators/wells/VFPProdProperties.hpp>
@@ -100,6 +102,11 @@ namespace Opm {
             using RateVector = GetPropType<TypeTag, Properties::RateVector>;
             using GlobalEqVector = GetPropType<TypeTag, Properties::GlobalEqVector>;
             using SparseMatrixAdapter = GetPropType<TypeTag, Properties::SparseMatrixAdapter>;
+            using GLiftOptWells = BlackoilWellModelGeneric::GLiftOptWells;
+            using GLiftProdWells = BlackoilWellModelGeneric::GLiftProdWells;
+            using GLiftWellStateMap = BlackoilWellModelGeneric::GLiftWellStateMap;
+            using GLiftEclWells = BlackoilWellModelGeneric::GLiftEclWells;
+            using GLiftSyncGroups = BlackoilWellModelGeneric::GLiftSyncGroups;
 
             typedef typename BaseAuxiliaryModule<TypeTag>::NeighborSet NeighborSet;
 
@@ -359,6 +366,10 @@ namespace Opm {
             void assembleWellEq(const double dt, DeferredLogger& deferred_logger);
 
             void maybeDoGasLiftOptimize(DeferredLogger& deferred_logger);
+
+            void gasLiftOptimizationStage1(DeferredLogger& deferred_logger,
+                GLiftProdWells &prod_wells, GLiftOptWells &glift_wells,
+                GasLiftGroupInfo &group_info, GLiftWellStateMap &state_map);
 
             void extractLegacyCellPvtRegionIndex_();
 
