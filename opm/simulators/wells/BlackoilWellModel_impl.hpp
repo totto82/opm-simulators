@@ -1095,13 +1095,14 @@ namespace Opm {
                 ecl_well_map,
                 ebosSimulator_.vanguard().schedule(),
                 ebosSimulator_.vanguard().summaryState(),
+                //ebosSimulator_.vanguard().grid().comm(),
                 ebosSimulator_.episodeIndex(),
                 ebosSimulator_.model().newtonMethod().numIterations(),
                 phase_usage_,
                 deferred_logger,
                 this->wellState()
             };
-            group_info.initialize();
+            group_info.initialize(ebosSimulator_.vanguard().grid().comm());
             // Stage1: Optimize single wells not checking any group limits
             //  NOTE: Only the wells in "group_info" needs to be optimized
             for (const auto &item : group_info.wellGroupMap()) {
