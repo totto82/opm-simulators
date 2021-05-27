@@ -57,13 +57,12 @@ GasLiftStage2(
     phase_usage_{well_model_.phaseUsage()},
     glo_{schedule_.glo(report_step_idx_)},
     comm_{ebos_simulator.vanguard().grid().comm()},
-    debug_{false}
+    debug_{true}
 {
 //    this->time_step_idx_
 //        = this->ebos_simulator_.model().newtonMethod().currentTimeStep();
     this->nonlinear_iteration_idx_
         = this->ebos_simulator_.model().newtonMethod().numIterations();
-
 }
 
 /********************************************
@@ -525,6 +524,7 @@ mpiSyncLocalToGlobalGradVector_(
     }
 }
 
+
 template<typename TypeTag>
 void
 GasLiftStage2<TypeTag>::
@@ -571,6 +571,7 @@ optimizeGroupsRecursive_(const Group &group)
         optimizeGroup_(group);
 
 }
+
 template<typename TypeTag>
 void
 GasLiftStage2<TypeTag>::
@@ -873,6 +874,7 @@ updateGradVector_(const std::string &name, std::vector<GradPair> &grads, double 
     // NOTE: the gradient vector is no longer sorted, but sorting will be done
     //   later in getEcoGradients()
 }
+
 
 /***********************************************
  * Public methods declared in OptimizeState

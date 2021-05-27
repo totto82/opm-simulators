@@ -46,7 +46,9 @@
 namespace Opm {
     template<typename TypeTag> class GasLiftSingleWell;
     template<typename TypeTag> class BlackoilWellModel;
+    class GasLiftGroupInfo;
 }
+#include <opm/simulators/wells/GasLiftGroupInfo.hpp>
 #include <opm/simulators/wells/GasLiftSingleWell.hpp>
 #include <opm/simulators/wells/BlackoilWellModel.hpp>
 #include <opm/simulators/flow/BlackoilModelParametersEbos.hpp>
@@ -173,7 +175,8 @@ namespace Opm
             DeferredLogger& deferred_logger,
             GLiftProdWells& prod_wells,
             GLiftOptWells& glift_wells,
-            GLiftWellStateMap& state_map
+            GLiftWellStateMap& state_map,
+            GasLiftGroupInfo& group_rates
         ) const = 0;
 
         void updateWellTestState(const WellState& well_state,
