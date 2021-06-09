@@ -1170,7 +1170,10 @@ namespace WellGroupHelpers
         }
         // Avoid negative target rates comming from too large local reductions.
         const double target_rate = std::max(1e-12, target / efficiencyFactorInclGroup);
-        return std::make_pair(current_rate > target_rate, target_rate / current_rate);
+        double scale = 1.0;
+        if (current_rate > 1e-12)
+            scale = target_rate / current_rate;
+        return std::make_pair(current_rate > target_rate, scale);
     }
 
     std::pair<bool, double> checkGroupConstraintsInj(const std::string& name,
@@ -1294,7 +1297,10 @@ namespace WellGroupHelpers
         }
         // Avoid negative target rates comming from too large local reductions.
         const double target_rate = std::max(1e-12, target / efficiencyFactorInclGroup);
-        return std::make_pair(current_rate > target_rate, target_rate / current_rate);
+        double scale = 1.0;
+        if (current_rate > 1e-12)
+            scale = target_rate / current_rate;
+        return std::make_pair(current_rate > target_rate, scale);
     }
 
     template <class Comm>
