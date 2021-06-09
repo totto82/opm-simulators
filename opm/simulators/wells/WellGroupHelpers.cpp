@@ -423,6 +423,76 @@ namespace WellGroupHelpers
             group_state.update_production_reduction_rates(group.name(), groupTargetReduction);
     }
 
+    void updateWellRatesFromGroupTargetScale(const double scale,
+                                             const Group& group,
+                                             const Schedule& schedule,
+                                             const int reportStepIdx,
+                                             bool isInjector,
+                                             const GroupState& group_state,
+                                             WellState& wellState) {
+        for (const std::string& groupName : group.groups()) {
+            bool individual_control = false;
+            if (isInjector) {
+                const Phase all[] = {Phase::WATER, Phase::OIL, Phase::GAS};
+                for (Phase phase : all) {
+                    const Group::InjectionCMode& currentGroupControl
+                            = group_state.injection_control(groupName, phase);
+                    individual_control = individual_control || (currentGroupControl != Group::InjectionCMode::FLD
+                                                     && currentGroupControl != Group::InjectionCMode::NONE);
+                }
+            } else {
+                const Group::ProductionCMode& currentGroupControl = group_state.production_control(groupName);
+                individual_control = (currentGroupControl != Group::ProductionCMode::FLD
+                                                 && currentGroupControl != Group::ProductionCMode::NONE);
+            }
+            if (!individual_control) {
+                const Group& groupTmp = schedule.getGroup(groupName, reportStepIdx);
+                updateWellRatesFromGroupTargetScale(scale, groupTmp, schedule, reportStepIdx, isInjector, group_state, wellState);
+            }
+        }
+
+        const int np = wellState.numPhases();
+        for (const std::string& wellName : group.wells()) {
+            const auto& wellTmp = schedule.getWell(wellName, reportStepIdx);
+
+            if (wellTmp.isProducer() && isInjector)
+                continue;
+
+            if (wellTmp.isInjector() && !isInjector)
+                continue;
+
+            if (wellTmp.getStatus() == Well::Status::SHUT)
+                continue;
+
+            const auto& end = wellState.wellMap().end();
+            const auto& it = wellState.wellMap().find(wellName);
+            if (it == end) // the well is not found
+                continue;
+
+            int well_index = it->second[0];
+
+            if (! wellState.wellIsOwned(well_index, wellName) ) // Only sum once
+            {
+                continue;
+            }
+
+            // scale rates
+            if (isInjector) {
+                if (wellState.currentInjectionControl(well_index) == Well::InjectorCMode::GRUP)
+                    for (int phase = 0; phase < np; phase++) {
+                        wellState.wellRates(well_index)[phase] *= scale;
+                    }
+            } else {
+                if (wellState.currentProductionControl(well_index) == Well::ProducerCMode::GRUP)
+                    for (int phase = 0; phase < np; phase++) {
+                        wellState.wellRates(well_index)[phase] *= scale;
+                    }
+            }
+        }
+
+
+    }
+
 
     void updateVREPForGroups(const Group& group,
                              const Schedule& schedule,

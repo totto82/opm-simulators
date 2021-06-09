@@ -1106,6 +1106,8 @@ namespace Opm {
             updateGroupIndividualControls(deferred_logger, switched_groups,
                                           episodeIdx, iterationIdx);
 
+            std::set<std::string> switched_groups;
+
             // Check group's constraints from higher levels.
             updateGroupHigherControls(deferred_logger,
                                       episodeIdx,
@@ -1126,9 +1128,9 @@ namespace Opm {
 
         // Check individual well constraints and communicate.
         for (const auto& well : well_container_) {
-            if (switched_wells.count(well->name())) {
-                continue;
-            }
+            //if (switched_wells.count(well->name())) {
+            //    continue;
+            //}
             const auto mode = WellInterface<TypeTag>::IndividualOrGroup::Individual;
             well->updateWellControl(ebosSimulator_, mode, this->wellState(), this->groupState(), deferred_logger);
         }
