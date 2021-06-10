@@ -618,7 +618,6 @@ namespace Opm
 
 
 
-
     template<typename TypeTag>
     void
     StandardWell<TypeTag>::

@@ -189,6 +189,7 @@ public:
                                        DeferredLogger& deferred_logger) = 0;
 
     void updateWellStateWithTarget(const Simulator& ebos_simulator,
+                                   const GroupState& group_state,
                                    WellState& well_state,
                                    DeferredLogger& deferred_logger) const;
 
