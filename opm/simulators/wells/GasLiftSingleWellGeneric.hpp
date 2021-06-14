@@ -53,12 +53,6 @@ protected:
     static const int Oil = BlackoilPhases::Liquid;
     static const int Gas = BlackoilPhases::Vapour;
     static constexpr double ALQ_EPSILON = 1e-8;
-    using MPIComm = typename Dune::MPIHelper::MPICommunicator;
-#if DUNE_VERSION_NEWER(DUNE_COMMON, 2, 7)
-    using Communication = Dune::Communication<MPIComm>;
-#else
-    using Communication = Dune::CollectiveCommunication<MPIComm>;
-#endif
 
 public:
     using GLiftSyncGroups = std::set<int>;
@@ -105,7 +99,6 @@ protected:
         GasLiftGroupInfo &group_info,
         const Schedule& schedule,
         const int report_step_idx,
-        const Communication& comm,
         GLiftSyncGroups &sync_groups
     );
 
@@ -230,7 +223,6 @@ protected:
     const Well& ecl_well_;
     const SummaryState& summary_state_;
     GasLiftGroupInfo& group_info_;
-    const Communication& comm_;
     GLiftSyncGroups& sync_groups_;
     const Well::ProductionControls controls_;
 

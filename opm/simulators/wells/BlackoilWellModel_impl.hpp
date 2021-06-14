@@ -870,12 +870,11 @@ namespace Opm {
                 ebosSimulator_.vanguard().summaryState(),
                 ebosSimulator_.episodeIndex(),
                 ebosSimulator_.model().newtonMethod().numIterations(),
-                ebosSimulator_.vanguard().grid().comm(),
                 phase_usage_,
                 deferred_logger,
                 this->wellState()
             };
-            group_info.initialize();
+            group_info.initialize(ebosSimulator_.vanguard().grid().comm());
             gasLiftOptimizationStage1(
                 deferred_logger, prod_wells, glift_wells, group_info, state_map);
             gasLiftOptimizationStage2(

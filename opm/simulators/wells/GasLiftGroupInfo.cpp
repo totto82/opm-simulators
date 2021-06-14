@@ -28,7 +28,6 @@ GasLiftGroupInfo(
     const SummaryState &summary_state,
     const int report_step_idx,
     const int iteration_idx,
-    const Communication& comm,
     const PhaseUsage &phase_usage,
     DeferredLogger &deferred_logger,
     WellState &well_state
@@ -38,7 +37,6 @@ GasLiftGroupInfo(
     summary_state_{summary_state},
     report_step_idx_{report_step_idx},
     iteration_idx_{iteration_idx},
-    comm_{comm},
     phase_usage_{phase_usage},
     deferred_logger_{deferred_logger},
     well_state_{well_state},
@@ -65,18 +63,6 @@ GasLiftGroupInfo::
 getGroupIdx(const std::string& group_name)
 {
     return this->group_idx_.at(group_name);
-}
-
-void
-GasLiftGroupInfo::
-initialize()
-{
-    const auto& group = this->schedule_.getGroup("FIELD", this->report_step_idx_);
-    initializeGroupRatesRecursive_(group);
-    std::vector<std::string> group_names;
-    std::vector<double> group_efficiency;
-    initializeWell2GroupMapRecursive_(
-        group, group_names, group_efficiency, /*current efficiency=*/1.0);
 }
 
 double
@@ -367,75 +353,7 @@ initializeWell2GroupMapRecursive_(
     }
 }
 
-std::tuple<double, double, double>
-GasLiftGroupInfo::
-initializeGroupRatesRecursive_(const Group &group)
-{
-    double oil_rate = 0.0;
-    double gas_rate = 0.0;
-    double alq = 0.0;
-    if (group.wellgroup()) {
-        for (const std::string& well_name : group.wells()) {
-            // NOTE: we cannot simply use:
-            //
-            //  const auto &well =
-            //    this->schedule_.getWell(well_name, this->report_step_idx_);
-            //
-            // since the well may not be active (present in the well container)
-            auto itr = this->ecl_wells_.find(well_name);
-            if (itr != this->ecl_wells_.end()) {
-                const Well *well = (itr->second).first;
-                assert(well); // Should never be nullptr
-                const int index = (itr->second).second;
-                if (well->isProducer()) {
-                    auto [sw_oil_rate, sw_gas_rate] = getProducerWellRates_(index);
-                    auto sw_alq = this->well_state_.getALQ(well_name);
-                    double factor = well->getEfficiencyFactor();
-                    oil_rate += (factor * sw_oil_rate);
-                    gas_rate += (factor * sw_gas_rate);
-                    alq += (factor * sw_alq);
-                }
-            }
-        }
-    }
-    else {
-        for (const std::string& group_name : group.groups()) {
-            if (!this->schedule_.back().groups.has(group_name))
-                continue;
-            const Group& sub_group = this->schedule_.getGroup(
-                group_name, this->report_step_idx_);
-            auto [sg_oil_rate, sg_gas_rate, sg_alq]
-                = initializeGroupRatesRecursive_(sub_group);
-            const auto gefac = sub_group.getGroupEfficiencyFactor();
-            oil_rate += (gefac * sg_oil_rate);
-            gas_rate += (gefac * sg_gas_rate);
-            alq += (gefac * sg_alq);
-        }
-    }
-    // These sums needs to be communictated
-    oil_rate = this->comm_.sum(oil_rate);
-    gas_rate = this->comm_.sum(gas_rate);
-    alq = this->comm_.sum(alq);
-    std::optional<double> oil_target, gas_target, max_total_gas, max_alq;
-    const auto controls = group.productionControls(this->summary_state_);
-    if (group.has_control(Group::ProductionCMode::ORAT)) {
-        oil_target = controls.oil_target;
-    }
-    if (group.has_control(Group::ProductionCMode::GRAT)) {
-        gas_target = controls.gas_target;
-    }
-    if (this->glo_.has_group(group.name())) {
-        const auto &gl_group = this->glo_.group(group.name());
-        max_alq = gl_group.max_lift_gas();
-        max_total_gas = gl_group.max_total_gas();
-    }
-    if (oil_target || gas_target || max_total_gas || max_alq) {
-        updateGroupIdxMap_(group.name());
-        this->group_rate_map_.try_emplace(group.name(),
-            oil_rate, gas_rate, alq, oil_target, gas_target, max_total_gas, max_alq);
-    }
-    return std::make_tuple(oil_rate, gas_rate, alq);
-}
+
 
 // TODO: It would be more efficient if the group idx map was build once
 //  per time step (or better: once per report step) and saved e.g. in

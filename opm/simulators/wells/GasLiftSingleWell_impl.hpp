@@ -39,7 +39,6 @@ GasLiftSingleWell(const StdWell &std_well,
         group_info,
         ebos_simulator.vanguard().schedule(),
         ebos_simulator.episodeIndex(),
-        ebos_simulator.vanguard().grid().comm(),
         sync_groups
     )
    , ebos_simulator_{ebos_simulator}

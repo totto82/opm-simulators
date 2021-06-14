@@ -56,12 +56,6 @@ class GasLiftGroupInfo
         std::map<std::string, GroupRates>;
     using GroupIdxMap = std::map<std::string, int>;
 
-    using MPIComm = typename Dune::MPIHelper::MPICommunicator;
-#if DUNE_VERSION_NEWER(DUNE_COMMON, 2, 7)
-    using Communication = Dune::Communication<MPIComm>;
-#else
-    using Communication = Dune::CollectiveCommunication<MPIComm>;
-#endif
     // TODO: same definition with WellInterface, and
     //   WellState eventually they should go to a common header file.
     static const int Water = BlackoilPhases::Aqua;
@@ -75,13 +69,24 @@ public:
         const SummaryState& summary_state,
         const int report_step_idx,
         const int iteration_idx,
-        const Communication& comm,
         const PhaseUsage& phase_usage,
         DeferredLogger& deferred_logger,
         WellState& well_state);
     std::vector<std::pair<std::string,double>>& getWellGroups(
         const std::string& well_name);
-    void initialize();
+
+    template<class Comm>
+    void
+    initialize(const Comm& comm)
+    {
+        const auto& group = this->schedule_.getGroup("FIELD", this->report_step_idx_);
+        initializeGroupRatesRecursive_(comm, group);
+        std::vector<std::string> group_names;
+        std::vector<double> group_efficiency;
+        initializeWell2GroupMapRecursive_(
+            group, group_names, group_efficiency, /*current efficiency=*/1.0);
+    }
+
     double alqRate(const std::string& group_name);
     double gasRate(const std::string& group_name);
     int getGroupIdx(const std::string& group_name);
@@ -102,12 +107,80 @@ private:
     void displayDebugMessage_(const std::string& msg);
     void displayDebugMessage_(const std::string& msg, const std::string& well_name);
     std::pair<double, double> getProducerWellRates_(const int index);
-    std::tuple<double, double, double> initializeGroupRatesRecursive_(
-        const Group& group);
     void initializeWell2GroupMapRecursive_(
         const Group& group, std::vector<std::string>& group_names,
         std::vector<double>& group_efficiency, double cur_efficiency);
     void updateGroupIdxMap_(const std::string& group_name);
+
+    template<class Comm>
+    std::tuple<double, double, double>
+    initializeGroupRatesRecursive_(const Comm& comm, const Group &group)
+    {
+        double oil_rate = 0.0;
+        double gas_rate = 0.0;
+        double alq = 0.0;
+        if (group.wellgroup()) {
+            for (const std::string& well_name : group.wells()) {
+                // NOTE: we cannot simply use:
+                //
+                //  const auto &well =
+                //    this->schedule_.getWell(well_name, this->report_step_idx_);
+                //
+                // since the well may not be active (present in the well container)
+                auto itr = this->ecl_wells_.find(well_name);
+                if (itr != this->ecl_wells_.end()) {
+                    const Well *well = (itr->second).first;
+                    assert(well); // Should never be nullptr
+                    const int index = (itr->second).second;
+                    if (well->isProducer()) {
+                        auto [sw_oil_rate, sw_gas_rate] = getProducerWellRates_(index);
+                        auto sw_alq = this->well_state_.getALQ(well_name);
+                        double factor = well->getEfficiencyFactor();
+                        oil_rate += (factor * sw_oil_rate);
+                        gas_rate += (factor * sw_gas_rate);
+                        alq += (factor * sw_alq);
+                    }
+                }
+            }
+        }
+        else {
+            for (const std::string& group_name : group.groups()) {
+                if (!this->schedule_.back().groups.has(group_name))
+                    continue;
+                const Group& sub_group = this->schedule_.getGroup(
+                    group_name, this->report_step_idx_);
+                auto [sg_oil_rate, sg_gas_rate, sg_alq]
+                    = initializeGroupRatesRecursive_(comm, sub_group);
+                const auto gefac = sub_group.getGroupEfficiencyFactor();
+                oil_rate += (gefac * sg_oil_rate);
+                gas_rate += (gefac * sg_gas_rate);
+                alq += (gefac * sg_alq);
+            }
+        }
+        // These sums needs to be communictated
+        oil_rate = comm.sum(oil_rate);
+        gas_rate = comm.sum(gas_rate);
+        alq = comm.sum(alq);
+        std::optional<double> oil_target, gas_target, max_total_gas, max_alq;
+        const auto controls = group.productionControls(this->summary_state_);
+        if (group.has_control(Group::ProductionCMode::ORAT)) {
+            oil_target = controls.oil_target;
+        }
+        if (group.has_control(Group::ProductionCMode::GRAT)) {
+            gas_target = controls.gas_target;
+        }
+        if (this->glo_.has_group(group.name())) {
+            const auto &gl_group = this->glo_.group(group.name());
+            max_alq = gl_group.max_lift_gas();
+            max_total_gas = gl_group.max_total_gas();
+        }
+        if (oil_target || gas_target || max_total_gas || max_alq) {
+            updateGroupIdxMap_(group.name());
+            this->group_rate_map_.try_emplace(group.name(),
+                oil_rate, gas_rate, alq, oil_target, gas_target, max_total_gas, max_alq);
+        }
+        return std::make_tuple(oil_rate, gas_rate, alq);
+    }
 
     class GroupRates {
     public:
@@ -158,7 +231,6 @@ private:
     const SummaryState &summary_state_;
     const int report_step_idx_;
     const int iteration_idx_;
-    const Communication &comm_;
     const PhaseUsage &phase_usage_;
     DeferredLogger &deferred_logger_;
     WellState &well_state_;

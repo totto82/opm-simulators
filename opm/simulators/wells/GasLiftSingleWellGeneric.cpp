@@ -43,7 +43,6 @@ GasLiftSingleWellGeneric::GasLiftSingleWellGeneric(
     GasLiftGroupInfo &group_info,
     const Schedule& schedule,
     const int report_step_idx,
-    const Communication& comm,
     GLiftSyncGroups &sync_groups
 ) :
     deferred_logger_{deferred_logger}
@@ -51,7 +50,6 @@ GasLiftSingleWellGeneric::GasLiftSingleWellGeneric(
     , ecl_well_{ecl_well}
     , summary_state_{summary_state}
     , group_info_{group_info}
-    , comm_{comm}
     , sync_groups_{sync_groups}
     , controls_{ecl_well_.productionControls(summary_state_)}
     , num_phases_{well_state_.numPhases()}
