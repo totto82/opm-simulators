@@ -798,7 +798,7 @@ checkGroupHigherConstraints(const Group& group,
 
     std::vector<double> rates(phase_usage_.num_phases, 0.0);
 
-    const bool skip = switched_groups.count(group.name()) || group.name() == "FIELD";
+    const bool skip = group.name() == "FIELD";
 
     if (!skip && group.isInjectionGroup()) {
         // Obtain rates for group.
