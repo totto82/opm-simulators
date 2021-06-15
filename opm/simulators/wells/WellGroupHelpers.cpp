@@ -1077,7 +1077,7 @@ namespace WellGroupHelpers
         if (currentGroupControl == Group::ProductionCMode::FLD || currentGroupControl == Group::ProductionCMode::NONE) {
             // Return if we are not available for parent group.
             if (!group.productionGroupControlAvailable()) {
-                std::cout << "HELLO" << std::endl;
+                //std::cout << "HELLO" << std::endl;
                 return std::make_pair(false, 1);
             }
             // Otherwise: check production share of parent's control.
@@ -1101,7 +1101,7 @@ namespace WellGroupHelpers
         // This can be false for FLD-controlled groups, we must therefore
         // check for FLD first (done above).
         if (!group.isProductionGroup()) {
-            std::cout << "HELLO 2" << std::endl;
+            //std::cout << "HELLO 2" << std::endl;
             return std::make_pair(false, 1.0);
         }
 
@@ -1175,8 +1175,8 @@ namespace WellGroupHelpers
         double scale = 1.0;
         if (current_rate > 1e-12)
             scale = target_rate / current_rate;
-        if(current_rate > target_rate)
-            std::cout << name << " " << parent << " " << current_rate << " " << target_rate << std::endl;
+        //if(current_rate > target_rate)
+        //    //std::cout << name << " " << parent << " " << current_rate << " " << target_rate << std::endl;
         return std::make_pair(current_rate > target_rate, scale);
     }
 

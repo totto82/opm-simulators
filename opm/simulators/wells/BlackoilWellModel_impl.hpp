@@ -822,9 +822,6 @@ namespace Opm {
                 prepareTimeStep(local_deferredLogger);
             }
             updateWellControls(local_deferredLogger, /* check group controls */ true);
-            updateWellControls(local_deferredLogger, /* check group controls */ true);
-            updateWellControls(local_deferredLogger, /* check group controls */ true);
-
 
             // Set the well primary variables based on the value of well solutions
             initPrimaryVariablesEvaluation();
@@ -1098,26 +1095,37 @@ namespace Opm {
         const int episodeIdx = ebosSimulator_.episodeIndex();
         const int iterationIdx = ebosSimulator_.model().newtonMethod().numIterations();
         updateAndCommunicateGroupData(episodeIdx, iterationIdx);
-
         updateNetworkPressures(episodeIdx);
 
         std::set<std::string> switched_wells;
         std::set<std::string> switched_groups;
+
+        bool check = true;
+        int check_iter = 0;
+        while(check && check_iter < 5) {
+        int number_of_groups_switched = switched_groups.size();
+        int number_of_groups_switched_start = number_of_groups_switched;
+        int number_of_wells_switched = switched_wells.size();
 
         if (checkGroupControls) {
             // Check group individual constraints.
             updateGroupIndividualControls(deferred_logger, switched_groups,
                                           episodeIdx, iterationIdx);
 
-            std::set<std::string> switched_groups;
-            updateAndCommunicateGroupData(episodeIdx, iterationIdx);
+            if (switched_groups.size() > number_of_groups_switched)
+                updateAndCommunicateGroupData(episodeIdx, iterationIdx);
+
+            number_of_groups_switched = switched_groups.size();
 
             // Check group's constraints from higher levels.
             updateGroupHigherControls(deferred_logger,
                                       episodeIdx,
                                       switched_groups);
 
-            updateAndCommunicateGroupData(episodeIdx, iterationIdx);
+            if (switched_groups.size() > number_of_groups_switched)
+                updateAndCommunicateGroupData(episodeIdx, iterationIdx);
+
+            number_of_groups_switched = switched_groups.size();
 
             // Check wells' group constraints and communicate.
             for (const auto& well : well_container_) {
@@ -1125,20 +1133,28 @@ namespace Opm {
                 const bool changed = well->updateWellControl(ebosSimulator_, mode, this->wellState(), this->groupState(), deferred_logger);
                 if (changed) {
                     switched_wells.insert(well->name());
+                    updateAndCommunicateGroupData(episodeIdx, iterationIdx);
                 }
             }
-            updateAndCommunicateGroupData(episodeIdx, iterationIdx);
         }
 
         // Check individual well constraints and communicate.
         for (const auto& well : well_container_) {
-            //if (switched_wells.count(well->name())) {
-            //    continue;
-            //}
             const auto mode = WellInterface<TypeTag>::IndividualOrGroup::Individual;
-            well->updateWellControl(ebosSimulator_, mode, this->wellState(), this->groupState(), deferred_logger);
+            const bool changed = well->updateWellControl(ebosSimulator_, mode, this->wellState(), this->groupState(), deferred_logger);
+            if (changed) {
+                switched_wells.insert(well->name());
+                updateAndCommunicateGroupData(episodeIdx, iterationIdx);
+            }
         }
-        updateAndCommunicateGroupData(episodeIdx, iterationIdx);
+        bool well_switched = switched_wells.size() > number_of_wells_switched;
+        bool group_switched = switched_groups.size() > number_of_groups_switched_start;
+
+        check = well_switched || group_switched;
+        check_iter++;
+
+        }
+
     }
 
 

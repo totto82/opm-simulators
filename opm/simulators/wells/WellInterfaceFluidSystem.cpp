@@ -966,7 +966,7 @@ getGroupInjectionTargetRate(const Group& group,
             // no appropriate controls defined on any of its
             // containing groups. We will therefore use the wells' bhp
             // limit equation as a fallback.
-            return 0.0;
+            return 1.0;
         } else {
             // Inject share of parents control
             const auto& parent = schedule.getGroup( group.parent(), currentStep());
@@ -979,7 +979,7 @@ getGroupInjectionTargetRate(const Group& group,
     const auto pu = phaseUsage();
 
     if (!group.isInjectionGroup()) {
-        return 0.0;
+        return 1.0;
     }
 
     // If we are here, we are at the topmost group to be visited in the recursion.
