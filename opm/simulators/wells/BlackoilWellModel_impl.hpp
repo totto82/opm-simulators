@@ -822,6 +822,9 @@ namespace Opm {
                 prepareTimeStep(local_deferredLogger);
             }
             updateWellControls(local_deferredLogger, /* check group controls */ true);
+            updateWellControls(local_deferredLogger, /* check group controls */ true);
+            updateWellControls(local_deferredLogger, /* check group controls */ true);
+
 
             // Set the well primary variables based on the value of well solutions
             initPrimaryVariablesEvaluation();
@@ -1107,6 +1110,7 @@ namespace Opm {
                                           episodeIdx, iterationIdx);
 
             std::set<std::string> switched_groups;
+            updateAndCommunicateGroupData(episodeIdx, iterationIdx);
 
             // Check group's constraints from higher levels.
             updateGroupHigherControls(deferred_logger,

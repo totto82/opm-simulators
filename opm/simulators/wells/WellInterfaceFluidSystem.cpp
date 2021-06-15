@@ -1037,7 +1037,7 @@ getGroupProductionTargetRate(const Group& group,
     if (currentGroupControl == Group::ProductionCMode::FLD ||
         currentGroupControl == Group::ProductionCMode::NONE) {
         if (!group.productionGroupControlAvailable()) {
-            return 0.0;
+            return 1.0;
         } else {
             // Produce share of parents control
             const auto& parent = schedule.getGroup(group.parent(), currentStep());
@@ -1050,7 +1050,7 @@ getGroupProductionTargetRate(const Group& group,
     const auto pu = phaseUsage();
 
     if (!group.isProductionGroup()) {
-        return 0.0;
+        return 1.0;
     }
 
     // If we are here, we are at the topmost group to be visited in the recursion.
