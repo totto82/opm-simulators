@@ -192,14 +192,16 @@ BlackoilAquiferModel<TypeTag>::init()
 
 
     const auto& connections = aquifer.connections();
-    for (const auto& aq : aquifer.ct()) {
-        aquifers_CarterTracy.emplace_back(connections[aq.aquiferID],
-                                          this->simulator_, aq);
-    }
+    if (connections.active()) {
+        for (const auto& aq : aquifer.ct()) {
+            aquifers_CarterTracy.emplace_back(connections[aq.aquiferID],
+                    this->simulator_, aq);
+        }
 
-    for (const auto& aq : aquifer.fetp()) {
-        aquifers_Fetkovich.emplace_back(connections[aq.aquiferID],
-                                        this->simulator_, aq);
+        for (const auto& aq : aquifer.fetp()) {
+            aquifers_Fetkovich.emplace_back(connections[aq.aquiferID],
+                    this->simulator_, aq);
+        }
     }
 
     if (aquifer.hasNumericalAquifer()) {
