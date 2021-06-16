@@ -1131,6 +1131,7 @@ namespace Opm {
         const int iterationIdx = ebosSimulator_.model().newtonMethod().numIterations();
         updateAndCommunicateGroupData(episodeIdx, iterationIdx);
         updateNetworkPressures(episodeIdx);
+        const auto& comm = ebosSimulator_.vanguard().grid().comm();
 
         bool changed = false;
         int iter = 0;
@@ -1161,10 +1162,12 @@ namespace Opm {
                     const auto mode = WellInterface<TypeTag>::IndividualOrGroup::Group;
                     const bool changed_well = well->updateWellControl(ebosSimulator_, mode, this->wellState(), this->groupState(), switched_wells_, deferred_logger);
                     if (changed_well) {
-                        updateAndCommunicateGroupData(episodeIdx, iterationIdx);
                         changed = true;
                     }
                 }
+                // This needs to be called after all well check to avoid MPI deadlock
+                updateAndCommunicateGroupData(episodeIdx, iterationIdx);
+
             }
 
             // Check individual well constraints and communicate.
@@ -1172,10 +1175,12 @@ namespace Opm {
                 const auto mode = WellInterface<TypeTag>::IndividualOrGroup::Individual;
                 const bool changed_well = well->updateWellControl(ebosSimulator_, mode, this->wellState(), this->groupState(), switched_wells_, deferred_logger);
                 if (changed_well) {
-                    updateAndCommunicateGroupData(episodeIdx, iterationIdx);
                     changed = true;
                 }
             }
+            // This needs to be called after all well check to avoid MPI deadlock
+            updateAndCommunicateGroupData(episodeIdx, iterationIdx);
+            changed = comm.sum(changed);
             iter++;
         }
     }
