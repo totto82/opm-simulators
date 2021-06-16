@@ -248,6 +248,9 @@ void WellState::init(const std::vector<double>& cellPressures,
         well_rates[winfo->name()].first = winfo->isOwner();
     }
 
+    // This need to set before return to make sure the gaslift code is entered on all ranks
+    do_glift_optimization_ = true;
+
     const int nw = wells_ecl.size();
 
     if( nw == 0 ) return ;
@@ -437,7 +440,6 @@ void WellState::init(const std::vector<double>& cellPressures,
 
 
     updateWellsDefaultALQ(wells_ecl);
-    do_glift_optimization_ = true;
 }
 
 void WellState::resize(const std::vector<Well>& wells_ecl,
