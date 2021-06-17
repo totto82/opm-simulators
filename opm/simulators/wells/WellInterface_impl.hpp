@@ -688,7 +688,8 @@ namespace Opm
                                                           injectorType,
                                                           efficiencyFactor,
                                                           deferred_logger);
-                well_state.wellRates(well_index)[phasePos] = target;
+                if (target > 0)
+                    well_state.wellRates(well_index)[phasePos] = target;
                 break;
             }
             case Well::InjectorCMode::CMODE_UNDEFINED:
