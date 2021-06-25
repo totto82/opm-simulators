@@ -1207,11 +1207,6 @@ namespace Opm {
         }
         if (checkGroupConvergence) {
             bool violated = updateWellControls(local_deferredLogger, /* check group controls */ true);
-            //const int reportStepIdx = ebosSimulator_.episodeIndex();
-            //const Group& fieldGroup = schedule().getGroup("FIELD", reportStepIdx);
-            //bool violated = checkGroupConstraints(fieldGroup,
-            //                                      ebosSimulator_.episodeIndex(),
-            //                                      local_deferredLogger);
             local_report.setGroupConverged(!violated);
         }
 
