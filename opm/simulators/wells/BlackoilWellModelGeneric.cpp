@@ -882,7 +882,7 @@ checkGroupHigherConstraints(const Group& group,
 
     // call recursively down the group hiearchy
     for (const std::string& groupName : group.groups()) {
-        changed = changed || checkGroupHigherConstraints( schedule().getGroup(groupName, reportStepIdx), deferred_logger, reportStepIdx, switched_prod_groups, switched_inj_groups);
+        changed = checkGroupHigherConstraints( schedule().getGroup(groupName, reportStepIdx), deferred_logger, reportStepIdx, switched_prod_groups, switched_inj_groups) || changed;
     }
     return changed;
 }
@@ -925,7 +925,7 @@ updateGroupIndividualControl(const Group& group,
 
     // call recursively down the group hiearchy
     for (const std::string& groupName : group.groups()) {
-        changed = changed || updateGroupIndividualControl( schedule().getGroup(groupName, reportStepIdx), deferred_logger, reportStepIdx, switched_prod_groups, switched_inj_groups);
+        changed = updateGroupIndividualControl( schedule().getGroup(groupName, reportStepIdx), deferred_logger, reportStepIdx, switched_prod_groups, switched_inj_groups) || changed;
     }
     return changed;
 }
@@ -998,10 +998,17 @@ actionOnBrokenConstraints(const Group& group,
     case Group::ExceedAction::RATE: {
         if (oldControl != newControl) {
             this->groupState().production_control(group.name(), newControl);
-            ss << "Switching production control mode for group "<< group.name()
-               << " from " << Group::ProductionCMode2String(oldControl)
-               << " to " << Group::ProductionCMode2String(newControl);
-            switched_prod_groups[group.name()] = std::make_pair(Group::ProductionCMode2String(oldControl), Group::ProductionCMode2String(newControl));
+            std::string from = Group::ProductionCMode2String(oldControl);
+            std::string to = Group::ProductionCMode2String(newControl);
+            ss << "Switching injection control mode for group "<< group.name()
+               << " from " << from
+               << " to " << to;
+            if (switched_prod_groups.count(group.name()) > 0) {
+                from = switched_prod_groups[group.name()].first;
+                switched_prod_groups[group.name()] = std::make_pair(from, to);
+            } else {
+                switched_prod_groups[group.name()] = std::make_pair(from, to);
+            }
         }
         break;
     }
@@ -1026,12 +1033,19 @@ actionOnBrokenConstraints(const Group& group,
 
     std::ostringstream ss;
     if (oldControl != newControl) {
-        const std::string from = Group::InjectionCMode2String(oldControl);
-        ss << "Switching injection control mode for group "<< group.name()
-           << " from " << Group::InjectionCMode2String(oldControl)
-           << " to " << Group::InjectionCMode2String(newControl);
         this->groupState().injection_control(group.name(), controlPhase, newControl);
-        switched_inj_groups[std::make_pair(controlPhase, group.name())] = std::make_pair(Group::InjectionCMode2String(oldControl), Group::InjectionCMode2String(newControl));
+        std::string from = Group::InjectionCMode2String(oldControl);
+        std::string to = Group::InjectionCMode2String(newControl);
+        ss << "Switching injection control mode for group "<< group.name()
+           << " from " << from
+           << " to " << to;
+        const auto tag = std::make_pair(controlPhase, group.name());
+        if (switched_inj_groups.count(tag) > 0) {
+            from = switched_inj_groups[tag].first;
+            switched_inj_groups[tag] = std::make_pair(from, to);
+        } else {
+            switched_inj_groups[tag] = std::make_pair(from, to);
+        }
     }
     auto cc = Dune::MPIHelper::getCollectiveCommunication();
     if (!ss.str().empty() && cc.rank() == 0)

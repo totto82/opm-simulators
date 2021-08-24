@@ -202,7 +202,13 @@ namespace Opm
                ss << " on rank " << cc.rank();
             }
             deferred_logger.debug(ss.str());
-            switched_wells[this->name()] = std::make_pair(from, to);
+            if (switched_wells.count(this->name()) > 0) {
+                std::cout << this->name() << " " << from << " " << switched_wells[this->name()].first << " " << to << std::endl;
+                from = switched_wells[this->name()].first;
+                switched_wells[this->name()] = std::make_pair(from, to);
+            } else {
+                switched_wells[this->name()] = std::make_pair(from, to);
+            }
             updateWellStateWithTarget(ebos_simulator, group_state, well_state, deferred_logger);
             updatePrimaryVariables(well_state, deferred_logger);
         }

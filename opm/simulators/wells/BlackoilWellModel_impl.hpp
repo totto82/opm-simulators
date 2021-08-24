@@ -484,6 +484,10 @@ namespace Opm {
         // output if well/group controll has changed
         auto cc = Dune::MPIHelper::getCollectiveCommunication();
         for (const auto& [well_name, from_to] : switched_wells_) {
+
+            if (from_to.first == from_to.second)
+                continue;
+
             std::ostringstream ss;
             ss << "Switching control mode for well " << well_name
                << " from " << from_to.first
@@ -495,6 +499,8 @@ namespace Opm {
         }
         if (cc.size() == 0) {
             for (const auto& [group_name, from_to] : switched_prod_groups_) {
+                if (from_to.first == from_to.second)
+                    continue;
                 std::ostringstream ss;
                 ss << "Switching control mode for production group " << group_name
                    << " from " << from_to.first
@@ -502,6 +508,8 @@ namespace Opm {
                 local_deferredLogger.info(ss.str());
             }
             for (const auto& [group_name_phase, from_to] : switched_inj_groups_) {
+                if (from_to.first == from_to.second)
+                    continue;
                 std::ostringstream ss;
                 ss << "Switching control mode for " << group_name_phase.second << " injection group "
                    <<  group_name_phase.second
@@ -1269,8 +1277,8 @@ namespace Opm {
 
         bool changed = false;
         int iter = 0;
-        while(!changed && iter < 5) {
-            if (checkGroupControls) {
+        while(!changed && iter < 1) {
+            if (true) {
                 // Check group individual constraints.
                 const bool changed_ind = updateGroupIndividualControls(deferred_logger,
                                                                        switched_prod_groups_,
