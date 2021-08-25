@@ -1202,7 +1202,7 @@ namespace Opm {
     template<typename TypeTag>
     ConvergenceReport
     BlackoilWellModel<TypeTag>::
-    getWellConvergence(const std::vector<Scalar>& B_avg, bool checkGroupConvergence)
+    getWellConvergence(const std::vector<Scalar>& B_avg, bool checkGroupConvergence) const
     {
 
         DeferredLogger local_deferredLogger;
@@ -1270,7 +1270,8 @@ namespace Opm {
 
         const int episodeIdx = ebosSimulator_.episodeIndex();
         const int iterationIdx = ebosSimulator_.model().newtonMethod().numIterations();
-        updateAndCommunicateGroupData(episodeIdx, iterationIdx);
+
+        updateAndCommunicate(episodeIdx, iterationIdx, deferred_logger);
 
         updateNetworkPressures(episodeIdx);
         const auto& comm = ebosSimulator_.vanguard().grid().comm();
