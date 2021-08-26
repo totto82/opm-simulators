@@ -1202,7 +1202,7 @@ namespace Opm {
     template<typename TypeTag>
     ConvergenceReport
     BlackoilWellModel<TypeTag>::
-    getWellConvergence(const std::vector<Scalar>& B_avg, bool checkGroupConvergence) const
+    getWellConvergence(const std::vector<Scalar>& B_avg, bool checkGroupConvergence)
     {
 
         DeferredLogger local_deferredLogger;
@@ -1286,7 +1286,7 @@ namespace Opm {
                                                                        switched_inj_groups_,
                                                                        episodeIdx, iterationIdx);
                 if ( changed_ind ) {
-                    updateAndCommunicateGroupData(episodeIdx, iterationIdx);
+                    updateAndCommunicate(episodeIdx, iterationIdx, deferred_logger);
                     changed = true;
                 }
 
@@ -1296,7 +1296,7 @@ namespace Opm {
                                                                       switched_prod_groups_,
                                                                       switched_inj_groups_);
                 if ( changed_higher ) {
-                    updateAndCommunicateGroupData(episodeIdx, iterationIdx);
+                    updateAndCommunicate(episodeIdx, iterationIdx, deferred_logger);
                     changed = true;
                 }
 
@@ -1309,7 +1309,7 @@ namespace Opm {
                     }
                 }
                 // This needs to be called after all well check to avoid MPI deadlock
-                updateAndCommunicateGroupData(episodeIdx, iterationIdx);
+                updateAndCommunicate(episodeIdx, iterationIdx, deferred_logger);
 
             }
 
@@ -1322,12 +1322,27 @@ namespace Opm {
                 }
             }
             // This needs to be called after all well check to avoid MPI deadlock
-            updateAndCommunicateGroupData(episodeIdx, iterationIdx);
+            updateAndCommunicate(episodeIdx, iterationIdx, deferred_logger);
             changed = comm.sum(changed);
             iter++;
         }
         return changed;
     }
+
+    template<typename TypeTag>
+    void
+            BlackoilWellModel<TypeTag>::
+            updateAndCommunicate(const int reportStepIdx,
+                                 const int iterationIdx,
+                                 DeferredLogger& deferred_logger)
+    {
+        updateAndCommunicateGroupData(reportStepIdx, iterationIdx);
+        // if a well or group change control it affects all wells that are under the same group
+        for (const auto& well : well_container_) {
+            well->updateWellStateWithTarget(ebosSimulator_, this->groupState(), this->wellState(), deferred_logger);
+        }
+    }
+
 
 
 
