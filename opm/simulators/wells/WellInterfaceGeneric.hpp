@@ -168,6 +168,13 @@ public:
     // whether a well is specified with a non-zero and valid VFP table number
     bool isVFPActive(DeferredLogger& deferred_logger) const;
 
+    void relax() {
+        relax_ = true;
+    }
+    bool isRelaxed() const {
+        return relax_;
+    }
+
 protected:
     bool getAllowCrossFlow() const;
     double mostStrictBhpFromBhpLimits(const SummaryState& summaryState) const;
@@ -302,6 +309,8 @@ protected:
     double well_efficiency_factor_;
     const VFPProperties* vfp_properties_;
     const GuideRate* guide_rate_;
+
+    bool relax_ = false;
 };
 
 }

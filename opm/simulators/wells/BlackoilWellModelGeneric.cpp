@@ -1883,4 +1883,11 @@ runWellPIScaling(const int timeStepIdx,
     this->last_run_wellpi_ = timeStepIdx;
 }
 
+void
+BlackoilWellModelGeneric::
+updateConsistentlyFailingWells(const std::set<std::string>& wells) {
+    failing_wells_ = wells;
+}
+
+
 }

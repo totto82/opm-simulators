@@ -260,6 +260,14 @@ namespace Opm {
             // optimize the usage of the following several member variables
             this->initWellContainer();
 
+            // mark problematic wells
+            for (auto& well : well_container_) {
+                auto search = failing_wells_.find(well->name());
+                if (search != failing_wells_.end()) {
+                    well->relax();
+                }
+            }
+
             // update the updated cell flag
             std::fill(is_cell_perforated_.begin(), is_cell_perforated_.end(), false);
             for (auto& well : well_container_) {

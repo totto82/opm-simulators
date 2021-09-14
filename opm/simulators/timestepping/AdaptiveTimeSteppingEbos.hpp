@@ -444,6 +444,10 @@ namespace Opm {
 
                 report += substepReport;
 
+                // mark problematic wells
+                std::set<std::string> failing_wells = consistentlyFailingWells(solver.model().stepReports(), 2);
+                solver.model().wellModel().updateConsistentlyFailingWells(failing_wells);
+
                 if (substepReport.converged) {
                     // advance by current dt
                     ++substepTimer;
@@ -552,7 +556,7 @@ namespace Opm {
                     } else {
                         // We are below the threshold, and will check if there are any
                         // wells we should close rather than chopping again.
-                        std::set<std::string> failing_wells = consistentlyFailingWells(solver.model().stepReports());
+                        std::set<std::string> failing_wells = consistentlyFailingWells(solver.model().stepReports(), 3);
                         if (failing_wells.empty()) {
                             // Found no wells to close, chop the timestep as above.
                             chopTimestep();
@@ -677,7 +681,7 @@ namespace Opm {
 
 
         template <class StepReportVector>
-        std::set<std::string> consistentlyFailingWells(const StepReportVector& sr)
+        std::set<std::string> consistentlyFailingWells(const StepReportVector& sr, int num_steps)
         {
             // If there are wells that cause repeated failures, we
             // close them, and restart the un-chopped timestep.
@@ -699,8 +703,7 @@ namespace Opm {
             msg.flush();
             OpmLog::debug(msg.str());
 
-            // Check the last few step reports.
-            const int num_steps = 3;
+            // Check the last num_steps reports.
             const int rep_step = sr.back().report_step;
             const int sub_step = sr.back().current_step;
             const int sr_size = sr.size();

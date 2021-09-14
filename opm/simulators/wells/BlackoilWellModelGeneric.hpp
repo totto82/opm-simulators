@@ -157,6 +157,9 @@ public:
     bool forceShutWellByNameIfPredictionMode(const std::string& wellname,
                                              const double simulation_time);
 
+    void updateConsistentlyFailingWells(const std::set<std::string>& wells);
+
+
 protected:
 
     /*
@@ -358,6 +361,7 @@ protected:
                               const SummaryConfig& summaryConfig,
                               DeferredLogger& deferred_logger);
 
+
     // create the well container
     virtual void createWellContainer(const int time_step) = 0;
     virtual void initWellContainer() = 0;
@@ -421,6 +425,8 @@ protected:
     WGState nupcol_wgstate_;
 
     bool glift_debug = false;
+
+    std::set<std::string> failing_wells_;
 
   private:
     WellInterfaceGeneric* getGenWell(const std::string& well_name);
