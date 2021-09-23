@@ -382,7 +382,7 @@ namespace Opm
                    DeferredLogger& deferred_logger)
     {
         const bool old_well_operable = this->operability_status_.isOperable();
-        checkWellOperability(ebosSimulator, well_state, deferred_logger);
+        //checkWellOperability(ebosSimulator, well_state, deferred_logger);
 
         // only use inner well iterations for the first newton iterations.
         const int iteration_idx = ebosSimulator.model().newtonMethod().numIterations();

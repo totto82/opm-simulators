@@ -1627,13 +1627,17 @@ inferLocalShutWells()
 
 void
 BlackoilWellModelGeneric::
-updateNetworkPressures(const int reportStepIdx)
+updateNetworkPressures(const int reportStepIdx, const int iterationIdx)
 {
     // Get the network and return if inactive.
     const auto& network = schedule()[reportStepIdx].network();
     if (!network.active()) {
         return;
     }
+    const int nupcol = schedule()[reportStepIdx].nupcol();
+    if (iterationIdx > nupcol)
+        return;
+
     node_pressures_ = WellGroupHelpers::computeNetworkPressures(network,
                                                                 this->wellState(),
                                                                 this->groupState(),

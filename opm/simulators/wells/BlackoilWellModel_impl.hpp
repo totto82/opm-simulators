@@ -435,6 +435,16 @@ namespace Opm {
                 well->setVFPProperties(vfp_properties_.get());
                 well->setGuideRate(&guideRate_);
 
+                if (well->isProducer()) {
+                    const auto it = node_pressures_.find(wellEcl.groupName());
+                    if (it != node_pressures_.end()) {
+                        // The well belongs to a group with has a network pressure constraint,
+                        // set the dynamic THP constraint of the well accordingly.
+                        std::cout << well->name() << " " << it->second << std::endl;
+                        well->setDynamicThpLimit(it->second);
+                    }
+                }
+
                 const WellTestConfig::Reason testing_reason = testWell.second;
 
                 well->wellTesting(ebosSimulator_, simulationTime, timeStepIdx,
@@ -1277,7 +1287,7 @@ namespace Opm {
         const int iterationIdx = ebosSimulator_.model().newtonMethod().numIterations();
         updateAndCommunicateGroupData(episodeIdx, iterationIdx);
 
-        updateNetworkPressures(episodeIdx);
+        updateNetworkPressures(episodeIdx, iterationIdx);
 
         std::set<std::string> switched_wells;
         std::set<std::string> switched_groups;

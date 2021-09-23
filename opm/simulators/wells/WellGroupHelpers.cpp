@@ -749,7 +749,7 @@ namespace WellGroupHelpers
                     auto rates = node_inflows[node];
                     for (auto& r : rates) { r *= -1.0; }
                     assert(rates.size() == 3);
-                    const double alq = 0.0; // TODO: Do not ignore ALQ
+                    const double alq = 0.0;
                     node_pressures[node] = vfp_prod_props.bhp(*vfp_table,
                                                               rates[BlackoilPhases::Aqua],
                                                               rates[BlackoilPhases::Liquid],

@@ -248,7 +248,7 @@ protected:
 
     bool wasDynamicallyShutThisTimeStep(const int well_index) const;
 
-    void updateNetworkPressures(const int reportStepIdx);
+    void updateNetworkPressures(const int reportStepIdx, const int iterationIdx);
 
     void updateWsolvent(const Group& group,
                         const int reportStepIdx,
