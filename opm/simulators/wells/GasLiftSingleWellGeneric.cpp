@@ -1190,7 +1190,9 @@ reduceALQtoGroupTarget(double alq,
         if (!this->parent.group_state_.has_production_control(groups.first))
             continue;
         const auto& current_control = this->parent.group_state_.production_control(groups.first);
-        if(current_control == Group::ProductionCMode::ORAT || current_control == Group::ProductionCMode::GRAT){
+        if(current_control == Group::ProductionCMode::ORAT
+                || current_control == Group::ProductionCMode::GRAT
+                || current_control == Group::ProductionCMode::LRAT ){
             stop_this_iteration = false;
             this->parent.displayDebugMessage_("Reducing ALQ to meet groups target before iteration starts.");
             break;

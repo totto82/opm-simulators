@@ -102,8 +102,8 @@ private:
     bool checkNewtonIterationIdxOk_(const std::string& well_name);
     void displayDebugMessage_(const std::string& msg);
     void displayDebugMessage_(const std::string& msg, const std::string& well_name);
-    std::pair<double, double> getProducerWellRates_(const int index);
-    std::tuple<double, double, double>
+    std::tuple<double, double, double> getProducerWellRates_(const int index);
+    std::tuple<double, double, double, double>
         initializeGroupRatesRecursive_(const Group &group);
     void initializeWell2GroupMapRecursive_(
         const Group& group, std::vector<std::string>& group_names,

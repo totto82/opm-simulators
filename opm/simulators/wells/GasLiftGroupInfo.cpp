@@ -295,7 +295,7 @@ displayDebugMessage_(const std::string &msg, const std::string &well_name)
 }
 
 
-std::pair<double, double>
+std::tuple<double, double, double>
 GasLiftGroupInfo::
 getProducerWellRates_(int well_index)
 {
@@ -311,15 +311,21 @@ getProducerWellRates_(int well_index)
         ? -wrate[pu.phase_pos[Gas]]
         : 0.0;
 
-    return {oil_rate, gas_rate};
+    const auto water_rate = pu.phase_used[Water]
+        ? -wrate[pu.phase_pos[Water]]
+        : 0.0;
+
+
+    return {oil_rate, gas_rate, water_rate};
 }
 
-std::tuple<double, double, double>
+std::tuple<double, double, double, double>
 GasLiftGroupInfo::
 initializeGroupRatesRecursive_(const Group &group)
 {
     double oil_rate = 0.0;
     double gas_rate = 0.0;
+    double water_rate = 0.0;
     double alq = 0.0;
     if (group.wellgroup()) {
         for (const std::string& well_name : group.wells()) {
@@ -335,17 +341,19 @@ initializeGroupRatesRecursive_(const Group &group)
                 assert(well); // Should never be nullptr
                 const int index = (itr->second).second;
                 if (well->isProducer()) {
-                    auto [sw_oil_rate, sw_gas_rate] = getProducerWellRates_(index);
+                    auto [sw_oil_rate, sw_gas_rate, sw_water_rate] = getProducerWellRates_(index);
                     auto sw_alq = this->well_state_.getALQ(well_name);
                     double factor = well->getEfficiencyFactor();
                     oil_rate += (factor * sw_oil_rate);
                     gas_rate += (factor * sw_gas_rate);
+                    water_rate += (factor * sw_water_rate);
                     alq += (factor * sw_alq);
                 }
             }
         }
         oil_rate = this->comm_.sum(oil_rate);
         gas_rate = this->comm_.sum(gas_rate);
+        water_rate = this->comm_.sum(water_rate);
         alq = this->comm_.sum(alq);
     }
     else {
@@ -354,11 +362,12 @@ initializeGroupRatesRecursive_(const Group &group)
                 continue;
             const Group& sub_group = this->schedule_.getGroup(
                 group_name, this->report_step_idx_);
-            auto [sg_oil_rate, sg_gas_rate, sg_alq]
+            auto [sg_oil_rate, sg_gas_rate, sg_water_rate, sg_alq]
                 = initializeGroupRatesRecursive_(sub_group);
             const auto gefac = sub_group.getGroupEfficiencyFactor();
             oil_rate += (gefac * sg_oil_rate);
             gas_rate += (gefac * sg_gas_rate);
+            water_rate += (gefac * sg_water_rate);
             alq += (gefac * sg_alq);
         }
     }
@@ -366,6 +375,9 @@ initializeGroupRatesRecursive_(const Group &group)
     const auto controls = group.productionControls(this->summary_state_);
     if (group.has_control(Group::ProductionCMode::ORAT)) {
         oil_target = controls.oil_target;
+    }
+    if (group.has_control(Group::ProductionCMode::LRAT)) {
+        oil_target = oil_target? std::min(*oil_target, controls.liquid_target - water_rate) : (controls.liquid_target - water_rate);
     }
     if (group.has_control(Group::ProductionCMode::GRAT)) {
         gas_target = controls.gas_target;
@@ -380,7 +392,7 @@ initializeGroupRatesRecursive_(const Group &group)
         this->group_rate_map_.try_emplace(group.name(),
             oil_rate, gas_rate, alq, oil_target, gas_target, max_total_gas, max_alq);
     }
-    return std::make_tuple(oil_rate, gas_rate, alq);
+    return std::make_tuple(oil_rate, gas_rate, water_rate, alq);
 }
 
 void

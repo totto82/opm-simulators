@@ -512,6 +512,8 @@ optimizeGroup_(const Group &group)
     const auto &max_glift = gl_group.max_lift_gas();
     const auto &max_total_gas = gl_group.max_total_gas();
     if (group.has_control(Group::ProductionCMode::ORAT)
+            || group.has_control(Group::ProductionCMode::GRAT)
+            || group.has_control(Group::ProductionCMode::LRAT)
                        || max_glift || max_total_gas)
     {
         displayDebugMessage_("optimizing", group.name());
@@ -1071,7 +1073,7 @@ bool
 GasLiftStage2::SurplusState::
 checkOilTarget()
 {
-    if (this->group.has_control(Group::ProductionCMode::ORAT)) {
+    if (this->group.has_control(Group::ProductionCMode::ORAT) || this->group.has_control(Group::ProductionCMode::LRAT)) {
         if (this->oil_target < this->oil_rate  ) {
             if (this->parent.debug_) {
                 const std::string msg = fmt::format("group: {} : "
