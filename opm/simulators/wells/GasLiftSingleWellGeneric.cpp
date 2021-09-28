@@ -290,6 +290,12 @@ GasLiftSingleWellGeneric::
 computeInitialWellRates_(std::vector<double>& potentials)
 {
 
+    //potentials = this->well_state_.well(this->well_name_).well_potentials;
+    //for (auto& pot : potentials) {
+    //   pot*= -1;
+    //}
+    //return true;
+
     if (auto bhp = computeBhpAtThpLimit_(this->orig_alq_); bhp) {
         {
             const std::string msg = fmt::format(

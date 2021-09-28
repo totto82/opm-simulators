@@ -240,6 +240,11 @@ namespace Opm
             std::vector<double>& well_flux,
             DeferredLogger& deferred_logger) const;
 
+        void computeWellRatesWithBhpIterations(const Simulator& ebosSimulator,
+                                              const double& bhp,
+                                              std::vector<double>& well_flux,
+                                              DeferredLogger& deferred_logger) const;
+
         // NOTE: These cannot be protected since they are used by GasLiftRuntime
         using Base::phaseUsage;
         using Base::vfp_properties_;
@@ -327,10 +332,7 @@ namespace Opm
                              double& perf_vap_oil_rate,
                              DeferredLogger& deferred_logger) const;
 
-        void computeWellRatesWithBhpIterations(const Simulator& ebosSimulator,
-                                              const double& bhp,
-                                              std::vector<double>& well_flux,
-                                              DeferredLogger& deferred_logger) const;
+
 
         std::vector<double> computeWellPotentialWithTHP(
             const Simulator& ebosSimulator,
