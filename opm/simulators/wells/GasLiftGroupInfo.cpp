@@ -202,6 +202,14 @@ maxAlq(const std::string& group_name)
     return group_rate.maxAlq();
 }
 
+std::optional<double>
+GasLiftGroupInfo::
+maxTotalRate(const std::string& group_name)
+{
+    auto& group_rate = this->group_rate_map_.at(group_name);
+    return group_rate.max();
+}
+
 double
 GasLiftGroupInfo::
 oilRate(const std::string &group_name) const
