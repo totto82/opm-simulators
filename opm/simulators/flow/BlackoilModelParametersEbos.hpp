@@ -259,15 +259,15 @@ struct MaxNewtonIterationsWithInnerWellIterations<TypeTag, TTag::FlowModelParame
 };
 template<class TypeTag>
 struct MaxInnerIterMsWells<TypeTag, TTag::FlowModelParameters> {
-    static constexpr int value = 100;
+    static constexpr int value = 20;
 };
 template<class TypeTag>
 struct MaxInnerIterWells<TypeTag, TTag::FlowModelParameters> {
-    static constexpr int value = 50;
+    static constexpr int value = 20;
 };
 template<class TypeTag>
 struct ShutUnsolvableWells<TypeTag, TTag::FlowModelParameters> {
-    static constexpr bool value = false;
+    static constexpr bool value = true;
 };
 template<class TypeTag>
 struct AlternativeWellRateInit<TypeTag, TTag::FlowModelParameters> {
@@ -275,16 +275,16 @@ struct AlternativeWellRateInit<TypeTag, TTag::FlowModelParameters> {
 };
 template<class TypeTag>
 struct StrictOuterIterWells<TypeTag, TTag::FlowModelParameters> {
-    static constexpr int value = 99;
+    static constexpr int value = 6;
 };
 template<class TypeTag>
 struct StrictInnerIterWells<TypeTag, TTag::FlowModelParameters> {
-    static constexpr int value = 40;
+    static constexpr int value = 10;
 };
 template<class TypeTag>
 struct RegularizationFactorMsw<TypeTag, TTag::FlowModelParameters> {
     using type = GetPropType<TypeTag, Scalar>;
-    static constexpr type value = 1;
+    static constexpr type value = 100;
 };
 template<class TypeTag>
 struct EnableWellOperabilityCheck<TypeTag, TTag::FlowModelParameters> {
@@ -297,12 +297,12 @@ struct EnableWellOperabilityCheckIter<TypeTag, TTag::FlowModelParameters> {
 template<class TypeTag>
 struct RelaxedWellFlowTol<TypeTag, TTag::FlowModelParameters> {
     using type = GetPropType<TypeTag, Scalar>;
-    static constexpr type value = 1;
+    static constexpr type value = 1e-3;
 };
 template<class TypeTag>
 struct RelaxedPressureTolMsw<TypeTag, TTag::FlowModelParameters> {
     using type = GetPropType<TypeTag, Scalar>;
-    static constexpr type value = 0.5e5;
+    static constexpr type value = 1.0e4;
 };
 template<class TypeTag>
 struct MaximumNumberOfWellSwitches<TypeTag, TTag::FlowModelParameters> {
