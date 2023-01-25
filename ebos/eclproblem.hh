@@ -889,6 +889,7 @@ public:
             drift_.resize(this->model().numGridDof());
             drift_ = 0.0;
         }
+        phase_cell_velocity_.resize(this->model().numGridDof());
 
         // write the static output files (EGRID, INIT, SMSPEC, etc.)
         if (enableEclOutput_) {
@@ -1159,6 +1160,30 @@ public:
             MICPModule::checkCloggingMICP(model, phi, globalDofIdx);
         }
       }
+
+        const auto& gridView = this->gridView();
+        ElementContext elemCtx(this->simulator());
+        for(const auto& elem: elements(gridView)) {
+            elemCtx.updateAll(elem);
+            const auto& stencil = elemCtx.stencil(0);
+            unsigned globalSpaceIdx = elemCtx.globalSpaceIndex(0, 0);
+            phase_cell_velocity_[globalSpaceIdx] = {0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0};
+            for (unsigned faceIdx = 0; faceIdx < stencil.numInteriorFaces(); ++faceIdx) {    
+                const auto& face = stencil.interiorFace(faceIdx);       
+                const auto& extQuants = elemCtx.extensiveQuantities(faceIdx, 0);
+                const int idx = face.dirId()/2;
+
+                for (unsigned phaseIdx = 0; phaseIdx < numPhases; ++phaseIdx) {
+                    
+                    if (!FluidSystem::phaseIsActive(phaseIdx))
+                        continue;
+                    
+                    const auto u = Opm::abs(Opm::getValue(extQuants.volumeFlux(phaseIdx)))/face.area();              
+                    if (idx >= 0)
+                        phase_cell_velocity_[globalSpaceIdx][idx*3+phaseIdx] += u/2; //only for cartgrid
+                }
+            }
+        }
     }
 
     /*!
@@ -1549,6 +1574,10 @@ public:
         // variable
         unsigned globalDofIdx = context.globalSpaceIndex(spaceIdx, timeIdx);
         return initialFluidStates_[globalDofIdx].temperature(/*phaseIdx=*/0);
+    }
+
+    Scalar cellPhaseFlux(unsigned cellIdx, unsigned face_id, unsigned phaseIdx) const {
+        return phase_cell_velocity_[cellIdx][face_id*3 + phaseIdx];
     }
 
     /*!
@@ -2922,6 +2951,9 @@ private:
     TracerModel tracerModel_;
 
     EclActionHandler actionHandler_;
+
+    std::vector<std::array<Scalar, 9>> phase_cell_velocity_;
+
 
     template<class T>
     struct BCData
