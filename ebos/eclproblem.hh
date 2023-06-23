@@ -3024,8 +3024,9 @@ private:
                         || events.hasEvent(ScheduleEvents::PRODUCTION_UPDATE)
                         || events.hasEvent(ScheduleEvents::INJECTION_UPDATE)
                         || events.hasEvent(ScheduleEvents::WELL_STATUS_CHANGE);
-                if (episodeIdx >= 0 && wellEventOccured && this->maxTimeStepAfterWellEvent_ > 0)
+                if (episodeIdx >= 0 && wellEventOccured && this->maxTimeStepAfterWellEvent_ > 0) {
                     dtNext = std::min(dtNext, this->maxTimeStepAfterWellEvent_);
+                }
             }
         }
 

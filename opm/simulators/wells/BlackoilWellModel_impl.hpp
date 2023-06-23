@@ -1572,7 +1572,7 @@ namespace Opm {
         ConvergenceReport local_report;
         for (const auto& well : well_container_) {
             if ((well_domain_.at(well->name()) == domain.index)) {
-                if (well->isOperableAndSolvable() || well->wellIsStopped()) {
+                if (well->isSolvable() || well->wellIsStopped()) {
                     local_report += well->getWellConvergence(summary_state,
                                                              this->wellState(),
                                                              B_avg,
@@ -1581,7 +1581,7 @@ namespace Opm {
                 } else {
                     ConvergenceReport report;
                     using CR = ConvergenceReport;
-                    report.setWellFailed({CR::WellFailure::Type::Unsolvable, CR::Severity::Normal, -1, well->name()});
+                    //report.setWellFailed({CR::WellFailure::Type::Unsolvable, CR::Severity::Normal, -1, well->name()});
                     local_report += report;
                 }
             }
@@ -1633,7 +1633,7 @@ namespace Opm {
         ConvergenceReport local_report;
         const int iterationIdx = ebosSimulator_.model().newtonMethod().numIterations();
         for (const auto& well : well_container_) {
-            if (well->isOperableAndSolvable() || well->wellIsStopped()) {
+            if (well->isSolvable() || well->wellIsStopped()) {
                 const auto& summary_state = ebosSimulator_.vanguard().summaryState();
                 local_report += well->getWellConvergence(
                         summary_state, this->wellState(), B_avg, local_deferredLogger,
@@ -1641,7 +1641,7 @@ namespace Opm {
             } else {
                 ConvergenceReport report;
                 using CR = ConvergenceReport;
-                report.setWellFailed({CR::WellFailure::Type::Unsolvable, CR::Severity::Normal, -1, well->name()});
+                //report.setWellFailed({CR::WellFailure::Type::Unsolvable, CR::Severity::Normal, -1, well->name()});
                 local_report += report;
             }
         }

@@ -508,6 +508,17 @@ std::set<std::string> consistentlyFailingWells(const std::vector<StepReport>& sr
                     }
                 }
 
+                std::set<std::string> failing_wells2 = detail::consistentlyFailingWells(solver.model().stepReports());
+                int num_shut_wells2 = 0;
+                for (const auto& well : failing_wells2) {
+                    bool was_shut = solver.model().wellModel().forceShutWellByName(well, substepTimer.simulationTimeElapsed());
+                        if (was_shut) {
+                            ++num_shut_wells2;
+                        }
+                }
+                if (! solver.model().stepReports().back().report.back().reservoirFailed() && num_shut_wells2 > 0)
+                    continue_on_uncoverged_solution = true;
+
                 if (substepReport.converged || continue_on_uncoverged_solution) {
 
                     // advance by current dt

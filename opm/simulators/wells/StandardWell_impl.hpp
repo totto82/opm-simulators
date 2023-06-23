@@ -794,7 +794,7 @@ namespace Opm
                 const double rho = FluidSystem::referenceDensity( phaseIdx, Base::pvtRegionIdx() );
                 total_ipr_mass_rate += ipr_rate * rho;
             }
-            if ( (this->isProducer() && total_ipr_mass_rate < 0.) || (this->isInjector() && total_ipr_mass_rate > 0.) ) {
+            if ( (this->isProducer() && total_ipr_mass_rate <= 0.) || (this->isInjector() && total_ipr_mass_rate >= 0.) ) {
                 this->operability_status_.operable_under_only_bhp_limit = false;
             }
 

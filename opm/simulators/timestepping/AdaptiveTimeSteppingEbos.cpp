@@ -56,7 +56,7 @@ consistentlyFailingWells(const std::vector<StepReport>& sr)
     OpmLog::debug(msg.str());
 
     // Check the last few step reports.
-    const int num_steps = 3;
+    const int num_steps = 1;
     const int rep_step = sr.back().report_step;
     const int sub_step = sr.back().current_step;
     const int sr_size = sr.size();

@@ -87,6 +87,7 @@ public:
 
     // whether the well is operable
     bool isOperableAndSolvable() const;
+    bool isSolvable() const;
     bool useVfpExplicit () const;
     bool thpLimitViolatedButNotSwitched() const;
 
@@ -230,6 +231,9 @@ protected:
             } else {
                 return ( (isOperableUnderBHPLimit() || isOperableUnderTHPLimit()) );
             }
+        }
+        bool isSolvable() const {
+            return ( solvable );
         }
 
         bool isOperableUnderBHPLimit() const {
