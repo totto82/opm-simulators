@@ -272,30 +272,51 @@ updateConvectiveDRsDt_(const unsigned compressedDofIdx,
                        const Scalar t,
                        const Scalar p,
                        const Scalar rs,
+                       const Scalar rssat,
                        const Scalar so,
+                       const Scalar sg,
                        const Scalar poro,
                        const Scalar permz,
+                       const Scalar visc,
                        const Scalar distZ,
                        const Scalar gravity,
+                       const Scalar Xhi,
+                       const Scalar Smo,
+                       const Scalar alphainn,
                        const int pvtRegionIndex)
 {
-    const Scalar rssat = FluidSystem::oilPvt().saturatedGasDissolutionFactor(pvtRegionIndex, t, p);
     const Scalar saturatedInvB
         = FluidSystem::oilPvt().saturatedInverseFormationVolumeFactor(pvtRegionIndex, t, p);
     const Scalar rsZero = 0.0;
+    const Scalar sg_max = 1.0;
     const Scalar pureDensity
         = FluidSystem::oilPvt().inverseFormationVolumeFactor(pvtRegionIndex, t, p, rsZero)
         * FluidSystem::oilPvt().oilReferenceDensity(pvtRegionIndex);
     const Scalar saturatedDensity = saturatedInvB
         * (FluidSystem::oilPvt().oilReferenceDensity(pvtRegionIndex)
            + rssat * FluidSystem::referenceDensity(FluidSystem::gasPhaseIdx, pvtRegionIndex));
-    const Scalar deltaDensity = saturatedDensity - pureDensity;
-    const Scalar visc = FluidSystem::oilPvt().viscosity(pvtRegionIndex, t, p, rs);
+    Scalar deltaDensity = saturatedDensity - pureDensity;
     // Note that for so = 0 this gives no limits (inf) for the dissolution rate
     // Also we restrict the effect of convective mixing to positive density differences
     // i.e. we only allow for fingers moving downward
+
+    Scalar co2Density = FluidSystem::gasPvt().inverseFormationVolumeFactor(pvtRegionIndex,
+        t,p,0.0 /*=Rv*/, 0.0 /*=Rvw*/) * FluidSystem::referenceDensity(FluidSystem::gasPhaseIdx, pvtRegionIndex);
+	Scalar factor = 1.0;
+	Scalar S = (rs - rssat * sg) / (rssat * ( 1.0 - sg));
+    Scalar alpha = 0.0;
+	if ((rs >= (rssat * sg))) { //&& (episodeIdx >=1)
+		if(S > Smo)
+			factor = 0.0;
+            alpha = alphainn;
+		} else {
+			factor /= Xhi;
+			deltaDensity = (saturatedDensity - co2Density);
+		}
+    
+    //= permz * rssat * max(0.0, deltaDensity) * gravity / (so * visc * distZ * poro); old
     convectiveDrs_[compressedDofIdx]
-        = permz * rssat * max(0.0, deltaDensity) * gravity / (so * visc * distZ * poro);
+        = factor * permz * rssat * max(0.0, deltaDensity) * gravity / ( std::max(sg_max - sg, 0.0) * visc * distZ * poro) + (alpha/Xhi); 
 }
 
 template class MixingRateControls<BlackOilFluidSystem<double,BlackOilDefaultIndexTraits>>;

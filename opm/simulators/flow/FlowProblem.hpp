@@ -1891,6 +1891,7 @@ protected:
             );
     }
 
+
     bool updateMaxOilSaturation_()
     {
         OPM_TIMEBLOCK(updateMaxOilSaturation);

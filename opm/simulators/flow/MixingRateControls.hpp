@@ -117,20 +117,29 @@ public:
                 const int pvtRegionIdx,
                 const std::array<bool,3>& active)
     {
+        const auto& oilVaporizationControl = schedule_[episodeIdx].oilvap();
+
         if (active[0]) {
             // This implements the convective DRSDT as described in
             // Sandve et al. "Convective dissolution in field scale CO2 storage simulations using the OPM Flow
             // simulator" Submitted to TCCS 11, 2021
+            // modification and introduction of regimes following Mykkeltvedt et al. Submitted to TCCS 12, 2023
             const auto& fs = iq.fluidState();
             this->updateConvectiveDRsDt_(compressedDofIdx,
                                          getValue(fs.temperature(FluidSystem::oilPhaseIdx)),
                                          getValue(fs.pressure(FluidSystem::oilPhaseIdx)),
+                                         getValue(fs.pressure(FluidSystem::gasPhaseIdx)),
                                          getValue(fs.Rs()),
+                                         getValue(fs.RsSat()),
                                          getValue(fs.saturation(FluidSystem::oilPhaseIdx)),
                                          getValue(iq.porosity()),
                                          permZ,
+                                         getValue(fs.viscosity(FluidSystem::oilPhaseIdx)),
                                          distZ,
                                          gravity,
+                                         oilVaporizationControl.getMaxDRSDT(fs.pvtRegionIndex()),
+                                         oilVaporizationControl.getSmo(fs.pvtRegionIndex()),
+                                         oilVaporizationControl.getAlpha(fs.pvtRegionIndex()),
                                          fs.pvtRegionIndex());
         }
 
@@ -139,7 +148,6 @@ public:
 
             using FluidState = typename std::decay<decltype(fs)>::type;
 
-            const auto& oilVaporizationControl = schedule_[episodeIdx].oilvap();
             constexpr Scalar freeGasMinSaturation_ = 1e-7;
             if (oilVaporizationControl.getOption(pvtRegionIdx) ||
                 fs.saturation(FluidSystem::gasPhaseIdx) > freeGasMinSaturation_) {
@@ -163,11 +171,17 @@ private:
                                 const Scalar t,
                                 const Scalar p,
                                 const Scalar rs,
+                                const Scalar rssat,
                                 const Scalar so,
+                                const Scalar sg,
                                 const Scalar poro,
                                 const Scalar permz,
+                                const Scalar visc,
                                 const Scalar distZ,
                                 const Scalar gravity,
+                                const Scalar Xhi,
+                                const Scalar Smo,
+                                const Scalar alphainn,
                                 const int pvtRegionIndex);
 
     std::vector<Scalar> lastRv_;
