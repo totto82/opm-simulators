@@ -126,12 +126,13 @@ public:
             // modification and introduction of regimes following Mykkeltvedt et al. Submitted to TCCS 12, 2023
             const auto& fs = iq.fluidState();
             this->updateConvectiveDRsDt_(compressedDofIdx,
+                                         episodeIdx,
                                          getValue(fs.temperature(FluidSystem::oilPhaseIdx)),
                                          getValue(fs.pressure(FluidSystem::oilPhaseIdx)),
-                                         getValue(fs.pressure(FluidSystem::gasPhaseIdx)),
                                          getValue(fs.Rs()),
                                          getValue(fs.RsSat()),
                                          getValue(fs.saturation(FluidSystem::oilPhaseIdx)),
+                                         getValue(fs.saturation(FluidSystem::gasPhaseIdx)),
                                          getValue(iq.porosity()),
                                          permZ,
                                          getValue(fs.viscosity(FluidSystem::oilPhaseIdx)),
@@ -147,7 +148,7 @@ public:
             const auto& fs = iq.fluidState();
 
             using FluidState = typename std::decay<decltype(fs)>::type;
-
+            const auto& oilVaporizationControl = schedule_[episodeIdx].oilvap();
             constexpr Scalar freeGasMinSaturation_ = 1e-7;
             if (oilVaporizationControl.getOption(pvtRegionIdx) ||
                 fs.saturation(FluidSystem::gasPhaseIdx) > freeGasMinSaturation_) {
@@ -168,6 +169,7 @@ public:
 
 private:
     void updateConvectiveDRsDt_(const unsigned compressedDofIdx,
+                                const int episodeIdx,
                                 const Scalar t,
                                 const Scalar p,
                                 const Scalar rs,
