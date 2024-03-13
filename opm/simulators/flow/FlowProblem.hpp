@@ -302,6 +302,7 @@ public:
         MICPModule::initFromState(vanguard.eclState());
         DispersionModule::initFromState(vanguard.eclState());
         DiffusionModule::initFromState(vanguard.eclState());
+        //ConvectiveMixingModule::beginEpisode(vanguard.schedule());
 
         // create the ECL writer
         eclWriter_ = std::make_unique<EclWriterType>(simulator);
@@ -515,6 +516,8 @@ public:
         auto& eclState = simulator.vanguard().eclState();
         const auto& schedule = simulator.vanguard().schedule();
         const auto& events = schedule[episodeIdx].events();
+
+
 
         if (episodeIdx >= 0 && events.hasEvent(ScheduleEvents::GEO_MODIFIER)) {
             // bring the contents of the keywords to the current state of the SCHEDULE
