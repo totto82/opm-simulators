@@ -59,6 +59,7 @@
 #include <opm/models/common/directionalmobility.hh>
 #include <opm/models/utils/pffgridvector.hh>
 #include <opm/models/blackoil/blackoilmodel.hh>
+#include <opm/models/blackoil/blackoilconvectivemixingmodule.hh>
 #include <opm/models/discretization/ecfv/ecfvdiscretization.hh>
 
 #include <opm/output/eclipse/EclipseIO.hpp>
@@ -180,6 +181,7 @@ class FlowProblem : public GetPropType<TypeTag, Properties::BaseProblem>
     using MICPModule = BlackOilMICPModule<TypeTag>;
     using DispersionModule = BlackOilDispersionModule<TypeTag, enableDispersion>;
     using DiffusionModule = BlackOilDiffusionModule<TypeTag, enableDiffusion>;
+    using ConvectiveMixingModule = BlackOilConvectiveMixingModule<TypeTag>;
 
     using InitialFluidState = typename EquilInitializer<TypeTag>::ScalarFluidState;
 
@@ -302,7 +304,7 @@ public:
         MICPModule::initFromState(vanguard.eclState());
         DispersionModule::initFromState(vanguard.eclState());
         DiffusionModule::initFromState(vanguard.eclState());
-        //ConvectiveMixingModule::beginEpisode(vanguard.schedule());
+        ConvectiveMixingModule::initFromState(vanguard.schedule());
 
         // create the ECL writer
         eclWriter_ = std::make_unique<EclWriterType>(simulator);
