@@ -304,7 +304,7 @@ public:
         MICPModule::initFromState(vanguard.eclState());
         DispersionModule::initFromState(vanguard.eclState());
         DiffusionModule::initFromState(vanguard.eclState());
-        ConvectiveMixingModule::initFromState(vanguard.schedule());
+        ConvectiveMixingModule::initFromState(vanguard.eclState(), vanguard.schedule());
 
         // create the ECL writer
         eclWriter_ = std::make_unique<EclWriterType>(simulator);
@@ -575,6 +575,8 @@ public:
                 FluidSystem::setVapPars(0.0, 0.0);
             }
         }
+
+        ConvectiveMixingModule::beginEpisode(simulator.vanguard().eclState(), simulator.vanguard().schedule(), episodeIdx);
     }
 
     /*!
