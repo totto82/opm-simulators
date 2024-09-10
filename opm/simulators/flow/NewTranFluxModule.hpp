@@ -284,6 +284,7 @@ public:
                                         J,
                                         distZ*g,
                                         thpres,
+                                        scvf.faceDirFromDirId(),
                                         problem.moduleParams());
 
             const bool upwindIsInterior = (static_cast<unsigned>(upIdx[phaseIdx]) == interiorDofIdx);
@@ -321,6 +322,7 @@ public:
                                             const unsigned globalIndexEx,
                                             const Scalar distZg,
                                             const Scalar thpres,
+                                            FaceDir::DirEnum facedir,
                                             const ModuleParams& moduleParams)
     {
 
@@ -342,7 +344,9 @@ public:
         Evaluation rhoAvg = (rhoIn + rhoEx)/2;
 
         if constexpr(enableConvectiveMixing) {
-            ConvectiveMixingModule::modifyAvgDensity(rhoAvg, intQuantsIn, intQuantsEx, phaseIdx, moduleParams.convectiveMixingModuleParam);
+            //if ( (facedir == FaceDir::DirEnum::ZPlus) || (facedir == FaceDir::DirEnum::ZMinus)) {
+                ConvectiveMixingModule::modifyAvgDensity(rhoAvg, intQuantsIn, intQuantsEx, phaseIdx, moduleParams.convectiveMixingModuleParam);
+            //}
         }
 
         const Evaluation& pressureInterior = intQuantsIn.fluidState().pressure(phaseIdx);

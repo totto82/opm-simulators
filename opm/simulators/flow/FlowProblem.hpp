@@ -403,6 +403,7 @@ public:
         OPM_TIMEBLOCK(beginIteration);
         wellModel_.beginIteration();
         aquiferModel_.beginIteration();
+        //ConvectiveMixingModule::beginIteration(this->simulator().model(), moduleParams_.convectiveMixingModuleParam);
     }
 
     /*!

@@ -252,6 +252,9 @@ maxGasDissolutionFactor(const unsigned timeIdx,
         return std::numeric_limits<Scalar>::max() / 2.0;
     }
 
+    //if (true)
+    //    return std::numeric_limits<Scalar>::max() / 2.0;
+
     Scalar scaling = 1.0;
     if (this->drsdtConvective(episodeIdx, pvtRegionIdx)) {
        scaling = convectiveDrs_[globalDofIdx];
