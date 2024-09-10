@@ -339,6 +339,8 @@ public:
         const Scalar trans = nbInfo.trans;
         const Scalar faceArea = nbInfo.faceArea;
         FaceDir::DirEnum facedir = nbInfo.faceDir;
+        short upIdx;
+
 
         for (unsigned phaseIdx = 0; phaseIdx < numPhases; ++phaseIdx) {
             if (!FluidSystem::phaseIsActive(phaseIdx))
@@ -346,7 +348,6 @@ public:
             // darcy flux calculation
             short dnIdx;
             //
-            short upIdx;
             // fake intices should only be used to get upwind anc compatibility with old functions
             short interiorDofIdx = 0; // NB
             short exteriorDofIdx = 1; // NB
@@ -365,9 +366,8 @@ public:
                                                              globalIndexEx,
                                                              distZg,
                                                              thpres,
+                                                             facedir,
                                                              moduleParams);
-
-
 
             const IntensiveQuantities& up = (upIdx == interiorDofIdx) ? intQuantsIn : intQuantsEx;
             unsigned globalUpIndex = (upIdx == interiorDofIdx) ? globalIndexIn : globalIndexEx;
@@ -422,8 +422,13 @@ public:
         static_assert(!enablePolymer, "Relevant computeFlux() method must be implemented for this module before enabling.");
         // PolymerModule::computeFlux(flux, elemCtx, scvfIdx, timeIdx);
 
+            //std::cout << interiorDofIdx << " " << exteriorDofIdx << " " << upIdx << " " << distZg << " " << FaceDir::toString(facedir) << std::endl;
+
         // deal with convective mixing
         if constexpr(enableConvectiveMixing) {
+            //if ( (facedir == FaceDir::DirEnum::ZPlus && upIdx == 1) || (facedir == FaceDir::DirEnum::ZMinus && upIdx == 0)) {
+            //if ( (facedir == FaceDir::DirEnum::ZPlus) || (facedir == FaceDir::DirEnum::ZMinus)) {
+
             ConvectiveMixingModule::addConvectiveMixingFlux(flux,
                                                             intQuantsIn,
                                                             intQuantsEx,
@@ -433,6 +438,7 @@ public:
                                                             nbInfo.trans,
                                                             nbInfo.faceArea,
                                                             moduleParams.convectiveMixingModuleParam);
+            //}
         }
         
         // deal with energy (if present)

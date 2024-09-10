@@ -133,6 +133,8 @@ class BlackOilConvectiveMixingModule<TypeTag, /*enableConvectiveMixing=*/true>
     using IntensiveQuantities = GetPropType<TypeTag, Properties::IntensiveQuantities>;
     using GridView = GetPropType<TypeTag, Properties::GridView>;
     using Toolbox = MathToolbox<Evaluation>;
+    using Model = GetPropType<TypeTag, Properties::Model>;
+
 
     enum { conti0EqIdx = Indices::conti0EqIdx };
     enum { dimWorld = GridView::dimensionworld };
@@ -148,6 +150,7 @@ public:
         std::vector<bool> active_;
         std::vector<Scalar> Xhi_;
         std::vector<Scalar> Psi_;
+        std::vector<bool> isConv_; 
     };
 
     #if HAVE_ECL_INPUT
@@ -174,6 +177,25 @@ public:
     }
     #endif
 
+    static void beginIteration(const Model& model, ConvectiveMixingModuleParam& info) {
+        
+        //std::size_t numGridDof = model.numGridDof();
+        //if (info.isConv_.empty()) {
+        //    info.isConv_.resize(numGridDof, true);
+      //  }
+        //for (std::size_t elementIdx = 0; elementIdx < numGridDof; ++elementIdx) {
+        //    const auto& iq = *model.cachedIntensiveQuantities(elementIdx, /*timeIdx=*/ 0);
+        //    const auto& fs = iq.fluidState();
+        //    const auto& sg = fs.saturation(FluidSystem::gasPhaseIdx);
+        //    const auto& rs =  (FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx)) ?
+        //                        fs.Rsw() :
+//                                fs.Rs();
+
+  //          if (!info.isConv_ && )
+    //    }
+
+    }
+
     static void modifyAvgDensity(Evaluation& rhoAvg,
                                  const IntensiveQuantities& intQuantsIn,
                                  const IntensiveQuantities& intQuantsEx,
@@ -188,6 +210,28 @@ public:
         }
 
         if (phaseIdx == FluidSystem::gasPhaseIdx) {
+            return;
+        }
+
+        const auto& rs_in = FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx) ?
+            intQuantsIn.fluidState().Rsw():
+            intQuantsIn.fluidState().Rs();
+
+        const auto& rs_ex = FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx) ?
+            intQuantsEx.fluidState().Rsw():
+            intQuantsEx.fluidState().Rs();
+
+        if (rs_in == 0.0 && rs_ex == 0.0) {
+            return;
+        }
+
+        const auto sg_in = Toolbox::value(intQuantsIn.fluidState().saturation(FluidSystem::gasPhaseIdx));
+        const auto sg_ex = Toolbox::value(intQuantsEx.fluidState().saturation(FluidSystem::gasPhaseIdx));
+
+        //if (sg_in > 0 && sg_ex > 0) {
+        //    return;
+        //}
+        if (sg_in > 0.1 && sg_ex > 0.1) {
             return;
         }
 
@@ -283,6 +327,23 @@ public:
         }
 
         if (!info.active_[ intQuantsIn.pvtRegionIndex()] || !info.active_[ intQuantsEx.pvtRegionIndex()]) {
+            return;
+        }
+
+        const auto sg_in = Toolbox::value(intQuantsIn.fluidState().saturation(FluidSystem::gasPhaseIdx));
+        const auto sg_ex = Toolbox::value(intQuantsEx.fluidState().saturation(FluidSystem::gasPhaseIdx));
+        if (sg_in > 0.1 && sg_ex > 0.1) {
+            return;
+        }
+        const auto& rs_in = FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx) ?
+            intQuantsIn.fluidState().Rsw():
+            intQuantsIn.fluidState().Rs();
+
+        const auto& rs_ex = FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx) ?
+            intQuantsEx.fluidState().Rsw():
+            intQuantsEx.fluidState().Rs();
+
+        if (rs_in == 0.0 && rs_ex == 0.0) {
             return;
         }
 
