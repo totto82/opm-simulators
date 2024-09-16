@@ -231,9 +231,9 @@ public:
         //if (sg_in > 0 && sg_ex > 0) {
         //    return;
         //}
-        if (sg_in > 0.01 && sg_ex > 0.01) {
-            return;
-        }
+        //if (sg_in > 0.01 && sg_ex > 0.01) {
+        //    return;
+        //}
 
         const auto& liquidPhaseIdx = (FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx)) ?
             FluidSystem::waterPhaseIdx :
@@ -332,9 +332,9 @@ public:
 
         const auto sg_in = Toolbox::value(intQuantsIn.fluidState().saturation(FluidSystem::gasPhaseIdx));
         const auto sg_ex = Toolbox::value(intQuantsEx.fluidState().saturation(FluidSystem::gasPhaseIdx));
-        if (sg_in > 0.01 && sg_ex > 0.01) {
-            return;
-        }
+        //if (sg_in > 0.01 && sg_ex > 0.01) {
+        //    return;
+        //}
         const auto& rs_in = FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx) ?
             intQuantsIn.fluidState().Rsw():
             intQuantsIn.fluidState().Rs();
