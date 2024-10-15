@@ -1564,7 +1564,7 @@ namespace Opm
         if (!converged) {
             const std::string msg = " well " + name() + " did not get converged during well potential calculations "
                                                         " potentials are computed based on unconverged solution";
-            deferred_logger.debug(msg);
+            // deferred_logger.debug(msg);
         }
         well_copy.updatePrimaryVariables(simulator, well_state_copy, deferred_logger);
         well_copy.computeWellConnectionPressures(simulator, well_state_copy, deferred_logger);
