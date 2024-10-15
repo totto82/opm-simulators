@@ -1528,10 +1528,14 @@ namespace Opm {
                 this->glift_debug
             };
             group_info.initialize();
+            // Gas lift optimization per well
             gasLiftOptimizationStage1(deferred_logger, prod_wells, glift_wells,
                                       group_info, state_map);
+
+            // Redistribute and remove surplus ALQ within groups (up to and including FIELD)
             this->gasLiftOptimizationStage2(deferred_logger, prod_wells, glift_wells,
                                             group_info, state_map, simulator_.episodeIndex());
+            
             if (this->glift_debug) {
                 this->gliftDebugShowALQ(deferred_logger);
             }
@@ -1593,6 +1597,7 @@ namespace Opm {
                 }
                 num_rates_to_sync = groups_to_sync.size();
             }
+
             num_rates_to_sync = comm.sum(num_rates_to_sync);
             if (num_rates_to_sync > 0) {
                 std::vector<int> group_indexes;
@@ -1632,6 +1637,7 @@ namespace Opm {
                             group_oil_rates[j], group_gas_rates[j], group_water_rates[j], group_alq_rates[j]);
                     }
                 }
+
                 if (this->glift_debug) {
                     int counter = 0;
                     if (comm.rank() == i) {
@@ -1666,8 +1672,9 @@ namespace Opm {
                 *well, simulator_, summary_state,
                 deferred_logger, this->wellState(), this->groupState(),
                 group_info, sync_groups, this->comm_, this->glift_debug);
-        auto state = glift->runOptimize(
-            simulator_.model().newtonMethod().numIterations());
+        
+        auto state = glift->runOptimize(simulator_.model().newtonMethod().numIterations());
+       
         if (state) {
             state_map.insert({well->name(), std::move(state)});
             glift_wells.insert({well->name(), std::move(glift)});

@@ -52,7 +52,7 @@ GasLiftStage2<Scalar>::GasLiftStage2(const int report_step_idx,
                                      GasLiftGroupInfo<Scalar>& group_info,
                                      GLiftWellStateMap &state_map,
                                      bool glift_debug)
-    : GasLiftCommon<Scalar>(well_state, group_state, deferred_logger, comm, true)
+    : GasLiftCommon<Scalar>(well_state, group_state, deferred_logger, comm, false)
     , prod_wells_{prod_wells}
     , stage1_wells_{glift_wells}
     , group_info_{group_info}
@@ -107,16 +107,19 @@ addOrRemoveALQincrement_(GradMap &grad_map,
     if (it == this->well_state_map_.end())
         return;
 
-    GasLiftWellState<Scalar>& state = *(it->second.get());
     const GradInfo& gi = grad_map.at(well_name);
-    if (this->debug) {
+
+    if (debug_) {
+        GasLiftWellState<Scalar>& state = *(it->second.get());
         auto new_alq = gi.alq;
         auto old_alq = state.alq();
         const std::string msg = fmt::format("well {} : {} ALQ increment, "
-            "old alq: {}, new alq: {}",
-            well_name, (add ? "adding" : "subtracting"), old_alq, new_alq);
+            "old alq: {:.2f}, new alq: {:.2f}",
+            well_name, (add ? "adding" : "subtracting"), old_alq * SEC_PER_DAY, new_alq * SEC_PER_DAY);
         this->displayDebugMessage_(msg);
     }
+
+    // well_state_map_ is the WellState class, while well_state_map_ is a GLiftWellStateMap class
     this->well_state_.setALQ(well_name, gi.alq);
     const auto& pu = this->well_state_.phaseUsage();
     std::vector<Scalar> well_pot(pu.num_phases, 0.0);
@@ -141,6 +144,7 @@ calcIncOrDecGrad_(const std::string well_name,
     // only applies to wells in the well_state_map (i.e. wells on this rank)
     if (this->well_state_map_.count(well_name) == 0)
         return std::nullopt;
+        
     GasLiftWellState<Scalar>& state = *(this->well_state_map_.at(well_name).get());
     if (checkRateAlreadyLimited_(well_name, state, increase)) {
         return std::nullopt;
@@ -148,14 +152,18 @@ calcIncOrDecGrad_(const std::string well_name,
     else {
         auto [oil_rate, gas_rate] = state.getRates();
         auto alq = state.alq();
-        auto grad = gs_well.calcIncOrDecGradient(
-            oil_rate, gas_rate, state.waterRate(), alq, gr_name_dont_limit, increase, /*debug_output=*/false);
-        if (this->debug) {
+        auto grad = gs_well.calcIncOrDecGradient(oil_rate, gas_rate, state.waterRate(), alq, gr_name_dont_limit, 
+                                                 increase, /*debug_output=*/false);
+        // if (grad->grad < 1e-16) {
+        //     return std::nullopt;
+        // }
+
+        if (debug_) {
             if (grad) {
                 const std::string msg = fmt::format(
-                    "well {} : alq = {} : adding {} gradient = {}",
+                    "well {} : alq = {:.2f} : adding {} gradient = {:.6g}",
                     well_name,
-                    alq,
+                    alq * SEC_PER_DAY,
                     (increase ? "incremental" : "decremental"),
                     grad->grad
                 );
@@ -163,9 +171,9 @@ calcIncOrDecGrad_(const std::string well_name,
             }
             else {
                 const std::string msg = fmt::format(
-                    "well {} : alq = {} : failed to compute {} gradient",
+                    "well {} : alq = {:.2f} : failed to compute {} gradient",
                     well_name,
-                    alq,
+                    alq * SEC_PER_DAY,
                     (increase ? "incremental" : "decremental")
                 );
                 displayDebugMessage_(msg);
@@ -204,9 +212,9 @@ checkRateAlreadyLimited_(const std::string& well_name,
         if (state.gasIsLimited() || state.oilIsLimited() ||
             state.alqIsLimited() || state.waterIsLimited()) {
             const std::string msg = fmt::format(
-                "Well {} : alq = {} : skipping {} gradient since {} was limited in previous step",
+                "Well {} : alq = {:.2f} : skipping {} gradient since {} was limited in previous step",
                 well_name,
-                state.alq(),
+                state.alq() * SEC_PER_DAY,
                 (increase ? "incremental" : "decremental"),
                 (state.oilIsLimited() ? "oil" : (state.gasIsLimited() ? "gas" : "alq"))
             );
@@ -263,7 +271,7 @@ template<class Scalar>
 void GasLiftStage2<Scalar>::
 displayDebugMessage_(const std::string& msg) const
 {
-    if (this->debug) {
+    if (debug_) {
         this->logMessage_(/*prefix=*/"GLIFT2", msg);
     }
 }
@@ -272,7 +280,7 @@ template<class Scalar>
 void GasLiftStage2<Scalar>::
 displayDebugMessage2B_(const std::string& msg)
 {
-    if (this->debug) {
+    if (debug_) {
         this->logMessage_(/*prefix=*/"GLIFT2B", msg);
     }
 }
@@ -281,7 +289,7 @@ template<class Scalar>
 void GasLiftStage2<Scalar>::
 displayDebugMessage_(const std::string& msg, const std::string& group_name)
 {
-    if (this->debug) {
+    if (debug_) {
         const std::string message = fmt::format(
             "Group {} : {}", group_name, msg);
         displayDebugMessage_(message);
@@ -351,6 +359,7 @@ getGroupGliftWellsRecursive_(const Group& group,
             getGroupGliftWellsRecursive_(sub_group, wells);
         }
     }
+
     for (const std::string& well_name : group.wells()) {
         if (this->stage1_wells_.count(well_name) == 1) {
             GasLiftSingleWell* well_ptr = this->stage1_wells_.at(well_name).get();
@@ -423,7 +432,7 @@ optimizeGroup_(const Group& group)
     const auto prod_control = this->group_state_.production_control(group_name);
     if (this->glo_.has_group(group.name()) || ((prod_control != Group::ProductionCMode::NONE) && (prod_control != Group::ProductionCMode::FLD)))
     {
-        if (this->debug) {
+        if (debug_) {
             const std::string msg = fmt::format("optimizing (control = {})", Group::ProductionCMode2String(prod_control));
             displayDebugMessage_(msg, group_name);
         }
@@ -431,13 +440,19 @@ optimizeGroup_(const Group& group)
         auto [oil_rate, gas_rate, water_rate, alq] = getCurrentGroupRates_(group);
         //std::cout << "GROUP RATE: " << group.name() << " " << oil_rate << " " << gas_rate << " " << water_rate << " " << alq << std::endl;
 
+        if (debug_) {
+            const std::string msg = fmt::format("initial group rates oil = {:.2f}, gas = {:.2f}, water = {:.2f}", 
+                oil_rate * SEC_PER_DAY, gas_rate * SEC_PER_DAY, water_rate * SEC_PER_DAY);
+            displayDebugMessage_(msg, group_name);
+        }
+
         std::vector<GradPair> inc_grads;
         std::vector<GradPair> dec_grads;
         redistributeALQ_(wells, group, inc_grads, dec_grads);
         removeSurplusALQ_(group, inc_grads, dec_grads);
     }
     else {
-        if (this->debug) {
+        if (debug_) {
             if ((prod_control != Group::ProductionCMode::NONE)) {
                 const std::string msg = fmt::format("skipping (control = {})", Group::ProductionCMode2String(prod_control));
                 displayDebugMessage_(msg, group_name);
@@ -460,14 +475,17 @@ optimizeGroupsRecursive_(const Group& group)
     optimizeGroup_(group);
 }
 
+
+/*
+incremental and decremental gradients: 
+if 'grads' are incremental, then 'other_grads' are decremental, or conversely, 
+if 'grads' are decremental, then 'other_grads' are incremental
+*/
 template<class Scalar>
 void GasLiftStage2<Scalar>::
 recalculateGradientAndUpdateData_(GradPairItr& grad_itr,
                                   const std::string& gr_name_dont_limit,
                                   bool increase,
-        //incremental and decremental gradients, if 'grads' are incremental, then
-        // 'other_grads' are decremental, or conversely, if 'grads' are decremental, then
-        // 'other_grads' are incremental
                                   std::vector<GradPair>& grads,
                                   std::vector<GradPair>& other_grads)
 {
@@ -479,8 +497,10 @@ recalculateGradientAndUpdateData_(GradPairItr& grad_itr,
     // only applies to wells in the well_state_map (i.e. wells on this rank)
     // the grads and other grads are synchronized later
     if(this->stage1_wells_.count(name) > 0) {
-        GasLiftSingleWell &gs_well = *(this->stage1_wells_.at(name).get());
+        GasLiftSingleWell& gs_well = *(this->stage1_wells_.at(name).get());
         {
+            // Calculate gradient and update gradient in incremental/decremental list
+            // OBS: If the new grad does not exist, the grad will be removed from any list instead
             auto grad = calcIncOrDecGrad_(name, gs_well, gr_name_dont_limit, increase);
             if (grad) {
                 grad_itr->second = grad->grad;
@@ -491,8 +511,8 @@ recalculateGradientAndUpdateData_(GradPairItr& grad_itr,
                 old_grad = deleteGrad_(name, increase);
             }
         }
-        // If the old incremental/decremental gradient was defined, it becomes the new
-        //   decremental/incremental gradient
+
+        // If the old incremental/decremental gradient was defined, it becomes the new decremental/incremental gradient
         if (old_grad) {
             // NOTE: Either creates a new item or reassigns
             // The old incremental gradient becomes the new decremental gradient
@@ -508,6 +528,7 @@ recalculateGradientAndUpdateData_(GradPairItr& grad_itr,
                 //   updateGradVector_() will do a push_back() if 'name' is not found..
                 updateGradVector_(name, other_grads, grad->grad);
             }
+            // Removed grad from incremental/decremental list
             else {
                 for (auto it = other_grads.begin(); it != other_grads.end(); it++) {
                     if (it->first == name) {
@@ -603,25 +624,25 @@ redistributeALQ_(std::vector<GasLiftSingleWell*>& wells,
 
     bool stop_iteration = false;
     while (!stop_iteration && (state.it++ <= this->max_iterations_)) {
+        // Show iteration info
         state.debugShowIterationInfo();
-        auto [min_dec_grad, max_inc_grad]
-            = state.getEcoGradients(inc_grads, dec_grads);
+
+        // Get min decremental and max incremental gradients from list
+        auto [min_dec_grad, max_inc_grad] = state.getEcoGradients(inc_grads, dec_grads);
+
+        // Redistribute if the largest incremental gradient exceeds the smallest decremental gradient
         if (min_dec_grad) {
             assert( max_inc_grad );
-            // Redistribute if the largest incremental gradient exceeds the
-            //   smallest decremental gradient
             if ((*max_inc_grad)->second > (*min_dec_grad)->second) {
                 state.redistributeALQ(*min_dec_grad, *max_inc_grad);
-                state.recalculateGradients(
-                    inc_grads, dec_grads, *min_dec_grad, *max_inc_grad);
+                state.recalculateGradients(inc_grads, dec_grads, *min_dec_grad, *max_inc_grad);
                 continue;
             }
         }
         stop_iteration = true;
     }
     if (state.it > this->max_iterations_) {
-        const std::string msg = fmt::format("Max iterations {} exceeded.",
-            this->max_iterations_);
+        const std::string msg = fmt::format("Max iterations {} exceeded.", this->max_iterations_);
         displayWarning_(msg, group.name());
     }
 }
@@ -639,31 +660,19 @@ removeSurplusALQ_(const Group& group,
                   std::vector<GradPair>& dec_grads)
 {
     if (dec_grads.empty()) {
-        displayDebugMessage_("no wells to remove ALQ from. Skipping");
+        displayDebugMessage_("no wells to remove surplus ALQ from. Skipping");
         return;
     }
     assert(!dec_grads.empty());
+
     const auto max_glift = getGroupMaxALQ_(group);
     const auto max_totalgas = getGroupMaxTotalGas_(group);
     const auto controls = group.productionControls(this->summary_state_);
-    //const auto &max_total_gas = gl_group.max_total_gas();
     auto [oil_rate, gas_rate, water_rate, alq] = getCurrentGroupRates_(group);
-
     const auto prod_control = this->group_state_.production_control(group.name());
-
     auto min_eco_grad = this->glo_.min_eco_gradient();
-    bool stop_iteration = false;
-    if (this->debug) {
-        std::string max_glift_str = "unlimited";
-        if (max_glift) max_glift_str = fmt::format("{}", *max_glift);
-        const std::string msg = fmt::format("Starting remove surplus iteration for group: {}. "
-            "oil_rate = {}, oil_target = {}, gas_rate = {}, gas_target = {}, "
-            "water_rate = {}, water_target = {}, liquid_target = {}, alq = {}, max_alq = {}",
-            group.name(), oil_rate, controls.oil_target,
-            gas_rate, controls.gas_target, water_rate, controls.water_target, controls.liquid_target,
-            alq, max_glift_str);
-        displayDebugMessage_(msg);
-    }
+    //const auto &max_total_gas = gl_group.max_total_gas();
+
     SurplusState state {*this, group, oil_rate, gas_rate, water_rate, alq,
                         static_cast<Scalar>(min_eco_grad),
                         static_cast<Scalar>(controls.oil_target),
@@ -672,22 +681,44 @@ removeSurplusALQ_(const Group& group,
                         static_cast<Scalar>(controls.liquid_target),
                         max_glift, max_totalgas };
 
+    if (debug_) {
+        std::string max_glift_str = "unlimited";
+        if (max_glift) max_glift_str = fmt::format("{}", *max_glift);
+        const std::string msg_part_1 = fmt::format("Starting remove surplus iteration for group {}: ", group.name());
+        const std::string msg_part_2 = fmt::format(
+            "\toil_rate = {:.2f}, oil_target = {:.2f}, gas_rate = {:.2f}, gas_target = {:.2f}, "
+            "water_rate = {:.2f}, water_target = {:.2f}, ",
+            oil_rate * SEC_PER_DAY, controls.oil_target * SEC_PER_DAY,
+            gas_rate * SEC_PER_DAY, controls.gas_target * SEC_PER_DAY, water_rate * SEC_PER_DAY, 
+            controls.water_target * SEC_PER_DAY);
+        const std::string msg_part_3 = fmt::format("\tliquid_target = {:.2f}, alq = {:.2f}, max_alq = {}, min_eco_grad = {:.6f}",
+            controls.liquid_target * SEC_PER_DAY, alq * SEC_PER_DAY, max_glift_str, min_eco_grad);
+        displayDebugMessage_(msg_part_1);
+        displayDebugMessage_(msg_part_2);
+        displayDebugMessage_(msg_part_3);
+    }
+    
+    bool stop_iteration = false;
     while (!stop_iteration) {
         if (dec_grads.size() >= 2) {
             sortGradients_(dec_grads);
         }
+
         auto dec_grad_itr = dec_grads.begin();
         const auto well_name = dec_grad_itr->first;
-        auto eco_grad = dec_grad_itr->second;
-        bool remove = false;
         const auto delta = state.computeDelta(well_name);
         const auto& [delta_oil, delta_gas, delta_water, delta_alq] = delta;
+        auto eco_grad = dec_grad_itr->second;
+        bool remove = false;
+
         if ( (prod_control == Group::ProductionCMode::ORAT && state.checkOilTarget(delta_oil))
           || (prod_control == Group::ProductionCMode::GRAT && state.checkGasTarget(delta_gas))
           || (prod_control == Group::ProductionCMode::LRAT && state.checkLiquidTarget(delta_oil + delta_water))
           || (prod_control == Group::ProductionCMode::WRAT && state.checkWaterTarget(delta_water))
           || state.checkALQlimit())
         {
+            std::string msg2 = fmt::format("Group {} target/limit violated, removing alq", group.name());
+            displayDebugMessage_(msg2);
             remove = true;
         }
         else {
@@ -696,8 +727,14 @@ removeSurplusALQ_(const Group& group,
             //   If the first well's eco. grad. is greater than the minimum
             //   eco. grad. then all the other wells' eco. grad. will also be
             //   greater.
-            if (state.checkEcoGradient(well_name, eco_grad)) remove = true;
+            if (state.checkEcoGradient(well_name, eco_grad)) {
+                std::string msg3 = fmt::format("Decremental gradient {} < economic gradient {}, removing alq", 
+                    eco_grad, min_eco_grad);
+                displayDebugMessage_(msg3);
+                remove = true;
+            }
         }
+
         if (remove) {
             state.updateRates(delta);
             state.addOrRemoveALQincrement( this->dec_grads_, well_name, /*add=*/false);
@@ -705,8 +742,7 @@ removeSurplusALQ_(const Group& group,
             // and gaslift based on the current group limits. In other words we want to reduce
             // the gasslift as much as possible as long as we are able to produce the group
             // targets
-            recalculateGradientAndUpdateData_(
-                        dec_grad_itr, group.name(), /*increase=*/false, dec_grads, inc_grads);
+            recalculateGradientAndUpdateData_(dec_grad_itr, group.name(), /*increase=*/false, dec_grads, inc_grads);
 
             // The dec_grads and inc_grads needs to be syncronized across ranks
             mpiSyncGlobalGradVector_(dec_grads);
@@ -714,20 +750,24 @@ removeSurplusALQ_(const Group& group,
             // NOTE: recalculateGradientAndUpdateData_() will remove the current gradient
             //   from dec_grads if it cannot calculate a new decremental gradient.
             //   This will invalidate dec_grad_itr and well_name
-            if (dec_grads.empty()) stop_iteration = true;
+            if (dec_grads.empty()) {
+                stop_iteration = true;
+            }
             ++state.it;
         }
         else {
             stop_iteration = true;
         }
     }
+    
     if (state.it >= 1) {
-        if (this->debug) {
+        if (debug_) {
             auto [oil_rate2, gas_rate2, water_rate2, alq2] = state.getCurrentGroupRates();
             const std::string msg = fmt::format(
                  "Finished after {} iterations for group: {}."
-                 " oil_rate = {}, gas_rate = {}, water_rate = {}, alq = {}", state.it,
-                 group.name(), oil_rate2, gas_rate2, water_rate2, alq2);
+                 " oil_rate = {:.2f}, gas_rate = {:.2f}, water_rate = {:.2f}, alq = {:.2f}", state.it,
+                 group.name(), oil_rate2 * SEC_PER_DAY, gas_rate2 * SEC_PER_DAY, water_rate2 * SEC_PER_DAY, 
+                 alq2 * SEC_PER_DAY);
             displayDebugMessage_(msg);
         }
     }
@@ -774,6 +814,18 @@ sortGradients_(std::vector<GradPair>& grads)
 }
 
 template<class Scalar>
+void GasLiftStage2<Scalar>::
+displayGradVector_(std::vector<GradPair>& grads, bool increase)
+{
+    std::string msg = increase ? "inc_grad = [" : "dec_grad = [";
+    for (auto itr = grads.begin(); itr != grads.end(); itr++) {
+        msg += fmt::format(" ({}, {:.6f}) ", itr->first, itr->second);
+    }
+    msg += "]";
+    displayDebugMessage_(msg);
+}
+
+template<class Scalar>
 std::optional<typename GasLiftStage2<Scalar>::GradInfo>
 GasLiftStage2<Scalar>::
 updateGrad_(const std::string& name, GradInfo& grad, bool increase)
@@ -816,11 +868,18 @@ updateGroupInfo(const std::string& well_name, bool add)
         const auto& pairs = this->group_info_.getWellGroups(well_name);
         for (const auto& [group_name, efficiency] : pairs) {
             //std::cout << "delta oil:  " << delta_oil << " " << group_name << " " << well_name << std::endl;
+            if (debug_) {
+                const std::string msg = 
+                fmt::format("update group info: delta_oil = {:.2f}, delta_gas = {:.2f}, delta_water = {:.2f} delta_alq = {:.2f}, eff_factor = {:.2f}",
+                delta_oil * SEC_PER_DAY, delta_gas * SEC_PER_DAY, delta_water * SEC_PER_DAY, delta_alq * SEC_PER_DAY, efficiency);
+                this->displayDebugMessage_(msg, group_name);
+            }
+
             this->group_info_.update(group_name,
-                                    efficiency * delta_oil,
-                                    efficiency * delta_gas,
-                                    efficiency * delta_water,
-                                    efficiency * delta_alq);
+                                     efficiency * delta_oil,
+                                     efficiency * delta_gas,
+                                     efficiency * delta_water,
+                                     efficiency * delta_alq);
         }
     }
 }
@@ -830,29 +889,33 @@ std::array<Scalar, 4>
 GasLiftStage2<Scalar>::
 computeDelta(const std::string& well_name, bool add)
 {
+    // init output 
     std::array<Scalar, 4> delta = {0.0, 0.0, 0.0, 0.0};
+
     // compute the delta on wells on own rank
     if (this->well_state_map_.count(well_name) > 0) {
-        const GradInfo& gi = add? this->inc_grads_.at(well_name) : this->dec_grads_.at(well_name);
+        const GradInfo& gi = add ? this->inc_grads_.at(well_name) : this->dec_grads_.at(well_name);
         GasLiftWellState<Scalar>& state = *(this->well_state_map_.at(well_name).get());
         GasLiftSingleWell& gs_well = *(this->stage1_wells_.at(well_name).get());
         const WellInterfaceGeneric<Scalar>& well = gs_well.getWell();
+        
         // only get deltas for wells owned by this rank
         if (this->well_state_.wellIsOwned(well.indexOfWell(), well_name)) {
             const auto& well_ecl = well.wellEcl();
             Scalar factor = well_ecl.getEfficiencyFactor();
             auto& [delta_oil, delta_gas, delta_water, delta_alq] = delta;
             delta_oil = factor * (gi.new_oil_rate - state.oilRate());
-            //std::cout << " compute delta " << gi.new_oil_rate << " " << state.oilRate() << std::endl;
             delta_gas = factor * (gi.new_gas_rate - state.gasRate());
             delta_water = factor * (gi.new_water_rate - state.waterRate());
             delta_alq = factor * (gi.alq - state.alq());
+            //std::cout << " compute delta " << gi.new_oil_rate << " " << state.oilRate() << std::endl;
         }
 
         state.update(gi.new_oil_rate, gi.oil_is_limited,
-                gi.new_gas_rate, gi.gas_is_limited,
-                gi.alq, gi.alq_is_limited,
-                gi.new_water_rate, gi.water_is_limited, add);
+                     gi.new_gas_rate, gi.gas_is_limited,
+                     gi.alq, gi.alq_is_limited,
+                     gi.new_water_rate, gi.water_is_limited, 
+                     add);
     }
 
     // and communicate the results
@@ -874,11 +937,13 @@ calculateEcoGradients(std::vector<GasLiftSingleWell*>& wells,
     for (auto well_ptr : wells) {
         const auto& gs_well = *well_ptr;  // gs = GasLiftSingleWell
         const auto& name = gs_well.name();
+
         auto inc_grad = this->parent.calcIncOrDecGrad_(name, gs_well, group.name(), /*increase=*/true);
         if (inc_grad) {
             inc_grads.emplace_back(std::make_pair(name, inc_grad->grad));
             this->parent.saveIncGrad_(name, *inc_grad);
         }
+
         auto dec_grad = this->parent.calcIncOrDecGrad_(name, gs_well, group.name(), /*increase=*/false);
         if (dec_grad) {
             dec_grads.emplace_back(std::make_pair(name, dec_grad->grad));
@@ -926,6 +991,8 @@ getEcoGradients(std::vector<GradPair>& inc_grads,
     if (!inc_grads.empty() && !dec_grads.empty()) {
         this->parent.sortGradients_(inc_grads);
         this->parent.sortGradients_(dec_grads);
+        this->parent.displayGradVector_(inc_grads, true);
+        this->parent.displayGradVector_(dec_grads, false);
         // The largest incremental gradient is the last element
         auto inc_grad = std::prev(inc_grads.end());
         std::optional<GradPairItr> inc_grad_opt;
@@ -967,6 +1034,7 @@ recalculateGradients(std::vector<GradPair>& inc_grads,
                      GradPairItr& min_dec_grad_itr,
                      GradPairItr& max_inc_grad_itr)
 {
+
     this->parent.recalculateGradientAndUpdateData_(
         max_inc_grad_itr, this->group.name(), /*increase=*/true, inc_grads, dec_grads);
     this->parent.recalculateGradientAndUpdateData_(
@@ -983,18 +1051,23 @@ void GasLiftStage2<Scalar>::OptimizeState::
 redistributeALQ(GradPairItr& min_dec_grad,
                 GradPairItr& max_inc_grad)
 {
+    // Debug message
     const std::string msg = fmt::format(
-        "redistributing ALQ from well {} (dec gradient: {}) "
-        "to well {} (inc gradient {})",
+        "redistributing ALQ from well {} (dec gradient: {:.6f}) "
+        "to well {} (inc gradient {:.6f})",
         min_dec_grad->first, min_dec_grad->second,
         max_inc_grad->first, max_inc_grad->second);
     displayDebugMessage_(msg);
+
+    // Subract ALQ from well with min gradient in decremental gradient list 
     this->parent.addOrRemoveALQincrement_(
         this->parent.dec_grads_, /*well_name=*/min_dec_grad->first, /*add=*/false);
     
+    // Add ALQ to well with max gradient in incremental gradient list
     this->parent.addOrRemoveALQincrement_(
         this->parent.inc_grads_, /*well_name=*/max_inc_grad->first, /*add=*/true);
 
+    // 
     this->parent.updateGroupInfo(min_dec_grad->first, /*add=*/false);
     this->parent.updateGroupInfo(max_inc_grad->first, /*add=*/true);
 }
@@ -1027,11 +1100,12 @@ addOrRemoveALQincrement(GradMap& grad_map,
                         const std::string& well_name,
                         bool add)
 {
-    if (this->parent.debug) {
+    if (this->parent.debug_) {
         const std::string msg = fmt::format("group: {} : well {} : {} ALQ increment",
             this->group.name(), well_name, (add ? "adding" : "subtracting"));
         this->parent.displayDebugMessage_(msg);
     }
+
     this->parent.addOrRemoveALQincrement_(grad_map, well_name, add);
     this->parent.updateGroupInfo(well_name, add);
 }
@@ -1043,10 +1117,10 @@ checkALQlimit()
     if (this->max_glift) {
         Scalar max_alq = *(this->max_glift);
         if ((max_alq) < (this->alq)  ) {
-            if (this->parent.debug) {
+            if (this->parent.debug_) {
                 const std::string msg = fmt::format("group: {} : "
-                    "ALQ rate {} is greater than ALQ limit {}", this->group.name(),
-                    this->alq, max_alq);
+                    "ALQ rate {:.2f} is greater than ALQ limit {:.2f}", this->group.name(),
+                    this->alq * SEC_PER_DAY, max_alq * SEC_PER_DAY);
                 this->parent.displayDebugMessage_(msg);
             }
             return true;
@@ -1056,10 +1130,10 @@ checkALQlimit()
         Scalar max_total = *(this->max_total_gas);
         Scalar total_gas_rate = (this->alq + this->gas_rate);
         if ((max_total) < total_gas_rate ) {
-            if (this->parent.debug) {
+            if (this->parent.debug_) {
                 const std::string msg = fmt::format("group: {} : "
-                    "Total gas rate {} is greater than Total gas limit {}", this->group.name(),
-                    total_gas_rate, max_total);
+                    "Total gas rate {:.2f} is greater than Total gas limit {:.2f}", this->group.name(),
+                    total_gas_rate * SEC_PER_DAY, max_total * SEC_PER_DAY);
                 this->parent.displayDebugMessage_(msg);
             }
             return true;
@@ -1073,9 +1147,9 @@ bool GasLiftStage2<Scalar>::SurplusState::
 checkEcoGradient(const std::string& well_name, Scalar eco_grad)
 {
     if (eco_grad < this->min_eco_grad) {
-        if (this->parent.debug) {
+        if (this->parent.debug_) {
             const std::string msg = fmt::format("group: {}, well: {} : "
-                "economic gradient {} less than minimum ({})", this->group.name(),
+                "economic gradient {:.6f} less than minimum ({:.6f})", this->group.name(),
                 well_name, eco_grad, this->min_eco_grad);
             this->parent.displayDebugMessage_(msg);
         }
@@ -1094,12 +1168,13 @@ checkGasTarget(Scalar delta_gas)
         // the change in gas rate is added to the gas rate to make sure the
         // group still can produce its target
         // i.e. we want to find the solution that optimize gas lift while still
-        // producing the given group limit     
-        if (this->gas_target < (this->gas_rate + delta_gas) ) {
+        // producing the given group limit
+        auto gas_rate_check = this->gas_rate + delta_gas;
+        if (this->gas_target < (gas_rate_check) ) {
             if (this->parent.debug) {
                 const std::string msg = fmt::format("group: {} : "
-                    "gas rate {} is greater than gas target {}", this->group.name(),
-                    this->gas_rate, this->gas_target);
+                    "gas rate {:.2f} is greater than gas target {}", this->group.name(),
+                    gas_rate_check * SEC_PER_DAY, this->gas_target * SEC_PER_DAY);
                 this->parent.displayDebugMessage_(msg);
             }
             return true;
@@ -1119,10 +1194,10 @@ checkLiquidTarget(Scalar delta_liquid)
         // producing the given group limit
         auto liquid_rate = this->oil_rate + this->water_rate + delta_liquid;
         if (this->liquid_target < (liquid_rate) ) {
-            if (this->parent.debug) {
+            if (this->parent.debug_) {
                 const std::string msg = fmt::format("group: {} : "
-                    "liquid rate {} is greater than liquid target {}", this->group.name(),
-                    liquid_rate, this->liquid_target);
+                    "liquid rate {:.2f} is greater than liquid target {:.2f}", this->group.name(),
+                    liquid_rate * SEC_PER_DAY, this->liquid_target * SEC_PER_DAY);
                 this->parent.displayDebugMessage_(msg);
             }
             return true;
@@ -1140,11 +1215,12 @@ checkOilTarget(Scalar delta_oil)
         // group still can produce its target
         // i.e. we want to find the solution that optimize gas lift while still
         // producing the given group limit
-        if (this->oil_target < (this->oil_rate + delta_oil) ) {
-            if (this->parent.debug) {
+        auto oil_rate_check = this->oil_rate + delta_oil;
+        if (this->oil_target < (oil_rate_check) ) {
+            if (this->parent.debug_) {
                 const std::string msg = fmt::format("group: {} : "
-                    "oil rate {} is greater than oil target {}", this->group.name(),
-                    this->oil_rate + delta_oil, this->oil_target);
+                    "oil rate {:.2f} is greater than oil target {:.2f}", this->group.name(),
+                    oil_rate_check * SEC_PER_DAY, this->oil_target * SEC_PER_DAY);
                 this->parent.displayDebugMessage_(msg);
             }
             return true;
@@ -1162,11 +1238,12 @@ checkWaterTarget(Scalar delta_water)
         // group still can produce its target
         // i.e. we want to find the solution that optimize gas lift while still
         // producing the given group limit
-        if (this->water_target < (this->water_rate + delta_water) ) {
-            if (this->parent.debug) {
+        auto water_rate_check = this->water_rate + delta_water;
+        if (this->water_target < (water_rate_check) ) {
+            if (this->parent.debug_) {
                 const std::string msg = fmt::format("group: {} : "
-                    "water rate {} is greater than water target {}", this->group.name(),
-                    this->water_rate + delta_water, this->water_target);
+                    "water rate {:.2f} is greater than water target {:.2f}", this->group.name(),
+                    water_rate_check * SEC_PER_DAY, this->water_target * SEC_PER_DAY);
                 this->parent.displayDebugMessage_(msg);
             }
             return true;
@@ -1181,12 +1258,14 @@ GasLiftStage2<Scalar>::SurplusState::
 computeDelta(const std::string& well_name)
 {
     std::array<Scalar, 4> delta = {0.0, 0.0, 0.0, 0.0};
+
     // compute the delta on wells on own rank
     if (this->parent.well_state_map_.count(well_name) > 0) {
         const GradInfo& gi = this->parent.dec_grads_.at(well_name);
         GasLiftWellState<Scalar>& state = *(this->parent.well_state_map_.at(well_name).get());
         GasLiftSingleWell& gs_well = *(this->parent.stage1_wells_.at(well_name).get());
         const WellInterfaceGeneric<Scalar>& well = gs_well.getWell();
+        
         // only get deltas for wells owned by this rank
         if (this->parent.well_state_.wellIsOwned(well.indexOfWell(), well_name)) {
             const auto& well_ecl = well.wellEcl();

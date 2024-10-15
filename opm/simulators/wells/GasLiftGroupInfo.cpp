@@ -641,6 +641,7 @@ initializeGroupRatesRecursive_(const Group& group)
             alq += (gefac * sg_alq);
         }
     }
+
     if (this->debug) debugEndInitializeGroup(group.name());
     std::optional<Scalar> oil_target, gas_target, water_target, liquid_target, max_total_gas, max_alq;
     const auto controls = group.productionControls(this->summary_state_);
@@ -703,12 +704,14 @@ initializeWell2GroupMapRecursive_(const Group& group,
     for (auto &item : group_efficiency) {
         item *= gfac;
     }
+
     if (this->group_rate_map_.count(group.name()) == 1) {
         // extract the subset of groups that has limits or targets that can affect
         //   gas lift optimization.
         group_names.push_back(group.name());
         group_efficiency.push_back(gfac);
     }
+    
     if (group.wellgroup()) {
         for (const std::string& well_name : group.wells()) {
             // TODO: can the same well be memember of two different groups
@@ -727,9 +730,7 @@ initializeWell2GroupMapRecursive_(const Group& group,
                 auto& vec = itr->second;
                 assert(group_names.size() == group_efficiency.size());
                 auto iter2 = group_efficiency.begin();
-                for (auto iter1 = group_names.begin();
-                     iter1 != group_names.end(); ++iter1)
-                {
+                for (auto iter1 = group_names.begin(); iter1 != group_names.end(); ++iter1) {
                     Scalar efficiency = (*iter2) * wfac;
                     vec.emplace_back(/*group_name=*/*iter1, efficiency);
                     ++iter2;
@@ -747,6 +748,7 @@ initializeWell2GroupMapRecursive_(const Group& group,
                 sub_group, group_names, group_efficiency, cur_efficiency);
         }
     }
+
     if (this->group_rate_map_.count(group.name()) == 1) {
         group_names.pop_back();
         group_efficiency.pop_back();

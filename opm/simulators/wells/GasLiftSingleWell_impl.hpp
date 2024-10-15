@@ -117,21 +117,21 @@ computeWellRates_(Scalar bhp, bool bhp_is_limited, bool debug_output ) const
                                         potentials,
                                         this->deferred_logger_);
     if (debug_output) {
-        const std::string msg = fmt::format("computed well potentials given bhp {}, "
-            "oil: {}, gas: {}, water: {}", bhp,
-            -potentials[this->oil_pos_], -potentials[this->gas_pos_],
-            -potentials[this->water_pos_]);
+        const std::string msg = fmt::format("computed well potentials given bhp {:.2f}, "
+            "oil: {:.2f}, gas: {:.2f}, water: {:.2f}", bhp * this->BAR_PER_PASCAL,
+            -potentials[this->oil_pos_] * this->SEC_PER_DAY, -potentials[this->gas_pos_] * this->SEC_PER_DAY,
+            -potentials[this->water_pos_] * this->SEC_PER_DAY);
         this->displayDebugMessage_(msg);
     }
 
     for (auto& potential : potentials) {
         potential = std::min(Scalar{0.0}, potential);
     }
+
     return {-potentials[this->oil_pos_],
             -potentials[this->gas_pos_],
             -potentials[this->water_pos_],
-            bhp_is_limited
-    };
+            bhp_is_limited};
 }
 
 template<typename TypeTag>
@@ -148,9 +148,9 @@ computeBhpAtThpLimit_(Scalar alq, bool debug_output) const
         if (*bhp_at_thp_limit < this->controls_.bhp_limit) {
             if (debug_output && this->debug) {
                 const std::string msg = fmt::format(
-                    "Computed bhp ({}) from thp limit is below bhp limit ({}), (ALQ = {})."
+                    "Computed bhp ({:.2f}) from thp limit is below bhp limit ({:.2f}), (ALQ = {:.2f})."
                     " Using bhp limit instead",
-                    *bhp_at_thp_limit, this->controls_.bhp_limit, alq
+                    (*bhp_at_thp_limit) * this->BAR_PER_PASCAL, this->controls_.bhp_limit * this->BAR_PER_PASCAL, alq * this->SEC_PER_DAY
                 );
                 this->displayDebugMessage_(msg);
             }
@@ -160,7 +160,7 @@ computeBhpAtThpLimit_(Scalar alq, bool debug_output) const
     }
     else {
         const std::string msg = fmt::format(
-            "Failed in getting converged bhp potential from thp limit (ALQ = {})", alq);
+            "Failed in getting converged bhp potential from thp limit (ALQ = {:.2f})", alq * this->SEC_PER_DAY);
         this->displayDebugMessage_(msg);
     }
     return bhp_at_thp_limit;

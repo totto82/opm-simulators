@@ -24,6 +24,10 @@
 
 #include <opm/simulators/utils/BlackoilPhases.hpp>
 
+#include <fmt/format.h>
+
+#include <opm/common/OpmLog/OpmLog.hpp>
+
 #include <map>
 #include <optional>
 #include <string>
@@ -63,6 +67,8 @@ protected:
     static const int Water = BlackoilPhases::Aqua;
     static const int Oil = BlackoilPhases::Liquid;
     static const int Gas = BlackoilPhases::Vapour;
+    static constexpr Scalar SEC_PER_DAY = 86400;
+    static constexpr Scalar BAR_PER_PASCAL = 1e-5;
 
 public:
     enum class Rate {oil, gas, water, liquid};
@@ -237,6 +243,10 @@ protected:
             gas_potential_ += delta_gas;
             water_potential_ += delta_water;
             alq_ += delta_alq;
+            // std::string msg = fmt::format("Rates updated: oil rate = {:.2f}, water rate = {:.2f}, gas rate = {:.2f}.",
+            //     oil_rate_ * SEC_PER_DAY, water_rate_ * SEC_PER_DAY, gas_rate_ * SEC_PER_DAY);
+            // OpmLog::debug(msg);
+            // std::cout << msg << std::endl;
             // Note. We don't updata the potentials at this point. They
             // are only needed initially.
         }
