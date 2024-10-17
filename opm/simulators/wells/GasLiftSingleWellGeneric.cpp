@@ -143,15 +143,16 @@ calcIncOrDecGradient(Scalar oil_rate,
                 grad, new_alq * SEC_PER_DAY, oil_rate * SEC_PER_DAY, this->increment_ * SEC_PER_DAY);
             displayDebugMessage_(msg);
             }
+            //return std::nullopt;
             return GradInfo(grad,
-                            0.0,
-                            false,
-                            0.0,
-                            false,
-                            0.0,
-                            false,
-                            new_alq,
-                            alq_is_limited);
+                           0.0,
+                           true,
+                           0.0,
+                           true,
+                           0.0,
+                           true,
+                           new_alq,
+                           false);
         }
         return std::nullopt;
     }
