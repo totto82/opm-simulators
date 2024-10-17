@@ -136,7 +136,7 @@ calcIncOrDecGradient(Scalar oil_rate,
                         new_alq,
                         alq_is_limited);
     } else {
-        if (!increase) {
+        if (false && !increase) {
             auto grad = calcEcoGradient_(oil_rate, 0.0, gas_rate, 0.0, increase, new_alq);
             if (debug_output) {
             std::string msg = fmt::format("No bhp found! Decremental gradient = {:.6f}, new_alq = {:.2f}, oil_rate = {:.2f}, increment = {:.2f}",
