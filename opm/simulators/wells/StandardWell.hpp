@@ -234,7 +234,7 @@ namespace Opm
         computeBhpAtThpLimitProdWithAlq(const Simulator& ebos_simulator,
                                         const SummaryState& summary_state,
                                         const Scalar alq_value,
-                                        DeferredLogger& deferred_logger) const override;
+                                        DeferredLogger& deferred_logger, bool insists=true) const override;
 
         void updateIPRImplicit(const Simulator& simulator,
                                WellState<Scalar>& well_state,

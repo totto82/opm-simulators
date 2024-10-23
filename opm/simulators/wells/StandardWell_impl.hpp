@@ -2222,7 +2222,7 @@ namespace Opm
     computeBhpAtThpLimitProdWithAlq(const Simulator& simulator,
                                     const SummaryState& summary_state,
                                     const Scalar alq_value,
-                                    DeferredLogger& deferred_logger) const
+                                    DeferredLogger& deferred_logger, bool insists) const
     {
         // Make the frates() function.
         auto frates = [this, &simulator, &deferred_logger](const Scalar bhp) {
@@ -2260,6 +2260,8 @@ namespace Opm
             }
         }
 
+        if (!insists) 
+            return std::nullopt;
 
         auto fratesIter = [this, &simulator, &deferred_logger](const Scalar bhp) {
             // Solver the well iterations to see if we are

@@ -190,7 +190,7 @@ public:
     computeBhpAtThpLimitProdWithAlq(const Simulator& ebos_simulator,
                                     const SummaryState& summary_state,
                                     const Scalar alq_value,
-                                    DeferredLogger& deferred_logger) const = 0;
+                                    DeferredLogger& deferred_logger, bool insist = true) const = 0;
 
     /// using the solution x to recover the solution xw for wells and applying
     /// xw to update Well State

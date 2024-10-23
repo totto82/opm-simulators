@@ -118,6 +118,11 @@ calcIncOrDecGradient(Scalar oil_rate,
         if (!increase && new_rates.oil < 0) {
             return std::nullopt;
         }
+        
+        //if (increase && new_rates.limit_type == LimitedRates::LimitType::group) {
+        //    return std::nullopt;
+        //}
+
         auto grad = calcEcoGradient_(oil_rate, new_rates.oil, gas_rate, new_rates.gas, increase);
         return GradInfo(grad,
                         new_rates.oil,
