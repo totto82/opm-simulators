@@ -2251,6 +2251,11 @@ namespace Opm {
         const Group& fieldGroup = this->schedule().getGroup("FIELD", episodeIdx);
         this->updateWsolvent(fieldGroup, episodeIdx,  this->nupcolWellState());
 
+
+        // set group control to NONE if no wells contributes to it
+        setToNone(fieldGroup, deferred_logger, episodeIdx);
+
+
         return { changed_well_group, more_network_update };
     }
 
@@ -2443,6 +2448,30 @@ namespace Opm {
         OPM_END_PARALLEL_TRY_CATCH("BlackoilWellModel::updateAndCommunicate failed: ",
                                    simulator_.gridView().comm())
         this->updateAndCommunicateGroupData(reportStepIdx, iterationIdx);
+    }
+
+    template<typename TypeTag>
+    bool
+    BlackoilWellModel<TypeTag>::
+    setToNone(const Group& group,
+              DeferredLogger& deferred_logger,
+              const int reportStepIdx)
+    {      
+        bool changed = false;
+        // call recursively down the group hierarchy
+        for (const std::string& groupName : group.groups()) {
+            bool changed_this = setToNone( this->schedule().getGroup(groupName, reportStepIdx), deferred_logger, reportStepIdx);
+            changed = changed || changed_this;
+        }
+        const int num_group_controlled_wells
+                = WellGroupHelpers<Scalar>::groupControlledWells(this->schedule(), this->wellState(), this->groupState(), reportStepIdx, group.name(), "", true, /*injectionPhaseNotUsed*/Phase::OIL);
+
+        if (num_group_controlled_wells == 0) {
+            this->groupState().production_control(group.name(), Group::ProductionCMode::NONE);
+            changed = true;
+            std::cout << "Group set to NONE "<< group.name() << std::endl;
+        }
+        return changed;
     }
 
     template<typename TypeTag>

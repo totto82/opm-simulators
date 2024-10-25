@@ -357,6 +357,10 @@ template<class Scalar> class WellContributions;
                                     const int reportStepIdx,
                                     const int iterationIdx);
 
+            bool setToNone(const Group& group,
+                                    DeferredLogger& deferred_logger,
+                                    const int reportStepIdx);
+
             WellInterfacePtr getWell(const std::string& well_name) const;
             bool hasWell(const std::string& well_name) const;
 
