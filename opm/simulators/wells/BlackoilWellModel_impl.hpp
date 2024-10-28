@@ -2253,7 +2253,7 @@ namespace Opm {
 
 
         // set group control to NONE if no wells contributes to it
-        setToNone(fieldGroup, deferred_logger, episodeIdx);
+        //setToNone(fieldGroup, deferred_logger, episodeIdx);
 
 
         return { changed_well_group, more_network_update };
@@ -2463,6 +2463,10 @@ namespace Opm {
             bool changed_this = setToNone( this->schedule().getGroup(groupName, reportStepIdx), deferred_logger, reportStepIdx);
             changed = changed || changed_this;
         }
+
+        if (this->groupState().production_control(group.name()) == Group::ProductionCMode::NONE || this->groupState().production_control(group.name()) == Group::ProductionCMode::FLD)
+            return false;
+
         const int num_group_controlled_wells
                 = WellGroupHelpers<Scalar>::groupControlledWells(this->schedule(), this->wellState(), this->groupState(), reportStepIdx, group.name(), "", true, /*injectionPhaseNotUsed*/Phase::OIL);
 
