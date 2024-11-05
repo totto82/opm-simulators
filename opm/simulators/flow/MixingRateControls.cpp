@@ -342,8 +342,12 @@ updateConvectiveDRsDt_(const unsigned compressedDofIdx,
     const Scalar pCap = Opm::abs(pg - p);
     if ((rs >= (rssat * sg)) || (pCap < 1e-12)) {
         if (X > Psi) {
-            factor = 0.0;
-            omega = omegainn;
+            if (X < 0.9) {
+                factor = 0.0;
+                omega = omegainn;
+            } else {
+                factor = 1e7;
+            }
         }
     } else {
         factor /= Xhi;

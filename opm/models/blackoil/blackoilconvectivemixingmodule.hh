@@ -228,9 +228,28 @@ public:
         const auto sg_in = Toolbox::value(intQuantsIn.fluidState().saturation(FluidSystem::gasPhaseIdx));
         const auto sg_ex = Toolbox::value(intQuantsEx.fluidState().saturation(FluidSystem::gasPhaseIdx));
 
-        //if (sg_in > 0 && sg_ex > 0) {
+        Scalar sgr = 0.11;
+
+        const auto& rssat_in = FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx) ?
+            intQuantsIn.fluidState().RswSat():
+            intQuantsIn.fluidState().RsSat();
+
+        const auto& rssat_ex = FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx) ?
+            intQuantsEx.fluidState().RswSat():
+            intQuantsEx.fluidState().RsSat();
+
+        //if (sg_in < sgr && sg_ex < sgr && 
+        //    rs_in > 1.1*rssat_in*info.Psi_[intQuantsIn.pvtRegionIndex()] &&
+        //    rs_ex > 1.1*rssat_ex*info.Psi_[intQuantsEx.pvtRegionIndex()]) {
         //    return;
         //}
+
+        if (sg_in < sgr && sg_ex < sgr && 
+            rs_in > 0.85*rssat_in &&
+            rs_ex > 0.85*rssat_ex) {
+            return;
+        }
+
         //if (sg_in > 0.01 && sg_ex > 0.01) {
         //    return;
         //}
@@ -347,6 +366,32 @@ public:
             return;
         }
 
+        Scalar sgr = 0.11;
+
+        const auto& rssat_in = FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx) ?
+            intQuantsIn.fluidState().RswSat():
+            intQuantsIn.fluidState().RsSat();
+
+        const auto& rssat_ex = FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx) ?
+            Opm::getValue(intQuantsIn.fluidState().RswSat()):
+            Opm::getValue(intQuantsIn.fluidState().RsSat());
+
+        //if (sg_in < sgr && sg_ex < sgr && 
+        //    rs_in > 1.1*rssat_in*info.Psi_[intQuantsIn.pvtRegionIndex()] &&
+        //    rs_ex > 1.1*rssat_ex*info.Psi_[intQuantsEx.pvtRegionIndex()]) {
+        //    return;
+        //}
+
+        if (sg_in < sgr && sg_ex < sgr && 
+            rs_in > 0.85*rssat_in &&
+            rs_ex > 0.85*rssat_ex) {
+            return;
+        }
+
+        //if (sg_in > 0 && sg_ex > 0) {
+        //    return;
+        //}
+
         const auto& liquidPhaseIdx = (FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx)) ?
             FluidSystem::waterPhaseIdx :
             FluidSystem::oilPhaseIdx;
@@ -355,9 +400,9 @@ public:
         //interiour
         const auto& t_in = intQuantsIn.fluidState().temperature(liquidPhaseIdx);
         const auto& p_in = intQuantsIn.fluidState().pressure(liquidPhaseIdx);
-        const auto& rssat_in = FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx) ?
-            intQuantsIn.fluidState().RswSat():
-            intQuantsIn.fluidState().RsSat();
+        //const auto& rssat_in = FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx) ?
+        //    intQuantsIn.fluidState().RswSat():
+        //    intQuantsIn.fluidState().RsSat();
         const auto& salt_in = intQuantsIn.fluidState().saltSaturation();
 
         const auto bLiquidSatIn = (FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx)) ?
@@ -375,9 +420,9 @@ public:
         //exteriour
         const auto t_ex = Opm::getValue(intQuantsEx.fluidState().temperature(liquidPhaseIdx));
         const auto p_ex = Opm::getValue(intQuantsEx.fluidState().pressure(liquidPhaseIdx));
-        const auto& rssat_ex = FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx) ?
-            Opm::getValue(intQuantsIn.fluidState().RswSat()):
-            Opm::getValue(intQuantsIn.fluidState().RsSat());
+        //const auto& rssat_ex = FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx) ?
+        //    Opm::getValue(intQuantsIn.fluidState().RswSat()):
+        //    Opm::getValue(intQuantsIn.fluidState().RsSat());
         const auto salt_ex = Opm::getValue(intQuantsEx.fluidState().saltSaturation());
         const auto bLiquidSatEx = (FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx)) ?
             FluidSystem::waterPvt().inverseFormationVolumeFactor(intQuantsEx.pvtRegionIndex(), t_ex, p_ex, rssat_ex, salt_ex):
