@@ -313,13 +313,18 @@ namespace Opm
                     
                     const bool hasGroupControl = this->isInjector() ? inj_controls.hasControl(Well::InjectorCMode::GRUP) :
                                                                       prod_controls.hasControl(Well::ProducerCMode::GRUP);
-                    bool isGroupControl = ws.production_cmode == Well::ProducerCMode::GRUP || ws.injection_cmode == Well::InjectorCMode::GRUP; 
-                    if (! (isGroupControl && !this->param_.check_group_constraints_inner_well_iterations_)) {
-                        changed = this->checkIndividualConstraints(ws, summary_state, deferred_logger, inj_controls, prod_controls);
+                    bool isGroupControl = ws.production_cmode == Well::ProducerCMode::GRUP || ws.injection_cmode == Well::InjectorCMode::GRUP;
+
+                    if (this->param_.check_group_constraints_inner_well_iterations_) {
+                        if (!isGroupControl && hasGroupControl) {
+                            changed = changed || this->checkGroupConstraints(well_state, group_state, schedule, summary_state,deferred_logger);
+                        }
+                        changed = changed || this->checkIndividualConstraints(ws, summary_state, deferred_logger, inj_controls, prod_controls);
+                    } else {
+                        if (!isGroupControl)
+                            changed = changed || this->checkIndividualConstraints(ws, summary_state, deferred_logger, inj_controls, prod_controls);
                     }
-                    if (hasGroupControl && this->param_.check_group_constraints_inner_well_iterations_) {
-                        changed = changed || this->checkGroupConstraints(well_state, group_state, schedule, summary_state,deferred_logger);
-                    }
+
                
                     if (changed) {
                         const bool thp_controlled = this->isInjector() ? ws.injection_cmode == Well::InjectorCMode::THP :
@@ -331,10 +336,12 @@ namespace Opm
                             ws.thp = this->getTHPConstraint(summary_state);
                         }
                         updatePrimaryVariables(simulator, well_state, deferred_logger);
+                        this->well_control_log_.push_back(from);
                     }
 
                     bool isNowGroupControl = ws.production_cmode == Well::ProducerCMode::GRUP || ws.injection_cmode == Well::InjectorCMode::GRUP; 
                     if (isGroupControl != isNowGroupControl) {
+                        //std::cout << "local switch to/from grup" << std::endl;
                         well_state.updateGlobalIsGrup();
                         int reportStepIdx = simulator.episodeIndex();
                         const Group& fieldGroup = schedule.getGroup("FIELD", reportStepIdx);
