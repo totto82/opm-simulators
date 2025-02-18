@@ -185,7 +185,9 @@ public:
                                          const Scalar& bhp,
                                          std::vector<Scalar>& well_flux,
                                          DeferredLogger& deferred_logger) const = 0;
-
+    void updateWellRatesFromThp(const Simulator& simulator,
+                                WellState<Scalar>& well_state,
+                                DeferredLogger& deferred_logger);
     virtual std::optional<Scalar>
     computeBhpAtThpLimitProdWithAlq(const Simulator& ebos_simulator,
                                     const SummaryState& summary_state,
@@ -374,6 +376,9 @@ public:
                                             DeferredLogger& deferred_logger, 
                                             const bool fixed_control = false, 
                                             const bool fixed_status = false) = 0;
+
+    virtual Scalar getRefDensity() const = 0;
+
 protected:
     // simulation parameters
     std::vector<RateVector> connectionRates_;
@@ -388,7 +393,6 @@ protected:
     Scalar woxygen() const;
     Scalar wurea() const;
 
-    virtual Scalar getRefDensity() const = 0;
 
     // Component fractions for each phase for the well
     const std::vector<Scalar>& compFrac() const;

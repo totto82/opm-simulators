@@ -1996,6 +1996,32 @@ namespace Opm
         }
     }
 
+    template<typename TypeTag>
+    void
+    WellInterface<TypeTag>::
+    updateWellRatesFromThp(const Simulator& simulator,
+                            WellState<Scalar>& well_state,
+                            DeferredLogger& deferred_logger) 
+    {
+        const auto& summary_state = simulator.vanguard().summaryState();
+        auto& ws = well_state.well(this->indexOfWell());
+        const bool thp_is_limit = ws.production_cmode == Well::ProducerCMode::THP;
+        if (!thp_is_limit) 
+            return;
+
+        auto rates = ws.surface_rates;
+        this->adaptRatesForVFP(rates);
+        this->updateIPRImplicit(simulator, well_state, deferred_logger);
+        auto bhp_stable = WellBhpThpCalculator(*this).estimateStableBhp(well_state, this->wellEcl(), rates, this->getRefDensity(), summary_state);
+        auto& potentials = ws.well_potentials;
+        if (bhp_stable) {
+            this->computeWellRatesWithBhp(simulator,
+                                            *bhp_stable,
+                                            potentials,
+                                            deferred_logger);
+        }
+    }
+
     template <typename TypeTag>
     void
     WellInterface<TypeTag>::

@@ -1085,7 +1085,7 @@ namespace Opm {
         const double dt = this->simulator_.timeStepSize();
         // TODO: should we also have the group and network backed-up here in case the solution did not get converged?
         auto& well_state = this->wellState();
-        const std::size_t max_iter = param_.network_max_iterations_;
+        const std::size_t max_iter = 1; //param_.network_max_iterations_;
         bool converged = false;
         std::size_t iter = 0;
         bool changed_well_group = false;
@@ -1749,6 +1749,8 @@ namespace Opm {
 
         // network related
         bool more_network_update = false;
+        const auto& summary_state = simulator_.vanguard().summaryState();
+        //const auto& well_state = ;
         if (this->shouldBalanceNetwork(episodeIdx, iterationIdx) || mandatory_network_balance) {
             OPM_TIMEBLOCK(BalanceNetowork);
             const double dt = this->simulator_.timeStepSize();
@@ -1767,6 +1769,31 @@ namespace Opm {
                 more_network_sub_update = this->networkActive() && network_imbalance > tolerance;
                 if (!more_network_sub_update)
                     break;
+
+                if (true) {
+                for (const auto& well : well_container_) {
+                    if (well->isInjector())
+                        continue;
+                   
+                    well->updateWellRatesFromThp(this->simulator_, this->wellState(), deferred_logger);
+                    //auto& ws = this->wellState().well(well->indexOfWell());
+                    //const bool thp_is_limit = ws.production_cmode == Well::ProducerCMode::THP;
+                    //if (thp_is_limit) {
+                    //auto rates = this->wellState().well(well->indexOfWell()).surface_rates;
+                    //well->adaptRatesForVFP(rates);
+                    //well->updateIPRImplicit(this->simulator_, this->wellState(), deferred_logger);
+                    //auto bhp_stable = WellBhpThpCalculator<Scalar>(*well).estimateStableBhp(this->wellState(), well->wellEcl(), rates, well->getRefDensity(), summary_state);
+                    //auto& potentials = ws.well_potentials;
+                    //if (bhp_stable) {
+                    //    well->computeWellRatesWithBhp(this->simulator_,
+                    //                                 *bhp_stable,
+                    //                                  potentials,
+                    //                                  deferred_logger);
+                    //}
+                    //}
+                }
+                this->updateAndCommunicateGroupData(episodeIdx, iterationIdx, param_.nupcol_group_rate_tolerance_, deferred_logger);
+                }
             }
             more_network_update = more_network_sub_update || well_group_thp_updated;
         }
