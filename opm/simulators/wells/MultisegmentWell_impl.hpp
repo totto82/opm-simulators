@@ -1493,25 +1493,12 @@ namespace Opm
         this->regularize_ = false;
         for (; it < max_iter_number; ++it, ++debug_cost_counter_) {
 
-            assembleWellEqWithoutIteration(simulator, dt, inj_controls, prod_controls, well_state, group_state, deferred_logger);
-
-            BVectorWell dx_well;
-            try{
-                dx_well = this->linSys_.solve();
-            }
-            catch(const NumericalProblem& exp) {
-                // Add information about the well and log to deferred logger
-                // (Logging done inside of solve() method will only be seen if
-                // this is the process with rank zero)
-                deferred_logger.problem("In MultisegmentWell::iterateWellEqWithControl for well "
-                                        + this->name() +": "+exp.what());
-                throw;
-            }
-
             if (it > this->param_.strict_inner_iter_wells_) {
                 relax_convergence = true;
                 this->regularize_ = true;
             }
+
+            assembleWellEqWithoutIteration(simulator, dt, inj_controls, prod_controls, well_state, group_state, deferred_logger);
 
             const auto report = getWellConvergence(simulator, well_state, Base::B_avg_, deferred_logger, relax_convergence);
             if (report.converged()) {
@@ -1545,6 +1532,19 @@ namespace Opm
                     converged = false;
                 }
                 break;
+            }
+
+            BVectorWell dx_well;
+            try{
+                dx_well = this->linSys_.solve();
+            }
+            catch(const NumericalProblem& exp) {
+                // Add information about the well and log to deferred logger
+                // (Logging done inside of solve() method will only be seen if
+                // this is the process with rank zero)
+                deferred_logger.problem("In MultisegmentWell::iterateWellEqWithControl for well "
+                                        + this->name() +": "+exp.what());
+                throw;
             }
             updateWellState(simulator, dx_well, well_state, deferred_logger, relaxation_factor);
         }
@@ -1650,15 +1650,14 @@ namespace Opm
                 }
             }
 
-            assembleWellEqWithoutIteration(simulator, dt, inj_controls, prod_controls,
-                                           well_state, group_state, deferred_logger);
-
-            const BVectorWell dx_well = this->linSys_.solve();
-
             if (it > this->param_.strict_inner_iter_wells_) {
                 relax_convergence = true;
                 this->regularize_ = true;
             }
+
+            assembleWellEqWithoutIteration(simulator, dt, inj_controls, prod_controls,
+                                           well_state, group_state, deferred_logger);
+
 
             const auto report = getWellConvergence(simulator, well_state, Base::B_avg_, deferred_logger, relax_convergence);
             converged = report.converged();
@@ -1697,6 +1696,7 @@ namespace Opm
                     break;
                 }
             }
+            const BVectorWell dx_well = this->linSys_.solve();
             updateWellState(simulator, dx_well, well_state, deferred_logger, relaxation_factor);
         }
 
