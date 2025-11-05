@@ -232,9 +232,6 @@ protected:
             maxNorm = max(maxNorm, std::abs(this->energyVector_[globI]));
             sumNorm += std::abs(this->energyVector_[globI]);
         }
-        Scalar scaling = 1.0/4.182e1; //// converting J -> RM3 (entalpy / (cp * deltaK * rho) assuming change of 1e-5K of water
-        maxNorm /= scaling;
-        sumNorm /= scaling;
         maxNorm = simulator_.gridView().comm().sum(maxNorm);
         sumNorm = simulator_.gridView().comm().sum(sumNorm);
         const int globalNumCells = simulator_.gridView().comm().sum(numCells);
