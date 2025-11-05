@@ -53,13 +53,12 @@ struct EnableTemperatureModel {
 } // namespace Opm::Properties
 
 namespace Opm {
-
 /*!
  * \ingroup BlackOilSimulator
  *
  * \brief A class which handles sequential implicit solution of the energy equation as specified in by TEMP
  */
-template <class TypeTag, bool enableTempV = getPropValue<TypeTag, Properties::EnableTemperature>()>
+template <class TypeTag, bool enableTempV = getPropValue<TypeTag, Properties::EnergyModuleType>() == EnergyModules::SequentialImplicitThermal >
 class TemperatureModel : public GenericTemperatureModel<GetPropType<TypeTag, Properties::Grid>,
                                               GetPropType<TypeTag, Properties::GridView>,
                                               GetPropType<TypeTag, Properties::DofMapper>,
@@ -216,11 +215,12 @@ protected:
         bool converged = this->linearSolve_(*this->energyMatrix_, dx, this->energyVector_);
         if (!converged) {
             OpmLog::warning("### Temp model: Linear solver did not converge. ###");
-        }
-        for (unsigned globI = 0; globI < numCells; ++globI) {
-            this->temperature_[globI] -= std::clamp(dx[globI][0], Scalar(-10.0), Scalar(10.0));
-            intQuants_[globI].updateTemperature_(simulator_.problem(), globI, /*timeIdx*/ 0);
-            intQuants_[globI].updateEnergyQuantities_(simulator_.problem(), globI, /*timeIdx*/ 0);
+        } else {
+            for (unsigned globI = 0; globI < numCells; ++globI) {
+                this->temperature_[globI] -= std::clamp(dx[globI][0], Scalar(-10.0), Scalar(10.0));
+                intQuants_[globI].updateTemperature_(simulator_.problem(), globI, /*timeIdx*/ 0);
+                intQuants_[globI].updateEnergyQuantities_(simulator_.problem(), globI, /*timeIdx*/ 0);
+            }
         }
     }
 

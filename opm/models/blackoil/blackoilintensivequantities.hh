@@ -104,8 +104,6 @@ class BlackOilIntensiveQuantities
     enum { enableDisgasInWater = getPropValue<TypeTag, Properties::EnableDisgasInWater>() };
     enum { enableSaltPrecipitation = getPropValue<TypeTag, Properties::EnableSaltPrecipitation>() };
     static constexpr EnergyModules energyModuleType = getPropValue<TypeTag, Properties::EnergyModuleType>();
-    enum { enableTemperature = (energyModuleType == EnergyModules::ConstantTemperature) };
-    enum { enableEnergy = (energyModuleType == EnergyModules::FullyImplicitThermal) };
     enum { enableDiffusion = getPropValue<TypeTag, Properties::EnableDiffusion>() };
     enum { enableDispersion = getPropValue<TypeTag, Properties::EnableDispersion>() };
     enum { enableConvectiveMixing = getPropValue<TypeTag, Properties::EnableConvectiveMixing>() };
@@ -139,8 +137,8 @@ class BlackOilIntensiveQuantities
 public:
     using FluidState = BlackOilFluidState<Evaluation,
                                           FluidSystem,
-                                          enableTemperature,
-                                          enableEnergy,
+                                          energyModuleType == EnergyModules::ConstantTemperature,
+                                          (energyModuleType == EnergyModules::FullyImplicitThermal || energyModuleType == EnergyModules::SequentialImplicitThermal),
                                           compositionSwitchEnabled,
                                           enableVapwat,
                                           enableBrine,
@@ -149,8 +147,8 @@ public:
                                           Indices::numPhases>;
     using ScalarFluidState = BlackOilFluidState<Scalar,
                                                 FluidSystem,
-                                                enableTemperature,
-                                                enableEnergy,
+                                          energyModuleType == EnergyModules::ConstantTemperature,
+                                          (energyModuleType == EnergyModules::FullyImplicitThermal || energyModuleType == EnergyModules::SequentialImplicitThermal),
                                                 compositionSwitchEnabled,
                                                 enableVapwat,
                                                 enableBrine,
@@ -175,17 +173,6 @@ public:
     BlackOilIntensiveQuantities(const BlackOilIntensiveQuantities& other) = default;
 
     BlackOilIntensiveQuantities& operator=(const BlackOilIntensiveQuantities& other) = default;
-
-    void updateTempSalt(const ElementContext& elemCtx, unsigned dofIdx, unsigned timeIdx)
-    {
-        // the temperature is updated even if the energy equations are not solved
-        // to allow for temperature dependent properites
-        asImp_().updateTemperature_(elemCtx, dofIdx, timeIdx);
-
-        if constexpr (enableBrine) {
-            asImp_().updateSaltConcentration_(elemCtx, dofIdx, timeIdx);
-        }
-    }
 
     void updateTempSalt(const Problem& problem,
                         const PrimaryVariables& priVars,
@@ -645,7 +632,8 @@ public:
         if constexpr (enablePolymer) {
             asImp_().polymerPropertiesUpdate_(elemCtx, dofIdx, timeIdx);
         }
-        if constexpr (enableEnergy) {
+        if constexpr (energyModuleType == EnergyModules::FullyImplicitThermal ||
+                      energyModuleType == EnergyModules::SequentialImplicitThermal) {
             asImp_().updateEnergyQuantities_(elemCtx, dofIdx, timeIdx);
         }
         if constexpr (enableFoam) {
@@ -692,7 +680,6 @@ public:
         static_assert(!enableSolvent);
         static_assert(!enableExtbo);
         static_assert(!enablePolymer);
-        static_assert(!enableEnergy);
         static_assert(!enableFoam);
         static_assert(!enableMICP);
         static_assert(!enableBrine);

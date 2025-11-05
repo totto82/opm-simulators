@@ -112,8 +112,6 @@ class BlackOilPrimaryVariables : public FvBasePrimaryVariables<TypeTag, VectorTy
     enum { enableSaltPrecipitation = getPropValue<TypeTag, Properties::EnableSaltPrecipitation>() };
     enum { enableVapwat = getPropValue<TypeTag, Properties::EnableVapwat>() };
     static constexpr EnergyModules energyModuleType = getPropValue<TypeTag, Properties::EnergyModuleType>();
-    enum { enableEnergy = (energyModuleType == EnergyModules::FullyImplicitThermal) };
-    enum { enableTemperature = (energyModuleType == EnergyModules::ConstantTemperature) };
     enum { enableBioeffects = getPropValue<TypeTag, Properties::EnableBioeffects>() };
     enum { enableMICP = Indices::enableMICP };
     enum { gasCompIdx = FluidSystem::gasCompIdx };
@@ -1014,52 +1012,14 @@ private:
 
     OPM_HOST_DEVICE Scalar temperature_(const Problem& problem, [[maybe_unused]] unsigned globalDofIdx) const
     {
-        if constexpr (enableEnergy) {
+        if constexpr (energyModuleType == EnergyModules::FullyImplicitThermal) {
             return (*this)[Indices::temperatureIdx];
         }
-        else {
+        else if (energyModuleType == EnergyModules::NoTemperature) {
+            return FluidSystem::reservoirTemperature();
+        } else {
             return problem.temperature(globalDofIdx, /*timeIdx*/ 0);
         }
-    }
-
-    Scalar microbialConcentration_() const
-    {
-        if constexpr (enableMICP)
-            return (*this)[Indices::microbialConcentrationIdx];
-        else
-            return 0.0;
-    }
-
-    Scalar oxygenConcentration_() const
-    {
-        if constexpr (enableMICP)
-            return (*this)[Indices::oxygenConcentrationIdx];
-        else
-            return 0.0;
-    }
-
-    Scalar ureaConcentration_() const
-    {
-        if constexpr (enableMICP)
-            return (*this)[Indices::ureaConcentrationIdx];
-        else
-            return 0.0;
-    }
-
-    Scalar biofilmConcentration_() const
-    {
-        if constexpr (enableMICP)
-            return (*this)[Indices::biofilmConcentrationIdx];
-        else
-            return 0.0;
-    }
-
-    Scalar calciteConcentration_() const
-    {
-        if constexpr (enableMICP)
-            return (*this)[Indices::calciteConcentrationIdx];
-        else
-            return 0.0;
     }
 
     template <class Container>

@@ -41,7 +41,7 @@
 #include <opm/output/eclipse/RestartValue.hpp>
 
 #include <opm/models/blackoil/blackoilenergymodules.hh>
-#include <opm/models/blackoil/blackoilproperties.hh> // Properties::EnableMech, EnableTemperature, EnableSolvent
+#include <opm/models/blackoil/blackoilproperties.hh> // Properties::EnableMech, EnableSolvent
 #include <opm/models/common/multiphasebaseproperties.hh> // Properties::FluidSystem
 
 #include <opm/simulators/flow/CollectDataOnIORank.hpp>
@@ -130,7 +130,6 @@ class EclWriter : public EclGenericWriter<GetPropType<TypeTag, Properties::Grid>
 
     enum { enableEnergy = getPropValue<TypeTag, Properties::EnergyModuleType>() == EnergyModules::FullyImplicitThermal };
     enum { enableMech = getPropValue<TypeTag, Properties::EnableMech>() };
-    enum { enableTemperature = getPropValue<TypeTag, Properties::EnergyModuleType>() == EnergyModules::ConstantTemperature };
     enum { enableSolvent = getPropValue<TypeTag, Properties::EnableSolvent>() };
 
 public:

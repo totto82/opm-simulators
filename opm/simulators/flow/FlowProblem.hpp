@@ -122,8 +122,8 @@ protected:
     enum { enableConvectiveMixing = getPropValue<TypeTag, Properties::EnableConvectiveMixing>() };
     enum { enableDiffusion = getPropValue<TypeTag, Properties::EnableDiffusion>() };
     enum { enableDispersion = getPropValue<TypeTag, Properties::EnableDispersion>() };
+    static constexpr EnergyModules energyModuleType = getPropValue<TypeTag, Properties::EnergyModuleType>();
     enum { enableEnergy = getPropValue<TypeTag, Properties::EnergyModuleType>() == EnergyModules::FullyImplicitThermal };
-    enum { enableTemperature = getPropValue<TypeTag, Properties::EnergyModuleType>() == EnergyModules::ConstantTemperature };
     enum { enableExperiments = getPropValue<TypeTag, Properties::EnableExperiments>() };
     enum { enableExtbo = getPropValue<TypeTag, Properties::EnableExtbo>() };
     enum { enableFoam = getPropValue<TypeTag, Properties::EnableFoam>() };
@@ -224,8 +224,8 @@ public:
                               simulator.vanguard().cartesianIndexMapper(),
                               simulator.vanguard().grid(),
                               simulator.vanguard().cellCentroids(),
-                              enableEnergy || enableTemperature,
-                              enableDiffusion,
+                              (energyModuleType == EnergyModules::FullyImplicitThermal ||
+                               energyModuleType == EnergyModules::SequentialImplicitThermal),                       enableDiffusion,
                               enableDispersion)
         , wellModel_(simulator)
         , aquiferModel_(simulator)
@@ -879,7 +879,7 @@ public:
         // use the initial temperature of the DOF if temperature is not a primary
         // variable
         unsigned globalDofIdx = context.globalSpaceIndex(spaceIdx, timeIdx);
-        if (enableTemperature)
+        if constexpr (energyModuleType == EnergyModules::SequentialImplicitThermal)
             return temperatureModel_.temperature(globalDofIdx);
 
         return asImp_().initialFluidState(globalDofIdx).temperature(/*phaseIdx=*/0);
@@ -890,7 +890,7 @@ public:
     {
         // use the initial temperature of the DOF if temperature is not a primary
         // variable
-        if (enableTemperature)
+        if constexpr (energyModuleType == EnergyModules::SequentialImplicitThermal)
             return temperatureModel_.temperature(globalDofIdx);
 
         return asImp_().initialFluidState(globalDofIdx).temperature(/*phaseIdx=*/0);
@@ -1395,7 +1395,8 @@ protected:
 
     void readThermalParameters_()
     {
-        if constexpr (enableTemperature || enableEnergy)
+        if constexpr (energyModuleType == EnergyModules::FullyImplicitThermal ||
+                      energyModuleType == EnergyModules::SequentialImplicitThermal )
         {
             const auto& simulator = this->simulator();
             const auto& vanguard = simulator.vanguard();

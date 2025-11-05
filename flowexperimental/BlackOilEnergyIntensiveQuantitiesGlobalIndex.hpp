@@ -103,6 +103,61 @@ public:
 };
 
 template <class TypeTag>
+class BlackOilEnergyIntensiveQuantitiesGlobalIndex<TypeTag, EnergyModules::SequentialImplicitTemperature>
+    : public BlackOilEnergyIntensiveQuantities<TypeTag, EnergyModules::SequentialImplicitTemperature>
+{
+    using Parent =  BlackOilEnergyIntensiveQuantities<TypeTag, EnergyModules::SequentialImplicitTemperature>;
+    using Problem = GetPropType<TypeTag, Properties::Problem>;
+    using PrimaryVariables = GetPropType<TypeTag, Properties::PrimaryVariables>;
+    using FluidSystem = GetPropType<TypeTag, Properties::FluidSystem>;
+    using Evaluation = GetPropType<TypeTag, Properties::Evaluation>;
+    using Scalar = GetPropType<TypeTag, Properties::Scalar>;
+
+public:
+    void updateTemperature_([[maybe_unused]] const Problem& problem,
+                            [[maybe_unused]] const PrimaryVariables& priVars,
+                            [[maybe_unused]] unsigned globalSpaceIdx,
+                            [[maybe_unused]] unsigned timeIdx)
+    {
+        auto& fs = this->asImp_().fluidState_;
+        Scalar T = problem.temperature(globalSpaceIdx, timeIdx);
+        fs.setTemperature(T);
+    }
+
+    void updateEnergyQuantities_([[maybe_unused]] const Problem& problem,
+                                 [[maybe_unused]] const PrimaryVariables& priVars,
+                                 [[maybe_unused]] unsigned globalSpaceIdx,
+                                 [[maybe_unused]] unsigned timeIdx,
+                                 const typename FluidSystem::template ParameterCache<Evaluation>&)
+    {        
+        auto& fs = Parent::asImp_().fluidState_;
+        // compute the specific enthalpy of the fluids, the specific enthalpy of the rock
+        // and the thermal conductivity coefficients
+        for (int phaseIdx = 0; phaseIdx < numPhases; ++ phaseIdx) {
+            if (!FluidSystem::phaseIsActive(phaseIdx)) {
+                continue;
+            }
+
+            const auto& h = FluidSystem::enthalpy(fs, paramCache, phaseIdx);
+            fs.setEnthalpy(phaseIdx, h);
+        }
+
+        const auto& solidEnergyLawParams = problem().solidEnergyLawParams(globalSpaceIndex, timeIdx);
+        this->rockInternalEnergy_ = SolidEnergyLaw::solidInternalEnergy(solidEnergyLawParams, fs);
+
+        const auto& thermalConductionLawParams = problem.thermalConductionLawParams(globalSpaceIndex, timeIdx);
+        this->totalThermalConductivity_ = ThermalConductionLaw::thermalConductivity(thermalConductionLawParams, fs);
+
+        // Retrieve the rock fraction from the problem
+        // Usually 1 - porosity, but if pvmult is used to modify porosity
+        // we will apply the same multiplier to the rock fraction
+        // i.e. pvmult*(1 - porosity) and thus interpret multpv as a volume
+        // multiplier. This is to avoid negative rock volume for pvmult*porosity > 1
+        this->rockFraction_ = problem.rockFraction(globalSpaceIndex, timeIdx);
+    }
+};
+
+template <class TypeTag>
 class BlackOilEnergyIntensiveQuantitiesGlobalIndex<TypeTag, EnergyModules::ConstantTemperature>
     : public BlackOilEnergyIntensiveQuantities<TypeTag, EnergyModules::ConstantTemperature>
 {

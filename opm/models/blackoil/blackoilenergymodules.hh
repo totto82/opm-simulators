@@ -457,19 +457,80 @@ class BlackOilEnergyIntensiveQuantities<TypeTag, EnergyModules::ConstantTemperat
     using ElementContext = GetPropType<TypeTag, Properties::ElementContext>;
     using FluidSystem = GetPropType<TypeTag, Properties::FluidSystem>;
     using Scalar = GetPropType<TypeTag, Properties::Scalar>;
+
+    using Problem = GetPropType<TypeTag, Properties::Problem>;
+
+public:
+
+    void updateTemperature_(const ElementContext& elemCtx,
+                            unsigned dofIdx,
+                            unsigned timeIdx)
+    {
+        updateTemperature_(elemCtx.problem(), elemCtx.globalSpaceIndex(dofIdx, timeIdx), timeIdx);
+    }
+
+    template<class Problem>
+    void updateTemperature_(const Problem& problem,
+                            [[maybe_unused]] const PrimaryVariables& priVars,
+                            unsigned globalDofIdx,
+                            unsigned timeIdx,
+                            [[maybe_unused]] const LinearizationType& lintype
+        )
+    {
+        updateTemperature_(problem, globalDofIdx, timeIdx);
+    }
+
+    void updateTemperature_(const Problem& problem, unsigned globalDofIdx, unsigned timeIdx)
+    {
+        auto& fs = asImp_().fluidState_;
+        const Scalar T = problem.temperature(globalDofIdx, timeIdx);
+        fs.setTemperature(T);
+    }
+
+    void updateEnergyQuantities_(const ElementContext&,
+                                 unsigned,
+                                 unsigned,
+                                 const typename FluidSystem::template ParameterCache<Evaluation>&)
+    {}
+
+    const Evaluation& rockInternalEnergy() const
+    {
+        throw std::logic_error("Requested the rock internal energy, which is "
+                             "unavailable because energy is not conserved");
+    }
+
+    const Evaluation& totalThermalConductivity() const
+    {
+        throw std::logic_error("Requested the total thermal conductivity, which is "
+                             "unavailable because energy is not conserved");
+    }
+
+protected:
+    Implementation& asImp_()
+    { return *static_cast<Implementation*>(this); }
+};
+
+template <class TypeTag>
+class BlackOilEnergyIntensiveQuantities<TypeTag, EnergyModules::SequentialImplicitThermal>
+{
+    using Implementation = GetPropType<TypeTag, Properties::IntensiveQuantities>;
+    using PrimaryVariables = GetPropType<TypeTag, Properties::PrimaryVariables>;
+    using Evaluation = GetPropType<TypeTag, Properties::Evaluation>;
+    using ElementContext = GetPropType<TypeTag, Properties::ElementContext>;
+    using FluidSystem = GetPropType<TypeTag, Properties::FluidSystem>;
+    using Scalar = GetPropType<TypeTag, Properties::Scalar>;
     using SolidEnergyLaw = GetPropType<TypeTag, Properties::SolidEnergyLaw>;
     using ThermalConductionLaw = GetPropType<TypeTag, Properties::ThermalConductionLaw>;
     using Indices = GetPropType<TypeTag, Properties::Indices>;
-
-
     using Problem = GetPropType<TypeTag, Properties::Problem>;
+    enum { numPhases = getPropValue<TypeTag, Properties::NumPhases>() };
 
 public:
 
     void updateTemperature_(const Problem& problem, unsigned globalDofIdx, unsigned timeIdx)
     {
         auto& fs = asImp_().fluidState_;
-        const Scalar T = elemCtx.problem().temperature(elemCtx, dofIdx, timeIdx);
+        const Evaluation T = Evaluation::createVariable(problem.temperature(globalDofIdx, timeIdx), Indices::temperatureIdx);
         fs.setTemperature(T);
     }
 
@@ -488,44 +549,49 @@ public:
                             [[maybe_unused]] const LinearizationType& lintype
         )
     {
-        auto& fs = asImp_().fluidState_;
-        const Scalar T = problem.temperature(globalDofIdx, timeIdx);
-        fs.setTemperature(T);
+        updateTemperature_(problem, globalDofIdx, timeIdx);
     }
-
-
+        
+    /*!
+     * \brief Compute the intensive quantities needed to handle energy conservation
+     *
+     */
     void updateEnergyQuantities_(const ElementContext& elemCtx,
                                  unsigned dofIdx,
-                                 unsigned timeIdx,
-                                 const typename FluidSystem::template ParameterCache<Evaluation>& paramCache)
+                                 unsigned timeIdx)
     {
-        if constexpr (enableTemperature) {
-            auto& fs = asImp_().fluidState_;
+        updateEnergyQuantities_(elemCtx.problem(), elemCtx.globalSpaceIndex(dofIdx, timeIdx), timeIdx);
+    }
 
-            // compute the specific enthalpy of the fluids, the specific enthalpy of the rock
-            // and the thermal condictivity coefficients
-            for (int phaseIdx = 0; phaseIdx < numPhases; ++ phaseIdx) {
-                if (!FluidSystem::phaseIsActive(phaseIdx)) {
-                    continue;
-                }
+    void updateEnergyQuantities_(const Problem& problem,
+                                 const unsigned globalSpaceIdx,
+                                 const unsigned timeIdx)
+    {
+        auto& fs = asImp_().fluidState_;
 
-                const auto& h = FluidSystem::enthalpy(fs, paramCache, phaseIdx);
-                fs.setEnthalpy(phaseIdx, h);
+        // compute the specific enthalpy of the fluids, the specific enthalpy of the rock
+        // and the thermal condictivity coefficients
+        for (int phaseIdx = 0; phaseIdx < numPhases; ++ phaseIdx) {
+            if (!FluidSystem::phaseIsActive(phaseIdx)) {
+                continue;
             }
-            const auto& solidEnergyLawParams = elemCtx.problem().solidEnergyLawParams(elemCtx, dofIdx, timeIdx);
-            rockInternalEnergy_ = SolidEnergyLaw::solidInternalEnergy(solidEnergyLawParams, fs);
 
-            const auto& thermalConductionLawParams = elemCtx.problem().thermalConductionLawParams(elemCtx, dofIdx, timeIdx);
-            totalThermalConductivity_ = ThermalConductionLaw::thermalConductivity(thermalConductionLawParams, fs);
-
-            // Retrieve the rock fraction from the problem
-            // Usually 1 - porosity, but if pvmult is used to modify porosity
-            // we will apply the same multiplier to the rock fraction
-            // i.e. pvmult*(1 - porosity) and thus interpret multpv as a volume
-            // multiplier. This is to avoid negative rock volume for pvmult*porosity > 1
-            const unsigned cell_idx = elemCtx.globalSpaceIndex(dofIdx, timeIdx);
-            rockFraction_ = elemCtx.problem().rockFraction(cell_idx, timeIdx);
+            const auto& h = FluidSystem::enthalpy(fs, phaseIdx, problem.pvtRegionIndex(globalSpaceIdx));
+            fs.setEnthalpy(phaseIdx, h);
         }
+
+        const auto& solidEnergyLawParams = problem.solidEnergyLawParams(globalSpaceIdx, timeIdx);
+        rockInternalEnergy_ = SolidEnergyLaw::solidInternalEnergy(solidEnergyLawParams, fs);
+
+        const auto& thermalConductionLawParams = problem.thermalConductionLawParams(globalSpaceIdx, timeIdx);
+        totalThermalConductivity_ = ThermalConductionLaw::thermalConductivity(thermalConductionLawParams, fs);
+
+        // Retrieve the rock fraction from the problem
+        // Usually 1 - porosity, but if pvmult is used to modify porosity
+        // we will apply the same multiplier to the rock fraction
+        // i.e. pvmult*(1 - porosity) and thus interpret multpv as a volume
+        // multiplier. This is to avoid negative rock volume for pvmult*porosity > 1
+        rockFraction_ = problem.rockFraction(globalSpaceIdx, timeIdx);
     }
 
     const Evaluation& rockInternalEnergy() const
@@ -820,7 +886,7 @@ public:
 };
 
 template <class TypeTag>
-class BlackOilEnergyExtensiveQuantities<TypeTag, EnergyModules::NoTemperature>
+class BlackOilEnergyExtensiveQuantities<TypeTag, EnergyModules::SequentialImplicitThermal>
 {
     using ElementContext = GetPropType<TypeTag, Properties::ElementContext>;
     using Evaluation = GetPropType<TypeTag, Properties::Evaluation>;
@@ -883,6 +949,55 @@ public:
 
         energyFlux = deltaT * (-H/faceArea);
     }
+
+    void updateEnergy(const ElementContext&,
+                      unsigned,
+                      unsigned)
+    {}
+
+    template <class Context, class BoundaryFluidState>
+    void updateEnergyBoundary(const Context&,
+                              unsigned,
+                              unsigned,
+                              const BoundaryFluidState&)
+    {}
+
+    template <class BoundaryFluidState>
+    static void updateEnergyBoundary(Evaluation& /*heatFlux*/,
+                                     const IntensiveQuantities& /*inIq*/,
+                                     unsigned /*focusDofIndex*/,
+                                     unsigned /*inIdx*/,
+                                     unsigned /*timeIdx*/,
+                                     Scalar /*alpha*/,
+                                     const BoundaryFluidState& /*boundaryFs*/)
+    {}
+
+    const Evaluation& energyFlux()  const
+    { throw std::logic_error("Requested the energy flux, but energy is not conserved"); }
+};
+
+template <class TypeTag>
+class BlackOilEnergyExtensiveQuantities<TypeTag, EnergyModules::NoTemperature>
+{
+    using ElementContext = GetPropType<TypeTag, Properties::ElementContext>;
+    using Evaluation = GetPropType<TypeTag, Properties::Evaluation>;
+    using IntensiveQuantities = GetPropType<TypeTag, Properties::IntensiveQuantities>;
+    using Scalar = GetPropType<TypeTag, Properties::Scalar>;
+
+public:
+    template<class FluidState>
+    static void updateEnergy(Evaluation& energyFlux,
+                             const unsigned& focusDofIndex,
+                             const unsigned& inIdx,
+                             const unsigned& exIdx,
+                             const IntensiveQuantities& inIq,
+                             const IntensiveQuantities& exIq,
+                             const FluidState& inFs,
+                             const FluidState& exFs,
+                             const Scalar& inAlpha,
+                             const Scalar& outAlpha,
+                             const Scalar& faceArea)
+    {}
 
     void updateEnergy(const ElementContext&,
                       unsigned,

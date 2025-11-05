@@ -25,6 +25,7 @@
 
 #include <opm/models/blackoil/blackoillocalresidualtpfa.hh>
 #include <opm/models/discretization/common/tpfalinearizer.hh>
+#include <opm/material/thermal/EnergyModuleType.hpp>
 
 namespace Opm {
 namespace Properties {
@@ -33,10 +34,11 @@ struct flowBlackoilTempProblem {
     using InheritsFrom = std::tuple<FlowProblem>;
 };
 }
+
 template<class TypeTag>
-struct EnableTemperature<TypeTag, TTag::flowBlackoilTempProblem> {
-    static constexpr bool value = true;
-};
+struct EnergyModuleType<TypeTag, TTag::flowBlackoilTempProblem>
+{ static constexpr EnergyModules value = EnergyModules::SequentialImplicitThermal; };
+
 template<class TypeTag>
 struct Linearizer<TypeTag, TTag::flowBlackoilTempProblem> { using type = TpfaLinearizer<TypeTag>; };
 
@@ -45,6 +47,11 @@ struct LocalResidual<TypeTag, TTag::flowBlackoilTempProblem> { using type = Blac
 
 template<class TypeTag>
 struct EnableDiffusion<TypeTag, TTag::flowBlackoilTempProblem> { static constexpr bool value = false; };
+
+template<class TypeTag>
+struct NumDerivatives<TypeTag, TTag::flowBlackoilTempProblem>
+{ static constexpr int value = GetPropType<TypeTag, Properties::Indices>::numEq + 1; };
+
 
 }}
 
