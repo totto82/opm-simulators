@@ -103,34 +103,41 @@ public:
 };
 
 template <class TypeTag>
-class BlackOilEnergyIntensiveQuantitiesGlobalIndex<TypeTag, EnergyModules::SequentialImplicitTemperature>
-    : public BlackOilEnergyIntensiveQuantities<TypeTag, EnergyModules::SequentialImplicitTemperature>
+class BlackOilEnergyIntensiveQuantitiesGlobalIndex<TypeTag, EnergyModules::SequentialImplicitThermal>
+    : public BlackOilEnergyIntensiveQuantities<TypeTag, EnergyModules::SequentialImplicitThermal>
 {
-    using Parent =  BlackOilEnergyIntensiveQuantities<TypeTag, EnergyModules::SequentialImplicitTemperature>;
+    using Parent =  BlackOilEnergyIntensiveQuantities<TypeTag, EnergyModules::SequentialImplicitThermal>;
     using Problem = GetPropType<TypeTag, Properties::Problem>;
     using PrimaryVariables = GetPropType<TypeTag, Properties::PrimaryVariables>;
     using FluidSystem = GetPropType<TypeTag, Properties::FluidSystem>;
     using Evaluation = GetPropType<TypeTag, Properties::Evaluation>;
     using Scalar = GetPropType<TypeTag, Properties::Scalar>;
+    using SolidEnergyLaw = GetPropType<TypeTag, Properties::SolidEnergyLaw>;
+    using ThermalConductionLaw  = GetPropType<TypeTag, Properties::ThermalConductionLaw>;
+    using ParamCache = typename FluidSystem::template ParameterCache<Evaluation>;
 
+    using Indices = GetPropType<TypeTag, Properties::Indices>;
+    static constexpr unsigned temperatureIdx = Indices::temperatureIdx;
+    static constexpr unsigned numPhases = FluidSystem::numPhases;
 public:
     void updateTemperature_([[maybe_unused]] const Problem& problem,
                             [[maybe_unused]] const PrimaryVariables& priVars,
-                            [[maybe_unused]] unsigned globalSpaceIdx,
+                            [[maybe_unused]] unsigned globalSpaceIndex,
                             [[maybe_unused]] unsigned timeIdx)
     {
         auto& fs = this->asImp_().fluidState_;
-        Scalar T = problem.temperature(globalSpaceIdx, timeIdx);
+        Evaluation T = Evaluation::createVariable(problem.temperature(globalSpaceIndex, timeIdx), Indices::temperatureIdx);
         fs.setTemperature(T);
     }
 
     void updateEnergyQuantities_([[maybe_unused]] const Problem& problem,
                                  [[maybe_unused]] const PrimaryVariables& priVars,
-                                 [[maybe_unused]] unsigned globalSpaceIdx,
+                                 [[maybe_unused]] unsigned globalSpaceIndex,
                                  [[maybe_unused]] unsigned timeIdx,
-                                 const typename FluidSystem::template ParameterCache<Evaluation>&)
+                                 const ParamCache& paramCache)
     {        
         auto& fs = Parent::asImp_().fluidState_;
+
         // compute the specific enthalpy of the fluids, the specific enthalpy of the rock
         // and the thermal conductivity coefficients
         for (int phaseIdx = 0; phaseIdx < numPhases; ++ phaseIdx) {

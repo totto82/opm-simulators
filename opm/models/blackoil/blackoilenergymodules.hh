@@ -73,7 +73,7 @@ class BlackOilEnergyModule
     static constexpr unsigned temperatureIdx = Indices::temperatureIdx;
     static constexpr unsigned contiEnergyEqIdx = Indices::contiEnergyEqIdx;
 
-    static constexpr unsigned enableEnergy = (activeModule == EnergyModules::FullyImplicitThermal);
+    static constexpr unsigned enableFullyImplicitThermal = (activeModule == EnergyModules::FullyImplicitThermal);
     static constexpr unsigned numEq = getPropValue<TypeTag, Properties::NumEq>();
     static constexpr unsigned numPhases = FluidSystem::numPhases;
 
@@ -85,7 +85,7 @@ public:
      */
     static void registerParameters()
     {
-        if constexpr (enableEnergy) {
+        if constexpr (enableFullyImplicitThermal) {
             VtkBlackOilEnergyModule<TypeTag>::registerParameters();
         }
     }
@@ -96,14 +96,14 @@ public:
     static void registerOutputModules(Model& model,
                                       Simulator& simulator)
     {
-        if constexpr (enableEnergy) {
+        if constexpr (enableFullyImplicitThermal) {
             model.addOutputModule(std::make_unique<VtkBlackOilEnergyModule<TypeTag>>(simulator));
         }
     }
 
     static bool primaryVarApplies(unsigned pvIdx)
     {
-        if constexpr (enableEnergy) {
+        if constexpr (enableFullyImplicitThermal) {
             return pvIdx == temperatureIdx;
         }
         else {
@@ -128,7 +128,7 @@ public:
 
     static bool eqApplies(unsigned eqIdx)
     {
-        if constexpr (enableEnergy) {
+        if constexpr (enableFullyImplicitThermal) {
             return eqIdx == contiEnergyEqIdx;
         }
         else {
@@ -155,7 +155,7 @@ public:
     static void addStorage(Dune::FieldVector<LhsEval, numEq>& storage,
                            const IntensiveQuantities& intQuants)
     {
-        if constexpr (enableEnergy) {
+        if constexpr (enableFullyImplicitThermal) {
             const auto& poro = decay<LhsEval>(intQuants.porosity());
 
             // accumulate the internal energy of the fluids
@@ -185,7 +185,7 @@ public:
                             [[maybe_unused]] unsigned scvfIdx,
                             [[maybe_unused]] unsigned timeIdx)
     {
-        if constexpr (enableEnergy) {
+        if constexpr (enableFullyImplicitThermal) {
             flux[contiEnergyEqIdx] = 0.0;
 
             const auto& extQuants = elemCtx.extensiveQuantities(scvfIdx, timeIdx);
@@ -213,7 +213,7 @@ public:
     static void addHeatFlux(RateVector& flux,
                             const Evaluation& heatFlux)
     {
-        if constexpr (enableEnergy) {
+        if constexpr (enableFullyImplicitThermal) {
             // diffusive energy flux
             flux[contiEnergyEqIdx] += heatFlux;
             flux[contiEnergyEqIdx] *= getPropValue<TypeTag, Properties::BlackOilEnergyScalingFactor>();
@@ -253,7 +253,7 @@ public:
     static void addToEnthalpyRate(RateVector& flux,
                                   const Evaluation& hRate)
     {
-        if constexpr (enableEnergy) {
+        if constexpr (enableFullyImplicitThermal) {
             flux[contiEnergyEqIdx] += hRate;
         }
     }
@@ -265,7 +265,7 @@ public:
     static void assignPrimaryVars(PrimaryVariables& priVars,
                                   const FluidState& fluidState)
     {
-        if constexpr (enableEnergy) {
+        if constexpr (enableFullyImplicitThermal) {
             priVars[temperatureIdx] = getValue(fluidState.temperature(/*phaseIdx=*/0));
         }
     }
@@ -277,7 +277,7 @@ public:
                                   const PrimaryVariables& oldPv,
                                   const EqVector& delta)
     {
-        if constexpr (enableEnergy) {
+        if constexpr (enableFullyImplicitThermal) {
             // do a plain unchopped Newton update
             newPv[temperatureIdx] = oldPv[temperatureIdx] - delta[temperatureIdx];
         }
@@ -307,7 +307,7 @@ public:
     template <class DofEntity>
     static void serializeEntity(const Model& model, std::ostream& outstream, const DofEntity& dof)
     {
-        if constexpr (enableEnergy) {
+        if constexpr (enableFullyImplicitThermal) {
             const unsigned dofIdx = model.dofMapper().index(dof);
             const PrimaryVariables& priVars = model.solution(/*timeIdx=*/0)[dofIdx];
             outstream << priVars[temperatureIdx];
@@ -317,7 +317,7 @@ public:
     template <class DofEntity>
     static void deserializeEntity(Model& model, std::istream& instream, const DofEntity& dof)
     {
-        if constexpr (enableEnergy) {
+        if constexpr (enableFullyImplicitThermal) {
             const unsigned dofIdx = model.dofMapper().index(dof);
             PrimaryVariables& priVars0 = model.solution(/*timeIdx=*/0)[dofIdx];
             PrimaryVariables& priVars1 = model.solution(/*timeIdx=*/1)[dofIdx];

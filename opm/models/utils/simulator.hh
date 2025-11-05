@@ -110,7 +110,7 @@ public:
 
         setupTimer_.start();
 
-        verbose_ = true; //verbose && comm.rank() == 0;
+        verbose_ = verbose && comm.rank() == 0;
 
         timeStepIdx_ = 0;
         startTime_ = 0.0;

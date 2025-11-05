@@ -64,7 +64,7 @@ struct BlackOilVariableAndEquationIndices
     static constexpr bool enablePolymer = numPolymersV > 0;
 
     //! Shall energy be conserved?
-    static constexpr bool enableEnergy = numEnergyV > 0;
+    static constexpr bool enableFullyImplicitThermal = numEnergyV > 0;
 
     //! No bioeffects for three phase indices
     static constexpr bool enableMICP = false;
@@ -81,7 +81,7 @@ struct BlackOilVariableAndEquationIndices
     static constexpr int numPolymers = enablePolymer ? numPolymersV : 0;
 
     //! Number of energy equations to be considered
-    static constexpr int numEnergy = enableEnergy ? numEnergyV : 0;
+    static constexpr int numEnergy = enableFullyImplicitThermal ? numEnergyV : 0;
 
     //! Number of foam equations to be considered
     static constexpr int numFoam = enableFoam? 1 : 0;
@@ -159,7 +159,7 @@ struct BlackOilVariableAndEquationIndices
 
     //! Index of the primary variable for temperature
     static constexpr int temperatureIdx  =
-        (enableTemperature || enableEnergy) ? PVOffset + numPhases + numSolvents + numExtbos + numPolymers + numFoam + numBrine : - 1000;
+        (enableTemperature || enableFullyImplicitThermal) ? PVOffset + numPhases + numSolvents + numExtbos + numPolymers + numFoam + numBrine : - 1000;
 
 
     ////////
@@ -203,7 +203,7 @@ struct BlackOilVariableAndEquationIndices
 
     //! Index of the continuity equation for energy
     static constexpr int contiEnergyEqIdx =
-        enableEnergy ? PVOffset + numPhases + numSolvents + numExtbos + numPolymers + numFoam + numBrine: -1000;
+        enableFullyImplicitThermal ? PVOffset + numPhases + numSolvents + numExtbos + numPolymers + numFoam + numBrine: -1000;
 };
 
 } // namespace Opm

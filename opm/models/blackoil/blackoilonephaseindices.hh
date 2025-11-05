@@ -65,7 +65,7 @@ struct BlackOilOnePhaseIndices
     static constexpr bool enablePolymer = numPolymersV > 0;
 
     //! Shall energy be conserved?
-    static constexpr bool enableEnergy = numEnergyV > 0;
+    static constexpr bool enableFullyImplicitThermal = numEnergyV > 0;
 
     //! Is MICP involved? (microbes, oxygen, urea, biofilm, and calcite)
     static constexpr bool enableMICP = numBioCompV == 5;
@@ -83,7 +83,7 @@ struct BlackOilOnePhaseIndices
     static constexpr int numPolymers = enablePolymer ? numPolymersV : 0;
 
     //! Number of energy equations to be considered
-    static constexpr int numEnergy = enableEnergy ? numEnergyV : 0;
+    static constexpr int numEnergy = enableFullyImplicitThermal ? numEnergyV : 0;
 
     //! Number of foam equations to be considered
     static constexpr int numFoam = enableFoam? 1 : 0;
@@ -182,7 +182,7 @@ struct BlackOilOnePhaseIndices
 
     //! Index of the primary variable for temperature
     static constexpr int temperatureIdx  =
-        enableEnergy ? PVOffset + numPhases + numSolvents + numExtbos + numPolymers + numMICPs + numFoam + numBrine: - 1000;
+        enableFullyImplicitThermal ? PVOffset + numPhases + numSolvents + numExtbos + numPolymers + numMICPs + numFoam + numBrine: - 1000;
 
     //////////////////////
     // Equation indices
@@ -237,7 +237,7 @@ struct BlackOilOnePhaseIndices
 
     //! Index of the continuity equation for energy
     static constexpr int contiEnergyEqIdx =
-        enableEnergy ? PVOffset + numPhases + numSolvents + numExtbos + numPolymers + numMICPs + numFoam + numBrine: -1000;
+        enableFullyImplicitThermal ? PVOffset + numPhases + numSolvents + numExtbos + numPolymers + numMICPs + numFoam + numBrine: -1000;
 };
 
 } // namespace Opm

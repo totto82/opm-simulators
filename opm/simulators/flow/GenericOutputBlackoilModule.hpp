@@ -365,7 +365,7 @@ protected:
     LogOutputHelper<Scalar> logOutput_;
 
     bool enableEnergy_{false};
-    bool enableTemperature_{false};
+    bool constantTemperature_{false};
     bool enableMech_{false};
 
     bool enableSolvent_{false};
