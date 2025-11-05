@@ -135,7 +135,7 @@ public:
                                  [[maybe_unused]] unsigned globalSpaceIndex,
                                  [[maybe_unused]] unsigned timeIdx,
                                  const ParamCache& paramCache)
-    {        
+    {
         auto& fs = Parent::asImp_().fluidState_;
 
         // compute the specific enthalpy of the fluids, the specific enthalpy of the rock

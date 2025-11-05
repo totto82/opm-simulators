@@ -551,7 +551,7 @@ public:
     {
         updateTemperature_(problem, globalDofIdx, timeIdx);
     }
-        
+
     /*!
      * \brief Compute the intensive quantities needed to handle energy conservation
      *

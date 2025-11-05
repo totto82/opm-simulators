@@ -1777,4 +1777,3 @@ protected:
 } // namespace Opm
 
 #endif // OPM_FLOW_PROBLEM_HPP
-

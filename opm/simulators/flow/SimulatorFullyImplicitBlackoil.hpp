@@ -448,7 +448,8 @@ public:
                         this->adaptiveTimeStepping_->updateNEXTSTEP(max_next_tstep);
                     }
                     result = max_next_tstep > 0;
-                }                
+                }
+
                 const auto& wcycle = schedule[reportStep].wcycle.get();
                 if (wcycle.empty()) {
                     return result;
