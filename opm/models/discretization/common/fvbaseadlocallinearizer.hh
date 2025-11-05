@@ -69,8 +69,6 @@ struct Evaluation<TypeTag, TTag::AutoDiffLocalLinearizer>
 {
 private:
     static constexpr unsigned numDerivatives = getPropValue<TypeTag, Properties::NumDerivatives>();
-    //static constexpr unsigned numEq = getPropValue<TypeTag, Properties::NumEq>();
-
     using Scalar = GetPropType<TypeTag, Properties::Scalar>;
 
 public:

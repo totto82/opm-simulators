@@ -299,7 +299,7 @@ protected:
                                 RSTConv::LocalToGlobalCellFunc globalCell,
                                 const Parallel::Communication& comm,
                                 bool enableEnergy,
-                                bool enableTemperature,
+                                bool constantTemperature,
                                 bool enableMech,
                                 bool enableSolvent,
                                 bool enablePolymer,

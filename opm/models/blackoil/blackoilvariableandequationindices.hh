@@ -39,7 +39,7 @@ template<unsigned numSolventsV,
          unsigned numExtbosV,
          unsigned numPolymersV,
          unsigned numEnergyV,
-         bool enableTemperature,
+         bool enableSequentialImplicitThermal,
          bool enableFoam,
          bool enableBrine,
          unsigned PVOffset,
@@ -93,7 +93,8 @@ struct BlackOilVariableAndEquationIndices
     static constexpr int numEq = numPhases + numSolvents + numExtbos + numPolymers +
                                  numEnergy + numFoam + numBrine;
 
-    static constexpr int numDerivatives = numEq + enableTemperature;
+    //! For seqential implicit approches we evaluate the intensive quantities with a larger number of derivaties 
+    static constexpr int numDerivatives = numEq + enableSequentialImplicitThermal;
 
 
     ////////
@@ -159,7 +160,7 @@ struct BlackOilVariableAndEquationIndices
 
     //! Index of the primary variable for temperature
     static constexpr int temperatureIdx  =
-        (enableTemperature || enableFullyImplicitThermal) ? PVOffset + numPhases + numSolvents + numExtbos + numPolymers + numFoam + numBrine : - 1000;
+        (enableSequentialImplicitThermal || enableFullyImplicitThermal) ? PVOffset + numPhases + numSolvents + numExtbos + numPolymers + numFoam + numBrine : - 1000;
 
 
     ////////

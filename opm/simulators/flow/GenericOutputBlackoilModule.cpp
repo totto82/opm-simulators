@@ -128,7 +128,7 @@ GenericOutputBlackoilModule(const EclipseState& eclState,
                             RSTConv::LocalToGlobalCellFunc globalCell,
                             const Parallel::Communication& comm,
                             bool enableEnergy,
-                            bool enableTemperature,
+                            bool constantTemperature,
                             bool enableMech,
                             bool enableSolvent,
                             bool enablePolymer,
@@ -146,7 +146,7 @@ GenericOutputBlackoilModule(const EclipseState& eclState,
                         declaredMaxRegionID(eclState.runspec()))
     , logOutput_(eclState, schedule, summaryState, moduleVersion)
     , enableEnergy_(enableEnergy)
-    , constantTemperature_(enableTemperature)
+    , constantTemperature_(constantTemperature)
     , enableMech_(enableMech)
     , enableSolvent_(enableSolvent)
     , enablePolymer_(enablePolymer)
