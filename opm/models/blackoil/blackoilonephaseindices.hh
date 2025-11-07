@@ -105,7 +105,7 @@ struct BlackOilOnePhaseIndices
     static constexpr int numEq = numPhases + numSolvents + numExtbos + numPolymers +
                                  numEnergy + numFoam + numBrine + numMICPs;
 
-    //! For seqential implicit approches we evaluate the intensive quantities with a larger number of derivaties 
+    //! For seqential implicit approches we evaluate the intensive quantities with a larger number of derivatives than equations
     static constexpr int numDerivatives = numEq + enableSequentialImplicitThermal;
 
     //////////////////////////////

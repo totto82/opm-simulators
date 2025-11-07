@@ -39,9 +39,7 @@
 #include <opm/grid/CpGrid.hpp>
 
 #include <opm/input/eclipse/EclipseState/EclipseState.hpp>
-//#include <opm/input/eclipse/EclipseState/Tables/TemperatureVdTable.hpp>
 #include <opm/input/eclipse/Schedule/Well/Well.hpp>
-//#include <opm/input/eclipse/Schedule/Well/WellTemperatureProperties.hpp>
 
 #include <opm/models/discretization/ecfv/ecfvstencil.hh>
 
@@ -156,6 +154,8 @@ doInit(std::size_t numGridDof)
         }
     }
     energyMatrix_->endindices();
+
+    maxTempChange_ = Parameters::Get<Parameters::MaxTemperatureChange<Scalar>>();
 }
 
 template<class Grid, class GridView, class DofMapper, class Stencil, class FluidSystem, class Scalar>
@@ -218,7 +218,7 @@ void GenericTemperatureModel<Grid,GridView,DofMapper,Stencil,FluidSystem,Scalar>
 syncOverlap_()
 {
 #if HAVE_MPI
-    // syncronize the solution on the ghost and overlap elements
+    // syncronize the residual on the ghost and overlap elements
     using GhostSyncHandle = GridCommHandleGhostSync<Dune::FieldVector<Scalar, 1>,
                                                     EnergyVector,
                                                     DofMapper,

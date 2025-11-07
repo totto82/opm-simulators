@@ -406,7 +406,7 @@ public:
         auto& fs = asImp_().fluidState_;
 
         // compute the specific enthalpy of the fluids, the specific enthalpy of the rock
-        // and the thermal condictivity coefficients
+        // and the thermal conductivity coefficients
         for (int phaseIdx = 0; phaseIdx < numPhases; ++ phaseIdx) {
             if (!FluidSystem::phaseIsActive(phaseIdx)) {
                 continue;
@@ -570,7 +570,7 @@ public:
         auto& fs = asImp_().fluidState_;
 
         // compute the specific enthalpy of the fluids, the specific enthalpy of the rock
-        // and the thermal condictivity coefficients
+        // and the thermal conductivity coefficients
         for (int phaseIdx = 0; phaseIdx < numPhases; ++ phaseIdx) {
             if (!FluidSystem::phaseIsActive(phaseIdx)) {
                 continue;
@@ -907,60 +907,31 @@ public:
                              const Scalar& outAlpha,
                              const Scalar& faceArea)
     {
-        // used by the TEMP option
-        Evaluation deltaT;
-        if (focusDofIndex == inIdx)
-            deltaT =
-                decay<Scalar>(exFs.temperature(/*phaseIdx=*/0))
-                - inFs.temperature(/*phaseIdx=*/0);
-        else if (focusDofIndex == exIdx)
-            deltaT =
-                exFs.temperature(/*phaseIdx=*/0)
-                - decay<Scalar>(inFs.temperature(/*phaseIdx=*/0));
-        else
-            deltaT =
-                decay<Scalar>(exFs.temperature(/*phaseIdx=*/0))
-                - decay<Scalar>(inFs.temperature(/*phaseIdx=*/0));
-
-        Evaluation inLambda;
-        if (focusDofIndex == inIdx)
-            inLambda = inIq.totalThermalConductivity();
-        else
-            inLambda = decay<Scalar>(inIq.totalThermalConductivity());
-
-        Evaluation exLambda;
-        if (focusDofIndex == exIdx)
-            exLambda = exIq.totalThermalConductivity();
-        else
-            exLambda = decay<Scalar>(exIq.totalThermalConductivity());
-
-        Evaluation H;
-        const Evaluation& inH = inLambda*inAlpha;
-        const Evaluation& exH = exLambda*outAlpha;
-        if (inH > 0 && exH > 0) {
-            // compute the "thermal transmissibility". In contrast to the normal
-            // transmissibility this cannot be done as a preprocessing step because the
-            // average thermal conductivity is analogous to the permeability but
-            // depends on the solution.
-            H = 1.0/(1.0/inH + 1.0/exH);
-        }
-        else
-            H = 0.0;
-
-        energyFlux = deltaT * (-H/faceArea);
+        // Uses the same caculations as the FullyImplicitThermal approach
+        BlackOilEnergyExtensiveQuantities<TypeTag, EnergyModules::FullyImplicitThermal>::updateEnergy(energyFlux,
+                     focusDofIndex,
+                     inIdx,
+                     exIdx,
+                     inIq,
+                     exIq,
+                     inFs,
+                     exFs,
+                     inAlpha,
+                     outAlpha,
+                     faceArea);
     }
 
     void updateEnergy(const ElementContext&,
                       unsigned,
                       unsigned)
-    {}
+    { } // Old interface still used output code for fluxes. But energy flux is not used. i.e. do nothing
 
     template <class Context, class BoundaryFluidState>
     void updateEnergyBoundary(const Context&,
                               unsigned,
                               unsigned,
                               const BoundaryFluidState&)
-    {}
+    { }
 
     template <class BoundaryFluidState>
     static void updateEnergyBoundary(Evaluation& /*heatFlux*/,
@@ -970,7 +941,7 @@ public:
                                      unsigned /*timeIdx*/,
                                      Scalar /*alpha*/,
                                      const BoundaryFluidState& /*boundaryFs*/)
-    {}
+    { }
 
     const Evaluation& energyFlux()  const
     { throw std::logic_error("Requested the energy flux, but energy is not conserved"); }

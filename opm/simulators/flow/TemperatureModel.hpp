@@ -214,10 +214,12 @@ protected:
         EnergyVector dx(numCells);
         bool converged = this->linearSolve_(*this->energyMatrix_, dx, this->energyVector_);
         if (!converged) {
-            OpmLog::warning("### Temp model: Linear solver did not converge. ###");
+            if (simulator_.gridView().comm().rank() == 0) {
+                OpmLog::warning("Temp model: Linear solver did not converge. Temperature values not updated.");
+            }
         } else {
             for (unsigned globI = 0; globI < numCells; ++globI) {
-                this->temperature_[globI] -= std::clamp(dx[globI][0], Scalar(-10.0), Scalar(10.0));
+                this->temperature_[globI] -= std::clamp(dx[globI][0], -this->maxTempChange_, this->maxTempChange_);
                 intQuants_[globI].updateTemperature_(simulator_.problem(), globI, /*timeIdx*/ 0);
                 intQuants_[globI].updateEnergyQuantities_(simulator_.problem(), globI, /*timeIdx*/ 0);
             }
