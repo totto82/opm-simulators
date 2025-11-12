@@ -385,8 +385,6 @@ protected:
                 //diagonal block set to diag(1.0).
                 (*this->energyMatrix_)[row][row][0][0] = 1.0;
             }
-            // Sync residuals in overlapping cells
-            this->syncOverlap_();
         }
     }
 

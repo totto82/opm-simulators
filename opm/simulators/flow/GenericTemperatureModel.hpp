@@ -81,8 +81,6 @@ protected:
 
     bool linearSolve_(const EnergyMatrix& M, EnergyVector& x, EnergyVector& b);
 
-    void syncOverlap_();
-
     const GridView& gridView_;
     const EclipseState& eclState_;
     const CartesianIndexMapper& cartMapper_;
