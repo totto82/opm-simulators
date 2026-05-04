@@ -453,10 +453,14 @@ public:
                 ? FluidSystem::waterPhaseIdx
                 : FluidSystem::oilPhaseIdx;
 
+        typename FluidSystem::template ParameterCache<Evaluation> paramCache;
+        paramCache.setRegionIndex(asImp_().pvtRegionIndex());
+        paramCache.updateAll(asImp_().fluidState());
+
         const Evaluation SoMax = 0.0;
         saturatedDissolutionFactor_ = FluidSystem::saturatedDissolutionFactor(asImp_().fluidState(),
+                                                                              paramCache,
                                                                               liquidPhaseIdx,
-                                                                              asImp_().pvtRegionIndex(),
                                                                               SoMax);
     }
 

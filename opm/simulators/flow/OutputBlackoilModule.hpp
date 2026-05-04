@@ -1244,10 +1244,10 @@ private:
                               &vanguard = this->simulator_.vanguard()](const Context& ectx)
                              {
                                 try {
-                                    return getValue(
-                                              FluidSystem::bubblePointPressure(ectx.fs,
-                                                                               ectx.intQuants.pvtRegionIndex())
-                                           );
+                                    typename FluidSystem::template ParameterCache<Scalar> paramCache;
+                                    paramCache.setRegionIndex(ectx.intQuants.pvtRegionIndex());
+                                    paramCache.updateAll(ectx.fs);
+                                    return getValue(FluidSystem::bubblePointPressure(ectx.fs, paramCache));
                                 } catch (const NumericalProblem&) {
                                     const auto cartesianIdx = vanguard.cartesianIndex(ectx.globalDofIdx);
                                     failedCells.push_back(cartesianIdx);
@@ -1261,10 +1261,10 @@ private:
                                &vanguard = this->simulator_.vanguard()](const Context& ectx)
                               {
                                   try {
-                                      return getValue(
-                                          FluidSystem::dewPointPressure(ectx.fs,
-                                                                        ectx.intQuants.pvtRegionIndex())
-                                      );
+                                      typename FluidSystem::template ParameterCache<Scalar> paramCache;
+                                      paramCache.setRegionIndex(ectx.intQuants.pvtRegionIndex());
+                                      paramCache.updateAll(ectx.fs);
+                                      return getValue(FluidSystem::dewPointPressure(ectx.fs, paramCache));
                                   } catch (const NumericalProblem&) {
                                       const auto cartesianIdx =  vanguard.cartesianIndex(ectx.globalDofIdx);
                                       failedCells.push_back(cartesianIdx);
@@ -1409,10 +1409,13 @@ private:
                               [&problem = this->simulator_.problem()](const Context& ectx)
                               {
                                   const Scalar SoMax = problem.maxOilSaturation(ectx.globalDofIdx);
+                                  typename FluidSystem::template ParameterCache<Scalar> paramCache;
+                                  paramCache.setRegionIndex(ectx.pvtRegionIdx);
+                                  paramCache.updateAll(ectx.fs);
                                   return FluidSystem::template
                                       saturatedDissolutionFactor<FluidState, Scalar>(ectx.fs,
+                                                                                     paramCache,
                                                                                      oilPhaseIdx,
-                                                                                     ectx.pvtRegionIdx,
                                                                                      SoMax);
                               }
                   }
@@ -1421,10 +1424,13 @@ private:
                               [&problem = this->simulator_.problem()](const Context& ectx)
                               {
                                   const Scalar SoMax = problem.maxOilSaturation(ectx.globalDofIdx);
+                                  typename FluidSystem::template ParameterCache<Scalar> paramCache;
+                                  paramCache.setRegionIndex(ectx.pvtRegionIdx);
+                                  paramCache.updateAll(ectx.fs);
                                   return FluidSystem::template
                                       saturatedDissolutionFactor<FluidState, Scalar>(ectx.fs,
+                                                                                     paramCache,
                                                                                      gasPhaseIdx,
-                                                                                     ectx.pvtRegionIdx,
                                                                                      SoMax);
                               }
                   }
@@ -1433,10 +1439,13 @@ private:
                               [&problem = this->simulator_.problem()](const Context& ectx)
                               {
                                   const Scalar SwMax = problem.maxWaterSaturation(ectx.globalDofIdx);
+                                  typename FluidSystem::template ParameterCache<Scalar> paramCache;
+                                  paramCache.setRegionIndex(ectx.pvtRegionIdx);
+                                  paramCache.updateAll(ectx.fs);
                                   return FluidSystem::template
                                       saturatedDissolutionFactor<FluidState, Scalar>(ectx.fs,
+                                                                                     paramCache,
                                                                                      waterPhaseIdx,
-                                                                                     ectx.pvtRegionIdx,
                                                                                      SwMax);
                               }
                   }
@@ -1444,40 +1453,52 @@ private:
             Entry{ScalarEntry{&this->waterVaporizationFactor_,
                               [](const Context& ectx)
                               {
+                                  typename FluidSystem::template ParameterCache<Scalar> paramCache;
+                                  paramCache.setRegionIndex(ectx.pvtRegionIdx);
+                                  paramCache.updateAll(ectx.fs);
                                   return FluidSystem::template
                                       saturatedVaporizationFactor<FluidState, Scalar>(ectx.fs,
-                                                                                      gasPhaseIdx,
-                                                                                      ectx.pvtRegionIdx);
+                                                                                      paramCache,
+                                                                                      gasPhaseIdx);
                               }
                   }
             },
             Entry{ScalarEntry{&this->gasFormationVolumeFactor_,
                               [](const Context& ectx)
                               {
+                                  typename FluidSystem::template ParameterCache<Scalar> paramCache;
+                                  paramCache.setRegionIndex(ectx.pvtRegionIdx);
+                                  paramCache.updateAll(ectx.fs);
                                   return 1.0 / FluidSystem::template
                                                    inverseFormationVolumeFactor<FluidState, Scalar>(ectx.fs,
-                                                                                                    gasPhaseIdx,
-                                                                                                    ectx.pvtRegionIdx);
+                                                                                                    paramCache,
+                                                                                                    gasPhaseIdx);
                               }
                   }
             },
             Entry{ScalarEntry{&this->saturatedOilFormationVolumeFactor_,
                               [](const Context& ectx)
                               {
+                                  typename FluidSystem::template ParameterCache<Scalar> paramCache;
+                                  paramCache.setRegionIndex(ectx.pvtRegionIdx);
+                                  paramCache.updateAll(ectx.fs);
                                   return 1.0 / FluidSystem::template
                                              saturatedInverseFormationVolumeFactor<FluidState, Scalar>(ectx.fs,
-                                                                                                       oilPhaseIdx,
-                                                                                                       ectx.pvtRegionIdx);
+                                                                                                       paramCache,
+                                                                                                       oilPhaseIdx);
                               }
                   }
             },
             Entry{ScalarEntry{&this->oilSaturationPressure_,
                               [](const Context& ectx)
                               {
+                                  typename FluidSystem::template ParameterCache<Scalar> paramCache;
+                                  paramCache.setRegionIndex(ectx.pvtRegionIdx);
+                                  paramCache.updateAll(ectx.fs);
                                   return FluidSystem::template
                                       saturationPressure<FluidState, Scalar>(ectx.fs,
-                                                                             oilPhaseIdx,
-                                                                             ectx.pvtRegionIdx);
+                                                                             paramCache,
+                                                                             oilPhaseIdx);
                               }
                   }
             },
@@ -1788,9 +1809,10 @@ private:
                                                                     const Context& ectx)
                             {
                                 const auto& fsInitial = problem.initialFluidState(ectx.globalDofIdx);
-                                return FluidSystem::density(fsInitial,
-                                                            phase,
-                                                            ectx.intQuants.pvtRegionIndex());
+                                typename FluidSystem::template ParameterCache<Scalar> paramCache;
+                                paramCache.setRegionIndex(ectx.intQuants.pvtRegionIndex());
+                                paramCache.updateAll(fsInitial);
+                                return FluidSystem::density(fsInitial, paramCache, phase);
                             }
                   },
                   simulator_.episodeIndex() < 0 &&
@@ -1802,9 +1824,10 @@ private:
                                                                     const Context& ectx)
                             {
                                 const auto& fsInitial = problem.initialFluidState(ectx.globalDofIdx);
-                                return FluidSystem::inverseFormationVolumeFactor(fsInitial,
-                                                                                 phase,
-                                                                                 ectx.intQuants.pvtRegionIndex());
+                                typename FluidSystem::template ParameterCache<Scalar> paramCache;
+                                paramCache.setRegionIndex(ectx.intQuants.pvtRegionIndex());
+                                paramCache.updateAll(fsInitial);
+                                return FluidSystem::inverseFormationVolumeFactor(fsInitial, paramCache, phase);
                             }
                   },
                   simulator_.episodeIndex() < 0 &&
@@ -1816,9 +1839,10 @@ private:
                                                                     const Context& ectx)
                             {
                                 const auto& fsInitial = problem.initialFluidState(ectx.globalDofIdx);
-                                return FluidSystem::viscosity(fsInitial,
-                                                              phase,
-                                                              ectx.intQuants.pvtRegionIndex());
+                                typename FluidSystem::template ParameterCache<Scalar> paramCache;
+                                paramCache.setRegionIndex(ectx.intQuants.pvtRegionIndex());
+                                paramCache.updateAll(fsInitial);
+                                return FluidSystem::viscosity(fsInitial, paramCache, phase);
                             }
                   },
                   simulator_.episodeIndex() < 0 &&

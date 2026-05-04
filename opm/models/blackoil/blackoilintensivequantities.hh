@@ -420,6 +420,16 @@ public:
                         problem.maxOilSaturation(globalSpaceIdx));
         }
 
+        Evaluation SwMax = 0.0;
+        if (getFluidSystem().phaseIsActive(getFluidSystem().waterPhaseIdx)) {
+            SwMax = max(fluidState_.saturation(waterPhaseIdx),
+                        problem.maxWaterSaturation(globalSpaceIdx));
+        }
+
+        typename FluidSystem::template ParameterCache<Evaluation> paramCache;
+        paramCache.setRegionIndex(pvtRegionIdx);
+        paramCache.updateAll(fluidState_);
+
         // take the meaning of the switching primary variable into account for the gas
         // and oil phase compositions
 
@@ -432,8 +442,8 @@ public:
                 if (getFluidSystem().enableDissolvedGas()) { // Add So > 0? i.e. if only water set rs = 0)
                     const Evaluation& RsSat = enableExtbo ? asImp_().rs() :
                         getFluidSystem().saturatedDissolutionFactor(fluidState_,
+                                                                paramCache,
                                                                 oilPhaseIdx,
-                                                                pvtRegionIdx,
                                                                 SoMax);
                     fluidState_.setRs(min(RsMax, RsSat));
                 }
@@ -450,8 +460,8 @@ public:
                 if (getFluidSystem().enableVaporizedOil() ) { // Add Sg > 0? i.e. if only water set rv = 0)
                     const Evaluation& RvSat = enableExtbo ? asImp_().rv() :
                         getFluidSystem().saturatedDissolutionFactor(fluidState_,
+                                                                paramCache,
                                                                 gasPhaseIdx,
-                                                                pvtRegionIdx,
                                                                 SoMax);
                     fluidState_.setRv(min(RvMax, RvSat));
                 }
@@ -469,8 +479,8 @@ public:
             else {
                 if (getFluidSystem().enableVaporizedWater()) { // Add Sg > 0? i.e. if only water set rv = 0)
                     const Evaluation& RvwSat = getFluidSystem().saturatedVaporizationFactor(fluidState_,
-                                                                                        gasPhaseIdx,
-                                                                                        pvtRegionIdx);
+                                                                                        paramCache,
+                                                                                        gasPhaseIdx);
                     fluidState_.setRvw(RvwSat);
                 }
             }
@@ -484,8 +494,9 @@ public:
             else {
                 if (getFluidSystem().enableDissolvedGasInWater()) {
                     const Evaluation& RswSat = getFluidSystem().saturatedDissolutionFactor(fluidState_,
+                                                                                       paramCache,
                                                                                        waterPhaseIdx,
-                                                                                       pvtRegionIdx);
+                                                                                       SwMax);
                     fluidState_.setRsw(min(RswMax, RswSat));
                 }
             }
@@ -511,7 +522,10 @@ public:
             if (!getFluidSystem().phaseIsActive(phaseIdx)) {
                 continue;
             }
-            const auto [b, mu] = getFluidSystem().inverseFormationVolumeFactorAndViscosity(fluidState_, phaseIdx, pvtRegionIdx);
+            typename FluidSystem::template ParameterCache<Evaluation> paramCache;
+            paramCache.setRegionIndex(pvtRegionIdx);
+            paramCache.updateAll(fluidState_);
+            const auto [b, mu] = getFluidSystem().inverseFormationVolumeFactorAndViscosity(fluidState_, paramCache, phaseIdx);
             fluidState_.setInvB(phaseIdx, b);
             for (int i = 0; i < nmobilities; ++i) {
                 if (enableExtbo && phaseIdx == oilPhaseIdx) {

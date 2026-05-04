@@ -654,8 +654,10 @@ private:
         //////
         // set composition of the oil phase
         //////
+        typename FluidSystem::template ParameterCache<Scalar> paramCache;
+        paramCache.setRegionIndex(0);
         Scalar RsSat =
-            FluidSystem::saturatedDissolutionFactor(fs, oilPhaseIdx, /*pvtRegionIdx=*/0);
+            FluidSystem::saturatedDissolutionFactor(fs, paramCache, oilPhaseIdx);
         Scalar XoGSat = FluidSystem::convertRsToXoG(RsSat, /*pvtRegionIdx=*/0);
         Scalar xoGSat = FluidSystem::convertXoGToxoG(XoGSat, /*pvtRegionIdx=*/0);
         Scalar xoG = 0.95*xoGSat;
@@ -666,7 +668,6 @@ private:
         fs.setMoleFraction(oilPhaseIdx, oilCompIdx, xoO);
 
         using CFRP = Opm::ComputeFromReferencePhase<Scalar, FluidSystem>;
-        typename FluidSystem::template ParameterCache<Scalar> paramCache;
         CFRP::solve(fs,
                     paramCache,
                     /*refPhaseIdx=*/oilPhaseIdx,
