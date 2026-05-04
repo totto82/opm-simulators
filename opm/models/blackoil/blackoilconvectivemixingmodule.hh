@@ -125,6 +125,8 @@ public:
                                  const IntensiveQuantities&,
                                  const IntensiveQuantities&,
                                  const unsigned int,
+                                 const Scalar,
+                                 const Scalar,
                                  const ConvectiveMixingModuleParam<Scalar>&)
     {}
 
@@ -144,6 +146,8 @@ public:
                                         const IntensiveQuantities&,
                                         const unsigned,
                                         const unsigned,
+                                        const Scalar,
+                                        const Scalar,
                                         const Scalar,
                                         const Scalar,
                                         const Scalar,
@@ -199,6 +203,8 @@ public:
                                                  const IntensiveQuantities& intQuantsIn,
                                                  const IntensiveQuantities& intQuantsEx,
                                                  const unsigned phaseIdx,
+                                                 const Scalar zIn,
+                                                 const Scalar zEx,
                                                  const CMMParam& info) {
 
         if (info.active_.empty()) {
@@ -226,7 +232,7 @@ public:
         const auto& bLiquidIn =
             fsys.phaseIsActive(waterPhaseIdx)
                 ? fsys.waterPvt().inverseFormationVolumeFactor(intQuantsIn.pvtRegionIndex(),
-                                                                         t_in, p_in, Evaluation(0.0), salt_in)
+                                                                         t_in, p_in, Evaluation(0.0), salt_in, Evaluation(zIn))
                 : fsys.oilPvt().inverseFormationVolumeFactor(intQuantsIn.pvtRegionIndex(),
                                                                  t_in, p_in, Evaluation(0.0));
 
@@ -244,7 +250,7 @@ public:
         const auto bLiquidEx =
             fsys.phaseIsActive(waterPhaseIdx)
                 ? fsys.waterPvt().inverseFormationVolumeFactor(intQuantsEx.pvtRegionIndex(),
-                                                                       t_ex, p_ex, Scalar{0.0}, salt_ex)
+                                                                       t_ex, p_ex, Scalar{0.0}, salt_ex, zEx)
                 : fsys.oilPvt().inverseFormationVolumeFactor(intQuantsEx.pvtRegionIndex(),
                                                                      t_ex, p_ex, Scalar{0.0});
 
@@ -288,6 +294,8 @@ public:
                                 intQuantsEx,
                                 globalIndexIn,
                                 globalIndexEx,
+                                zIn,
+                                zEx,
                                 distZ * g,
                                 trans,
                                 faceArea,
@@ -304,6 +312,8 @@ public:
                                                         const IntensiveQuantities& intQuantsEx,
                                                         const unsigned globalIndexIn,
                                                         const unsigned globalIndexEx,
+                                                        const Scalar zIn,
+                                                        const Scalar zEx,
                                                         const Scalar distZg,
                                                         const Scalar trans,
                                                         const Scalar faceArea,
@@ -333,7 +343,7 @@ public:
         const auto bLiquidSatIn =
             fsys.phaseIsActive(fsys.waterPhaseIdx)
                 ? fsys.waterPvt().inverseFormationVolumeFactor(intQuantsIn.pvtRegionIndex(),
-                                                                       t_in, p_in, rssat_in, salt_in)
+                                                                       t_in, p_in, rssat_in, salt_in, Evaluation(zIn))
                 : fsys.oilPvt().inverseFormationVolumeFactor(intQuantsIn.pvtRegionIndex(),
                                                                      t_in, p_in, rssat_in);
 
@@ -356,7 +366,7 @@ public:
         const auto bLiquidSatEx =
             fsys.phaseIsActive(fsys.waterPhaseIdx)
                 ? fsys.waterPvt().inverseFormationVolumeFactor(intQuantsEx.pvtRegionIndex(),
-                                                                       t_ex, p_ex, rssat_ex, salt_ex)
+                                                                       t_ex, p_ex, rssat_ex, salt_ex, zEx)
                 : fsys.oilPvt().inverseFormationVolumeFactor(intQuantsEx.pvtRegionIndex(),
                                                                      t_ex, p_ex, rssat_ex);
 

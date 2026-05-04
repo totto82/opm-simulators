@@ -117,7 +117,8 @@ calcInjCoeff(const RegionId r, const int pvtRegionIdx, Coeff& coeff) const
                                                                                T,
                                                                                p,
                                                                                Scalar{0.0},
-                                                                               saltConcentration);
+                                                                               saltConcentration,
+                                                                               Scalar{0.0});
 
         coeff[iw] = 1.0 / bw;
     }
@@ -192,7 +193,7 @@ calcCoeff(const int pvtRegionIdx,
     if (FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx)) {
         // q[w]_r = 1/(bw * (1 - rsw*rvw)) * (q[w]_s - rvw*q[g]_s)
 
-        const Scalar bw = FluidSystem::waterPvt().inverseFormationVolumeFactor(pvtRegionIdx, T, p, Rsw, saltConcentration);
+        const Scalar bw = FluidSystem::waterPvt().inverseFormationVolumeFactor(pvtRegionIdx, T, p, Rsw, saltConcentration, Scalar{0.0});
 
         const Scalar den = bw * detRw;
 
@@ -286,7 +287,8 @@ calcReservoirVoidageRates(const int           pvtRegionIdx,
         const auto bw = FluidSystem::waterPvt()
             .inverseFormationVolumeFactor(pvtRegionIdx, T, p,
                                           Rsw,
-                                          saltConcentration);
+                                          saltConcentration,
+                                          Scalar{0.0});
 
         if (FluidSystem::phaseIsActive(FluidSystem::gasPhaseIdx)) {
             voidage_rates[iw] -= Rvw * surface_rates[ig];

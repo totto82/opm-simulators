@@ -1274,7 +1274,8 @@ protected:
                                                             this->gravity_[dim - 1],
                                                             perm[dim - 1][dim - 1],
                                                             distZ,
-                                                            pvtRegionIdx);
+                                                            pvtRegionIdx,
+                                                            this->dofCenterDepth(compressedDofIdx));
                               }
         );
 

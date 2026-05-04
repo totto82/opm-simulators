@@ -595,7 +595,7 @@ private:
                         const auto dirId = scvf.dirId();
                         auto faceDir = dirId < 0 ? FaceDir::DirEnum::Unknown
                                                  : FaceDir::FromIntersectionIndex(dirId);
-                        ResidualNBInfo nbinfo{trans, area, thpres, dZg, faceDir, Vin, Vex, {}, {}, {}, {}};
+                        ResidualNBInfo nbinfo{trans, area, thpres, dZg, faceDir, Vin, Vex, zIn, zEx, {}, {}, {}, {}};
                         if constexpr (enableFullyImplicitThermal) {
                             nbinfo.inAlpha = problem_().thermalHalfTransmissibility(myIdx, neighborIdx);
                             nbinfo.outAlpha = problem_().thermalHalfTransmissibility(neighborIdx, myIdx);

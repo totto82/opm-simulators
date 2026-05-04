@@ -661,7 +661,8 @@ public:
                         FluidSystem::waterPvt().saturatedGasDissolutionFactor(pvtRegionIdx_,
                                                                               T,
                                                                               pw,
-                                                                              saltConcentration);
+                                                                              saltConcentration,
+                                                                              problem.dofCenterDepth(globalDofIdx));
                     setPrimaryVarsMeaningWater(WaterMeaning::Rsw);
                     const Scalar rswMax = problem.maxGasDissolutionFactor(/*timeIdx=*/0, globalDofIdx);
                     (*this)[Indices::waterSwitchIdx] = std::min(rswSat, rswMax); //primary variable becomes Rsw
@@ -707,7 +708,8 @@ public:
                     FluidSystem::waterPvt().saturatedGasDissolutionFactor(pvtRegionIdx_,
                                                                           T,
                                                                           pw,
-                                                                          saltConcentration);
+                                                                          saltConcentration,
+                                                                          problem.dofCenterDepth(globalDofIdx));
 
                 const Scalar rsw = (*this)[Indices::waterSwitchIdx];
                 const Scalar rswMax = problem.maxGasDissolutionFactor(/*timeIdx=*/0, globalDofIdx);
