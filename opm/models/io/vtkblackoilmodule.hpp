@@ -164,6 +164,7 @@ public:
                     : 0.0;
             typename FluidSystem::template ParameterCache<Scalar> paramCache;
             paramCache.setRegionIndex(pvtRegionIdx);
+            paramCache.setDepth(elemCtx.problem().dofCenterDepth(globalDofIdx));
             paramCache.updateAll(fs);
 
             if (FluidSystem::phaseIsActive(gasPhaseIdx) && FluidSystem::phaseIsActive(oilPhaseIdx)) {

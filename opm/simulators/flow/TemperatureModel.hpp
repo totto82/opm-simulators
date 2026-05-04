@@ -111,6 +111,7 @@ class BlackOilEnergyIntensiveQuantitiesTemp
         // and the thermal conductivity coefficients
         typename FluidSystem::template ParameterCache<EvaluationTemp> paramCache;
         paramCache.setRegionIndex(problem.pvtRegionIndex(globalSpaceIdx));
+        paramCache.setDepth(problem.dofCenterDepth(globalSpaceIdx));
         paramCache.updateAll(fluidState_);
         for (int phaseIdx = 0; phaseIdx < numPhases; ++ phaseIdx) {
             if (!FluidSystem::phaseIsActive(phaseIdx)) {
@@ -679,6 +680,7 @@ protected:
                     fs.setTemperature(eclWell.inj_temperature());
                     typename FluidSystem::template ParameterCache<Evaluation> paramCache;
                     paramCache.setRegionIndex(fs.pvtRegionIndex());
+                    paramCache.setDepth(simulator_.problem().dofCenterDepth(globI));
                     paramCache.updateAll(fs);
                     const auto& rho = FluidSystem::density(fs, paramCache, phaseIdx);
                     fs.setDensity(phaseIdx, rho);

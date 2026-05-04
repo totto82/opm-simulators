@@ -438,6 +438,7 @@ template <class TypeTag>
 class BlackOilConvectiveMixingIntensiveQuantities<TypeTag, /*enableConvectiveMixingV=*/true>
 {
     using Implementation = GetPropType<TypeTag, Properties::IntensiveQuantities>;
+    using Scalar = GetPropType<TypeTag, Properties::Scalar>;
     using Evaluation = GetPropType<TypeTag, Properties::Evaluation>;
     using FluidSystem = GetPropType<TypeTag, Properties::FluidSystem>;
 
@@ -446,7 +447,7 @@ public:
      * \brief Compute the intensive quantities needed to handle convective dissolution
      *
      */
-    void updateSaturatedDissolutionFactor_()
+    void updateSaturatedDissolutionFactor_(Scalar depth)
     {
         const auto liquidPhaseIdx =
             FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx)
@@ -455,6 +456,7 @@ public:
 
         typename FluidSystem::template ParameterCache<Evaluation> paramCache;
         paramCache.setRegionIndex(asImp_().pvtRegionIndex());
+        paramCache.setDepth(depth);
         paramCache.updateAll(asImp_().fluidState());
 
         const Evaluation SoMax = 0.0;

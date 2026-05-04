@@ -264,6 +264,7 @@ public:
 
         typename FluidSystem::template ParameterCache<Evaluation> paramCache;
         paramCache.setRegionIndex(pvtRegionIdx);
+        paramCache.setDepth(problem.dofCenterDepth(globalSpaceIdx));
 
         // take the meaning of the switching primary variable into account for the gas
         // and oil phase compositions
@@ -324,7 +325,7 @@ public:
             if (!FluidSystem::phaseIsActive(phaseIdx)) {
                 continue;
             }
-            computeInverseFormationVolumeFactorAndViscosity(fluidState_, phaseIdx, pvtRegionIdx);
+            computeInverseFormationVolumeFactorAndViscosity(fluidState_, phaseIdx, pvtRegionIdx, problem, globalSpaceIdx);
         }
         Valgrind::CheckDefined(mobility_);
 
@@ -392,7 +393,7 @@ public:
         rockCompTransMultiplier_ = problem.template rockCompTransMultiplier<Evaluation>(*this, globalSpaceIdx);
 
         if constexpr (enableConvectiveMixing) {
-            asImp_().updateSaturatedDissolutionFactor_();
+            asImp_().updateSaturatedDissolutionFactor_(problem.dofCenterDepth(globalSpaceIdx));
         }
 
 #ifndef NDEBUG
@@ -446,10 +447,13 @@ public:
 
     void computeInverseFormationVolumeFactorAndViscosity(FluidState& fluidState,
                                                          unsigned phaseIdx,
-                                                         unsigned pvtRegionIdx) {
+                                                         unsigned pvtRegionIdx,
+                                                         const Problem& problem,
+                                                         const unsigned globalSpaceIdx) {
         OPM_TIMEBLOCK_LOCAL(UpdateInverseFormationFactorAndViscosity, Subsystem::PvtProps);
         typename FluidSystem::template ParameterCache<Evaluation> paramCache;
         paramCache.setRegionIndex(pvtRegionIdx);
+        paramCache.setDepth(problem.dofCenterDepth(globalSpaceIdx));
         paramCache.updateAll(fluidState_);
         {
             OPM_TIMEBLOCK_LOCAL(UpdateFormationFactor, Subsystem::PvtProps);

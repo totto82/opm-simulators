@@ -171,6 +171,7 @@ public:
 
                 typename FluidSystem::template ParameterCache<Scalar> paramCache;
                 paramCache.setRegionIndex(regionIdx);
+                paramCache.setDepth(simulator_.problem().dofCenterDepth(elemIdx));
                 paramCache.updateAll(fluidState);
 
                 const auto& b = FluidSystem::inverseFormationVolumeFactor(fluidState, paramCache, phaseIdx);

@@ -656,6 +656,7 @@ private:
         //////
         typename FluidSystem::template ParameterCache<Scalar> paramCache;
         paramCache.setRegionIndex(0);
+        paramCache.setDepth(0.0);
         Scalar RsSat =
             FluidSystem::saturatedDissolutionFactor(fs, paramCache, oilPhaseIdx);
         Scalar XoGSat = FluidSystem::convertRsToXoG(RsSat, /*pvtRegionIdx=*/0);

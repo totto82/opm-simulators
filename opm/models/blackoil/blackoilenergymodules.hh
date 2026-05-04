@@ -431,6 +431,7 @@ public:
         // and the thermal conductivity coefficients
         typename FluidSystem::template ParameterCache<Evaluation> paramCache;
         paramCache.setRegionIndex(problem.pvtRegionIndex(globalSpaceIdx));
+        paramCache.setDepth(problem.dofCenterDepth(globalSpaceIdx));
         paramCache.updateAll(fs);
         for (int phaseIdx = 0; phaseIdx < numPhases; ++ phaseIdx) {
             if (!FluidSystem::phaseIsActive(phaseIdx)) {

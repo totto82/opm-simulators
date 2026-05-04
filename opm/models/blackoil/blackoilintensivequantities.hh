@@ -428,6 +428,7 @@ public:
 
         typename FluidSystem::template ParameterCache<Evaluation> paramCache;
         paramCache.setRegionIndex(pvtRegionIdx);
+        paramCache.setDepth(problem.dofCenterDepth(globalSpaceIdx));
         paramCache.updateAll(fluidState_);
 
         // take the meaning of the switching primary variable into account for the gas
@@ -503,7 +504,8 @@ public:
         }
     }
 
-    OPM_HOST_DEVICE void updateMobilityAndInvB()
+    OPM_HOST_DEVICE void updateMobilityAndInvB(const Problem& problem,
+                                                const unsigned globalSpaceIdx)
     {
         OPM_TIMEBLOCK_LOCAL(updateMobilityAndInvB, Subsystem::PvtProps);
         const unsigned pvtRegionIdx = fluidState_.pvtRegionIndex();
@@ -524,6 +526,7 @@ public:
             }
             typename FluidSystem::template ParameterCache<Evaluation> paramCache;
             paramCache.setRegionIndex(pvtRegionIdx);
+            paramCache.setDepth(problem.dofCenterDepth(globalSpaceIdx));
             paramCache.updateAll(fluidState_);
             const auto [b, mu] = getFluidSystem().inverseFormationVolumeFactorAndViscosity(fluidState_, paramCache, phaseIdx);
             fluidState_.setInvB(phaseIdx, b);
@@ -745,7 +748,7 @@ public:
             if (!problem.simulator().vanguard().eclState().getIOConfig().initOnly()) {
                 if (problem.simulator().vanguard().eclState().runspec().co2Storage()) {
                     if (problem.drsdtconIsActive(globalSpaceIdx, problem.simulator().episodeIndex())) {
-                        asImp_().updateSaturatedDissolutionFactor_();
+                        asImp_().updateSaturatedDissolutionFactor_(problem.dofCenterDepth(globalSpaceIdx));
                     }
                 }
             }
@@ -815,7 +818,7 @@ public:
         }
 
         updateRsRvRsw(problem, priVars, globalSpaceIdx, timeIdx);
-        updateMobilityAndInvB();
+        updateMobilityAndInvB(problem, globalSpaceIdx);
         updatePhaseDensities();
 
         rockCompTransMultiplier_ = problem.template rockCompTransMultiplier<Evaluation>(*this, globalSpaceIdx);

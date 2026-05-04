@@ -701,6 +701,7 @@ public:
                         }
                         typename FluidSystem::template ParameterCache<Scalar> paramCache;
                         paramCache.setRegionIndex(pvtRegionIdx);
+                        paramCache.setDepth(this->dofCenterDepth(globalDofIdx));
                         paramCache.updateAll(fs);
                         const auto& h = FluidSystem::enthalpy(fs, paramCache, phaseIdx);
                         Scalar mass_rate = source.rate(ijk, sourceComp)/ this->model().dofTotalVolume(globalDofIdx);
@@ -879,6 +880,7 @@ public:
 
                     typename FluidSystem::template ParameterCache<Scalar> paramCache;
                     paramCache.setRegionIndex(pvtRegionIdx);
+                    paramCache.setDepth(this->dofCenterDepth(globalDofIdx));
                     paramCache.updateAll(fluidState);
 
                     const auto& b = FluidSystem::inverseFormationVolumeFactor(fluidState, paramCache, phaseIdx);
@@ -1526,6 +1528,7 @@ protected:
             //////
             typename FluidSystem::template ParameterCache<Scalar> paramCache;
             paramCache.setRegionIndex(pvtRegionIndex(dofIdx));
+            paramCache.setDepth(this->dofCenterDepth(dofIdx));
             paramCache.updateAll(dofFluidState);
             for (unsigned phaseIdx = 0; phaseIdx < numPhases; ++phaseIdx) {
                 if (!FluidSystem::phaseIsActive(phaseIdx))
