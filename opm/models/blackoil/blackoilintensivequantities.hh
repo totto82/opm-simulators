@@ -420,12 +420,6 @@ public:
                         problem.maxOilSaturation(globalSpaceIdx));
         }
 
-        Evaluation SwMax = 0.0;
-        if (getFluidSystem().phaseIsActive(getFluidSystem().waterPhaseIdx)) {
-            SwMax = max(fluidState_.saturation(waterPhaseIdx),
-                        problem.maxWaterSaturation(globalSpaceIdx));
-        }
-
         typename FluidSystem::template ParameterCache<Evaluation> paramCache;
         paramCache.setRegionIndex(pvtRegionIdx);
         paramCache.setDepth(problem.dofCenterDepth(globalSpaceIdx));
@@ -496,8 +490,7 @@ public:
                 if (getFluidSystem().enableDissolvedGasInWater()) {
                     const Evaluation& RswSat = getFluidSystem().saturatedDissolutionFactor(fluidState_,
                                                                                        paramCache,
-                                                                                       waterPhaseIdx,
-                                                                                       SwMax);
+                                                                                       waterPhaseIdx);
                     fluidState_.setRsw(min(RswMax, RswSat));
                 }
             }

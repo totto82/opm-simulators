@@ -513,22 +513,26 @@ public:
     static bool isMiscible()
     { return params_.isMiscible_; }
 
-    template <class Value>
+    template <class Value, class DepthValue>
     static Value solubilityLimit(unsigned pvtIdx, const Value& temperature,
-                                 const Value& pressure, const Value& saltConcentration)
+                                 const Value& pressure,
+                                 const Value& saltConcentration,
+                                 const DepthValue& depth)
     {
         if (!isSolubleInWater()) {
             return 0.0;
         }
 
+        const Value depthValue = depth;
+
         assert(isCO2Sol() || isH2Sol());
         if (isCO2Sol()) {
             return brineCo2Pvt().saturatedGasDissolutionFactor(pvtIdx, temperature,
-                                                               pressure, saltConcentration);
+                                                               pressure, saltConcentration, depthValue);
         }
         else {
             return brineH2Pvt().saturatedGasDissolutionFactor(pvtIdx, temperature,
-                                                              pressure, saltConcentration);
+                                                              pressure, saltConcentration, depthValue);
         }
     }
 
@@ -670,7 +674,8 @@ public:
             rsSolw = SolventModule::solubilityLimit(asImp_().pvtRegionIndex(),
                                                      fs.temperature(waterPhaseIdx),
                                                      fs.pressure(waterPhaseIdx),
-                                                     fs.saltConcentration());
+                                                     fs.saltConcentration(),
+                                                     problem.dofCenterDepth(globalSpaceIdx));
         } else if (priVars.primaryVarsMeaningSolvent() == PrimaryVariables::SolventMeaning::Rsolw) {
             rsSolw = priVars.makeEvaluation(solventSaturationIdx, timeIdx, linearizationType);
         }
@@ -816,6 +821,7 @@ public:
         const unsigned pvtRegionIdx = iq.pvtRegionIndex();
         const Evaluation& T = iq.fluidState().temperature(gasPhaseIdx);
         const Evaluation& p = iq.fluidState().pressure(gasPhaseIdx);
+        const Evaluation depth = elemCtx.problem().dofCenterDepth(elemCtx, scvIdx, timeIdx);
 
         Evaluation solventInvB;
         const Evaluation rv = 0.0;
@@ -829,7 +835,7 @@ public:
                 solventViscosity_ = co2gasPvt.viscosity(pvtRegionIdx, T, p, rv, rvw);
 
                 const auto& brineCo2Pvt = SolventModule::brineCo2Pvt();
-                const auto& bw = brineCo2Pvt.inverseFormationVolumeFactor(pvtRegionIdx, T, p, rsSolw());
+                const auto& bw = brineCo2Pvt.inverseFormationVolumeFactor(pvtRegionIdx, T, p, rsSolw(), fs.saltConcentration(), depth);
 
                 const auto denw = bw * brineCo2Pvt.waterReferenceDensity(pvtRegionIdx) +
                                   rsSolw() * bw * brineCo2Pvt.gasReferenceDensity(pvtRegionIdx);
@@ -837,7 +843,7 @@ public:
                 fs.setInvB(waterPhaseIdx, bw);
                 Evaluation& mobw = asImp_().mobility_[waterPhaseIdx];
                 const auto& muWat = fs.viscosity(waterPhaseIdx);
-                const auto& muWatEff = brineCo2Pvt.viscosity(pvtRegionIdx, T, p, rsSolw());
+                const auto& muWatEff = brineCo2Pvt.viscosity(pvtRegionIdx, T, p, rsSolw(), fs.saltConcentration(), depth);
                 mobw *= muWat / muWatEff;
             } else {
                 const auto& h2gasPvt = SolventModule::h2GasPvt();
@@ -847,7 +853,7 @@ public:
                 solventViscosity_ = h2gasPvt.viscosity(pvtRegionIdx, T, p, rv, rvw);
 
                 const auto& brineH2Pvt = SolventModule::brineH2Pvt();
-                const auto& bw = brineH2Pvt.inverseFormationVolumeFactor(pvtRegionIdx, T, p, rsSolw());
+                const auto& bw = brineH2Pvt.inverseFormationVolumeFactor(pvtRegionIdx, T, p, rsSolw(), fs.saltConcentration(), depth);
 
                 const auto denw = bw * brineH2Pvt.waterReferenceDensity(pvtRegionIdx) +
                                   rsSolw() * bw * brineH2Pvt.gasReferenceDensity(pvtRegionIdx);
@@ -855,7 +861,7 @@ public:
                 fs.setInvB(waterPhaseIdx, bw);
                 Evaluation& mobw = asImp_().mobility_[waterPhaseIdx];
                 const auto& muWat = fs.viscosity(waterPhaseIdx);
-                const auto& muWatEff = brineH2Pvt.viscosity(pvtRegionIdx, T, p, rsSolw());
+                const auto& muWatEff = brineH2Pvt.viscosity(pvtRegionIdx, T, p, rsSolw(), fs.saltConcentration(), depth);
                 mobw *= muWat / muWatEff;
             }
         } else {

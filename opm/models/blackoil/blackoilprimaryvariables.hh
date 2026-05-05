@@ -554,7 +554,8 @@ public:
             if (SolventModule::isSolubleInWater()) {
                 const Scalar p = (*this)[pressureSwitchIdx]; // cap-pressure?
                 const Scalar solLimit =
-                    SolventModule::solubilityLimit(pvtRegionIndex(), T , p, saltConcentration);
+                    SolventModule::solubilityLimit(pvtRegionIndex(), T, p, saltConcentration,
+                                                  problem.dofCenterDepth(globalDofIdx));
                 if (primaryVarsMeaningSolvent() == SolventMeaning::Ss) {
                     const Scalar solSat = (*this)[solventSaturationIdx];
                     if (solSat < -eps) { // solvent dissappears
