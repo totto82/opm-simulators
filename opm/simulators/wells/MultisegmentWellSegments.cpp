@@ -806,14 +806,15 @@ calculatePhaseProperties(PhaseCalcResult& result,
 
     // water phase
     if (waterActive) {
-        // rsw is only for interface usage
+        // rsw and depth are only for interface usage
         const EvalWell rsw{0.};
+        const EvalWell depth{0.};
         b[waterActiveCompIdx] = FluidSystem::waterPvt().inverseFormationVolumeFactor(
-                                             pvt_region_index, temperature, seg_pressure, rsw, saltConcentration, EvalWell{0.});
+                                             pvt_region_index, temperature, seg_pressure, rsw, saltConcentration, depth);
         if (update_visc_and_den) {
             // TODO: should not we use phaseIndex here?
             phase_viscosities[waterActiveCompIdx] = FluidSystem::waterPvt().viscosity(
-                                             pvt_region_index, temperature, seg_pressure, rsw, saltConcentration, EvalWell{0.});
+                                             pvt_region_index, temperature, seg_pressure, rsw, saltConcentration, depth);
             phase_densities[waterActiveCompIdx] = b[waterActiveCompIdx] * surface_densities_[waterActiveCompIdx];
         }
     }

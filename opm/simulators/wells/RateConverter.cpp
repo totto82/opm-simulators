@@ -116,9 +116,9 @@ calcInjCoeff(const RegionId r, const int pvtRegionIdx, Coeff& coeff) const
         const Scalar bw = FluidSystem::waterPvt().inverseFormationVolumeFactor(pvtRegionIdx,
                                                                                T,
                                                                                p,
-                                                                               Scalar{0.0},
+                                                                               /*Rsw*/ Scalar{0.0},
                                                                                saltConcentration,
-                                                                               Scalar{0.0});
+                                                                               /*depth*/ Scalar{0.0});
 
         coeff[iw] = 1.0 / bw;
     }

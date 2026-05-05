@@ -393,7 +393,7 @@ copyToWellState(const  MultisegmentWellGeneric<Scalar, IndexTraits>& mswell,
                 FluidSystem::waterPvt().viscosity(pvtReg, temperature,
                                                   segment_pressure[seg],
                                                   Scalar{0.0} /*Rsw*/, saltConc,
-                                                  Scalar{0.0});
+                                                  Scalar{0.0} /*depth*/);
         }
 
         if (FluidSystem::phaseIsActive(FluidSystem::gasPhaseIdx)) {

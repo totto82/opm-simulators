@@ -118,7 +118,7 @@ public:
                 const Scalar permZ,
                 const Scalar distZ,
                 const int pvtRegionIdx,
-                const Scalar depth = Scalar{0.0})
+                const Scalar depth)
     {
         const auto& oilVaporizationControl = schedule_[episodeIdx].oilvap();
 
@@ -200,7 +200,7 @@ private:
                                 const Scalar Psi,
                                 const Scalar omegainn,
                                 const int pvtRegionIndex,
-                                const Scalar depth = Scalar{0.0});
+                                const Scalar depth);
 
     std::vector<Scalar> lastRv_;
     std::vector<Scalar> maxDRv_;
