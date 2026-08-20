@@ -106,6 +106,8 @@ class TracerModel : public GenericTracerModel<GetPropType<TypeTag, Properties::G
     enum { waterPhaseIdx = FluidSystem::waterPhaseIdx };
     enum { oilPhaseIdx = FluidSystem::oilPhaseIdx };
     enum { gasPhaseIdx = FluidSystem::gasPhaseIdx };
+    enum { enableDiffusion = getPropValue<TypeTag, Properties::EnableDiffusion>() };
+    enum { enableDispersion = getPropValue<TypeTag, Properties::EnableDispersion>() };
 
 public:
     explicit TracerModel(Simulator& simulator)
@@ -320,10 +322,13 @@ protected:
         if constexpr (Index == Free) {
             upIdx = extQuants.upstreamIndex(tracerPhaseIdx);
             const auto& intQuants = elemCtx.intensiveQuantities(upIdx, timeIdx);
-            const auto& fs = intQuants.fluidState();
+            const auto& inFs = intQuants.fluidState();
+
             v = decay<Scalar>(extQuants.volumeFlux(tracerPhaseIdx)) *
-                decay<Scalar>(fs.invB(tracerPhaseIdx));
+                decay<Scalar>(inFs.invB(tracerPhaseIdx));
+
         } else {
+            // vaporized oil in gas phase
             if (tracerPhaseIdx == FluidSystem::oilPhaseIdx && FluidSystem::enableVaporizedOil()) {
                 upIdx = extQuants.upstreamIndex(FluidSystem::gasPhaseIdx);
 
@@ -333,7 +338,7 @@ protected:
                     decay<Scalar>(extQuants.volumeFlux(FluidSystem::gasPhaseIdx)) *
                     decay<Scalar>(fs.Rv());
             }
-            // dissolved gas
+            // dissolved gas in oil phase
             else if (tracerPhaseIdx == FluidSystem::gasPhaseIdx && FluidSystem::enableDissolvedGas()) {
                 upIdx = extQuants.upstreamIndex(FluidSystem::oilPhaseIdx);
 
@@ -354,6 +359,99 @@ protected:
             ? std::pair{A * v * variable<TracerEvaluation>(1.0, 0), true}
             : std::pair{A * v, false};
     }
+
+    /**
+     * @brief This function calculates the diffusive coefficient D, as used in the Fickian type equations for diffusion. ∇c is calculated in the function that calls this.
+     *        This will probably have to change per tracer in future.
+     * @param 
+     * @param 
+     * @param 
+     * @param
+     * @return
+     */
+    template<TracerTypeIdx Index>
+    std::pair<TracerEvaluation, bool>
+    computeDiffusiveFlux_(const int tracerPhaseIdx,
+                 const ElementContext& elemCtx,
+                 const unsigned scvfIdx,
+                 const unsigned timeIdx) const
+    {
+        const auto& stencil = elemCtx.stencil(timeIdx);
+        const auto& scvf = stencil.interiorFace(scvfIdx);
+        Scalar v;
+        unsigned upIdx;
+
+        const auto& extQuants = elemCtx.extensiveQuantities(scvfIdx, timeIdx);
+        const unsigned inIdx = extQuants.interiorIndex();
+        upIdx = extQuants.upstreamIndex(tracerPhaseIdx);
+        const auto& intQuants = elemCtx.intensiveQuantities(upIdx, timeIdx);
+        const FluidSystem& fsys = intQuants.getFluidSystem();
+        const unsigned solventCompIdx = fsys.solventComponentIndex(tracerPhaseIdx);
+
+        if constexpr (enableDiffusion) {
+            v = decay<Scalar>(extQuants.diffusivity() *
+                                //1.0); //Testing: set effective diffusion coefficient to 1.
+                                extQuants.effectiveDiffusionCoefficient()[tracerPhaseIdx][solventCompIdx]);
+        }
+        else {
+            v = 0.0;
+        }
+
+        const Scalar A = scvf.area();
+        return inIdx == upIdx
+            ? std::pair{A * v * variable<TracerEvaluation>(1.0, 0), true}
+            : std::pair{A * v, false};
+    }
+
+    /**
+     * @brief This function calculates the dispersive coefficient κ, as used in the Fickian type equations for dispersion. ∇c is calculated in the function that calls this.
+     *        This will probably have to change per tracer in future.
+     * @param 
+     * @param 
+     * @param 
+     * @param
+     * @return
+     */
+    template<TracerTypeIdx Index>
+    std::pair<TracerEvaluation, bool>
+    computeDispersiveFlux_(const int tracerPhaseIdx,
+                 const ElementContext& elemCtx,
+                 const unsigned scvfIdx,
+                 const unsigned timeIdx) const
+    {
+        const auto& stencil = elemCtx.stencil(timeIdx);
+        const auto& scvf = stencil.interiorFace(scvfIdx);
+        Scalar v;
+        unsigned upIdx;
+        
+        const auto& extQuants = elemCtx.extensiveQuantities(scvfIdx, timeIdx);
+        const unsigned inIdx = extQuants.interiorIndex();
+        const unsigned outIdx = extQuants.exteriorIndex();
+        upIdx = extQuants.upstreamIndex(tracerPhaseIdx);
+        
+        if constexpr (enableDispersion) {
+            const auto& normVelocityAvg = 0.5 * 
+                        (elemCtx.intensiveQuantities(inIdx, timeIdx).normVelocityCell(tracerPhaseIdx) +
+                        elemCtx.intensiveQuantities(outIdx, timeIdx).normVelocityCell(tracerPhaseIdx));
+            if (normVelocityAvg > 0.0 || normVelocityAvg < 0.0){
+                std::cout << "Debug point reached: `normVelocityAvg != 0`" << std::endl;
+            }
+            v = decay<Scalar>(  
+                normVelocityAvg *
+                extQuants.dispersivity());
+        }
+        else {
+            v = 0.0;
+        }
+        
+
+        const Scalar A = scvf.area();
+        return inIdx == upIdx
+            ? std::pair{A * v * variable<TracerEvaluation>(1.0, 0), true}
+            : std::pair{A * v, false};
+    }
+
+
 
     template<TracerTypeIdx Index, class TrRe>
     Scalar storage1_(const TrRe& tr,
@@ -420,6 +518,12 @@ protected:
 
         const auto& [fFlux, isUpF] = computeFlux_<Free>(tr.phaseIdx_, elemCtx, scvfIdx, 0);
         const auto& [sFlux, isUpS] = computeFlux_<Solution>(tr.phaseIdx_, elemCtx, scvfIdx, 0);
+        
+        // computeDiffusiveFlux_() provides diffusivity D (positive, I think?)
+        const auto& diffusivity_ = computeDiffusiveFlux_<Free>(tr.phaseIdx_, elemCtx, scvfIdx, 0);
+        // computeDispersiveFlux_() provides dispersivity κ(V) – I think it is in positive formulation?
+        const auto& dispersivity_ = computeDispersiveFlux_<Free>(tr.phaseIdx_, elemCtx, scvfIdx, 0);
+
         dVol_[Solution][tr.phaseIdx_][I] += sFlux.value() * dt;
         dVol_[Free][tr.phaseIdx_][I] += fFlux.value() * dt;
         const int fGlobalUpIdx = isUpF ? I : J;
@@ -428,16 +532,46 @@ protected:
             // Free and solution fluxes
             tr.residual_[tIdx][I][Free] += fFlux.value()*tr.concentration_[tIdx][fGlobalUpIdx][Free]; // residual + flux
             tr.residual_[tIdx][I][Solution] += sFlux.value()*tr.concentration_[tIdx][sGlobalUpIdx][Solution]; // residual + flux
+            
+            if constexpr (enableDiffusion) {
+                auto concentrationGradient = (tr.concentration_[tIdx][J][Free] - tr.concentration_[tIdx][I][Free]);
+                // TODO: Divide by distance? Or is 1/Δx included already in earlier code?
+
+                // This calculates J = -D∇c
+                const auto& diffusiveFlux_ = - diffusivity_.first.value() * concentrationGradient;
+                tr.residual_[tIdx][I][Free] += diffusiveFlux_ * tr.concentration_[tIdx][fGlobalUpIdx][Free]; // residual + flux
+                // Still need to calculate ∂c/∂t = D∇^2 c? Or is that included in the above? Something crucial feels missing in my understanding.
+
+                if constexpr (enableDispersion) {
+                    // This calculates J* = -κ(V).∇c
+                    const auto& dispersiveFlux_ = -dispersivity_.first.value() * concentrationGradient;
+                    tr.residual_[tIdx][I][Free] += dispersiveFlux_ * tr.concentration_[tIdx][fGlobalUpIdx][Free];// residual + flux
+                }
+            }
         }
 
         // Derivative matrix
         if (isUpF){
             (*tr.mat)[J][I][Free][Free] = -fFlux.derivative(0);
             (*tr.mat)[I][I][Free][Free] += fFlux.derivative(0);
+            if constexpr (enableDiffusion) {
+                // Should this be the actual flux or the diffusivity derivative?
+                (*tr.mat)[J][I][Free][Free] += diffusivity_.first.derivative(0);
+                if constexpr (enableDispersion) {
+                    (*tr.mat)[J][I][Free][Free] += dispersivity_.first.derivative(0);
+                }
+            }
         }
         if (isUpS) {
             (*tr.mat)[J][I][Solution][Solution] = -sFlux.derivative(0);
             (*tr.mat)[I][I][Solution][Solution] += sFlux.derivative(0);
+            if constexpr (enableDiffusion) {
+                // Should this be the actual flux or the diffusivity derivative?
+                (*tr.mat)[J][I][Solution][Solution] += diffusivity_.first.derivative(0);
+                if constexpr (enableDispersion) {
+                    (*tr.mat)[J][I][Solution][Solution] += dispersivity_.first.derivative(0);
+                }
+            }
         }
     }
 
