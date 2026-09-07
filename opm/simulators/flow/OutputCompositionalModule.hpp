@@ -438,6 +438,30 @@ public:
 
         using namespace std::string_view_literals;
 
+        const auto densityIfPresent = [](const unsigned phaseIdx) {
+            return [phaseIdx](const Context& ectx) -> Scalar {
+                if (!FluidSystem::phaseIsActive(phaseIdx) ||
+                    getValue(ectx.fs.saturation(phaseIdx)) <= 0.0)
+                {
+                    return Scalar{0};
+                }
+
+                return getValue(ectx.fs.density(phaseIdx));
+            };
+        };
+
+        const auto viscosityIfPresent = [](const unsigned phaseIdx) {
+            return [phaseIdx](const Context& ectx) -> Scalar {
+                if (!FluidSystem::phaseIsActive(phaseIdx) ||
+                    getValue(ectx.fs.saturation(phaseIdx)) <= 0.0)
+                {
+                    return Scalar{0};
+                }
+
+                return getValue(ectx.fs.viscosity(phaseIdx));
+            };
+        };
+
         const auto handlers = std::array{
             Entry{ScalarEntry{std::vector{"BPR"sv, "BPRESSUR"sv},
                               [](const Context& ectx)
@@ -445,6 +469,20 @@ public:
                                   return FluidSystem::phaseIsActive(oilPhaseIdx)
                                       ? getValue(ectx.fs.pressure(oilPhaseIdx))
                                       : getValue(ectx.fs.pressure(gasPhaseIdx));
+                              }
+                  }
+            },
+            Entry{ScalarEntry{"BGPR"sv,
+                              [](const Context& ectx)
+                              { return getValue(ectx.fs.pressure(gasPhaseIdx)); }
+                  }
+            },
+            Entry{ScalarEntry{"BWPR"sv,
+                              [](const Context& ectx)
+                              {
+                                  return FluidSystem::phaseIsActive(waterPhaseIdx)
+                                      ? getValue(ectx.fs.pressure(waterPhaseIdx))
+                                      : Scalar{0};
                               }
                   }
             },
@@ -468,41 +506,27 @@ public:
                   }
             },
             Entry{ScalarEntry{std::vector{"BDENO"sv, "BODEN"sv},
-                              [](const Context& ectx)
-                              { return getValue(ectx.fs.density(oilPhaseIdx)); }
+                              densityIfPresent(oilPhaseIdx)
                   }
             },
             Entry{ScalarEntry{std::vector{"BDENG"sv, "BGDEN"sv},
-                              [](const Context& ectx)
-                              { return getValue(ectx.fs.density(gasPhaseIdx)); }
+                              densityIfPresent(gasPhaseIdx)
                   }
             },
             Entry{ScalarEntry{std::vector{"BDENW"sv, "BWDEN"sv},
-                              [](const Context& ectx)
-                              {
-                                  return FluidSystem::phaseIsActive(waterPhaseIdx)
-                                      ? getValue(ectx.fs.density(waterPhaseIdx))
-                                      : Scalar{0};
-                              }
+                              densityIfPresent(waterPhaseIdx)
                   }
             },
             Entry{ScalarEntry{std::vector{"BVOIL"sv, "BOVIS"sv},
-                              [](const Context& ectx)
-                              { return getValue(ectx.fs.viscosity(oilPhaseIdx)); }
+                              viscosityIfPresent(oilPhaseIdx)
                   }
             },
             Entry{ScalarEntry{std::vector{"BVGAS"sv, "BGVIS"sv},
-                              [](const Context& ectx)
-                              { return getValue(ectx.fs.viscosity(gasPhaseIdx)); }
+                              viscosityIfPresent(gasPhaseIdx)
                   }
             },
             Entry{ScalarEntry{std::vector{"BVWAT"sv, "BWVIS"sv},
-                              [](const Context& ectx)
-                              {
-                                  return FluidSystem::phaseIsActive(waterPhaseIdx)
-                                      ? getValue(ectx.fs.viscosity(waterPhaseIdx))
-                                      : Scalar{0};
-                              }
+                              viscosityIfPresent(waterPhaseIdx)
                   }
             },
             Entry{ScalarEntry{std::vector{"BTEMP"sv, "BTCNFHEA"sv},
@@ -519,7 +543,7 @@ public:
         this->blockExtractors_ = BlockExtractor::setupExecMap(this->blockData_, handlers);
     }
 
-    //! \brief Clear list of active element-level data extractors
+    //! \brief Clear the active element and block extractors.
     void clearExtractors()
     {
         this->extractors_.clear();
