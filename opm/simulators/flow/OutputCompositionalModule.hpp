@@ -568,7 +568,7 @@ public:
         if (!std::is_same<Discretization, EcfvDiscretization<TypeTag>>::value)
             return;
 
-        if (this->blockExtractors_.empty()) {
+        if (this->blockExtractors_.empty() || elemCtx.element().level() != 0) {
             return;
         }
 
