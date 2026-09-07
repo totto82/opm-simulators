@@ -533,11 +533,13 @@ public:
         return this->interRegionFlows_;
     }
 
-    void updateFluidInPlace(const unsigned             /* globalDofIdx */,
-                            const IntensiveQuantities& /* intQuants */,
-                            const double               /* totVolume */)
+    void updateFluidInPlace(const unsigned             globalDofIdx,
+                            const IntensiveQuantities& intQuants,
+                            const double               totVolume)
     {
-        // this->updateFluidInPlace_(globalDofIdx, intQuants, totVolume);
+        // Pressure and pore-volume summaries do not require a surface-condition
+        // flash. Phase in-place volumes do, so those remain unavailable here.
+        this->updateTotalVolumesAndPressures_(globalDofIdx, intQuants, totVolume);
     }
 
 protected:

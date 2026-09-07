@@ -26,9 +26,12 @@
 #ifndef OPM_GENERIC_OUTPUT_MODULE_HPP
 #define OPM_GENERIC_OUTPUT_MODULE_HPP
 
+#include <opm/input/eclipse/EclipseState/EclipseState.hpp>
 #include <opm/input/eclipse/EclipseState/Grid/FaceDir.hpp>
 #include <opm/input/eclipse/EclipseState/SummaryConfig/SummaryConfig.hpp>
 #include <opm/input/eclipse/Units/UnitSystem.hpp>
+
+#include <opm/material/common/MathToolbox.hpp>
 
 #include <opm/output/data/RegionVariableMapping.hpp>
 #include <opm/output/data/Wells.hpp>
@@ -54,6 +57,7 @@
 #include <opm/simulators/utils/ParallelCommunication.hpp>
 
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <functional>
 #include <map>
@@ -326,6 +330,89 @@ protected:
     enum { oilCompIdx = FluidSystem::oilCompIdx };
     enum { waterCompIdx = FluidSystem::waterCompIdx };
     using Dir = FaceDir::DirEnum;
+
+    /// Return the reference (undeformed) porosity of a cell.
+    ///
+    /// Compositional intensive quantities expose only the current porosity,
+    /// so use it as the reference porosity for those models.
+    template <class IntensiveQuantities>
+    static Scalar referencePorosity(const IntensiveQuantities& intQuants)
+    {
+        if constexpr (requires { intQuants.referencePorosity(); }) {
+            return intQuants.referencePorosity();
+        }
+        else {
+            return getValue(intQuants.porosity());
+        }
+    }
+
+    /// Fraction of pore volume occupied by hydrocarbons.
+    template <class FluidState>
+    Scalar hydroCarbonFraction(const FluidState& fs) const
+    {
+        if (this->eclState_.runspec().co2Storage()) {
+            // CO2 storage uses the full pore volume.
+            return 1.0;
+        }
+
+        // Sum the saturations of the active hydrocarbon phases.
+        auto hydrocarbon = Scalar {0};
+        if (FluidSystem::phaseIsActive(oilPhaseIdx)) {
+            hydrocarbon += getValue(fs.saturation(oilPhaseIdx));
+        }
+
+        if (FluidSystem::phaseIsActive(gasPhaseIdx)) {
+            hydrocarbon += getValue(fs.saturation(gasPhaseIdx));
+        }
+
+        return hydrocarbon;
+    }
+
+    /// Accumulate pore volumes and pressure-volume products used by pressure
+    /// and pore-volume summary vectors.
+    template <class IntensiveQuantities>
+    void updateTotalVolumesAndPressures_(const unsigned             globalDofIdx,
+                                         const IntensiveQuantities& intQuants,
+                                         const double               totVolume)
+    {
+        const auto& fs = intQuants.fluidState();
+
+        const double pv = totVolume * getValue(intQuants.porosity());
+        const auto hydrocarbon = this->hydroCarbonFraction(fs);
+
+        this->fipC_.assignPoreVolume(globalDofIdx,
+                                totVolume * referencePorosity(intQuants),
+                                pv);
+        if (! this->hydrocarbonPoreVolume_.empty()) {
+            this->hydrocarbonPoreVolume_[globalDofIdx] = pv * hydrocarbon;
+        }
+
+        if (!this->pressureTimesHydrocarbonVolume_.empty() &&
+            !this->pressureTimesPoreVolume_.empty())
+        {
+            assert(this->hydrocarbonPoreVolume_.size() == this->pressureTimesHydrocarbonVolume_.size());
+            assert(this->fipC_.get(Inplace::Phase::PoreVolume).size() == this->pressureTimesPoreVolume_.size());
+
+            if (FluidSystem::phaseIsActive(oilPhaseIdx)) {
+                this->pressureTimesPoreVolume_[globalDofIdx] =
+                    getValue(fs.pressure(oilPhaseIdx)) * pv;
+
+                this->pressureTimesHydrocarbonVolume_[globalDofIdx] =
+                    this->pressureTimesPoreVolume_[globalDofIdx] * hydrocarbon;
+            }
+            else if (FluidSystem::phaseIsActive(gasPhaseIdx)) {
+                this->pressureTimesPoreVolume_[globalDofIdx] =
+                    getValue(fs.pressure(gasPhaseIdx)) * pv;
+
+                this->pressureTimesHydrocarbonVolume_[globalDofIdx] =
+                    this->pressureTimesPoreVolume_[globalDofIdx] * hydrocarbon;
+            }
+            else if (FluidSystem::phaseIsActive(waterPhaseIdx)) {
+                this->pressureTimesPoreVolume_[globalDofIdx] =
+                    getValue(fs.pressure(waterPhaseIdx)) * pv;
+            }
+        }
+    }
 
     /// Names under which the phase densities and viscosities are reported.
     /// The black-oil and compositional formulations use different names for
