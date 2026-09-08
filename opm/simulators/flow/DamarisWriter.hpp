@@ -455,7 +455,6 @@ private:
 
             damarisOutputModule_->processElement(elemCtx);
         }
-        damarisOutputModule_->clearExtractors();
         }
         {
         OPM_TIMEBLOCK(prepareBlockData);
@@ -464,6 +463,7 @@ private:
             elemCtx.updatePrimaryIntensiveQuantities(/*timeIdx=*/0);
             damarisOutputModule_->processElementBlockData(elemCtx);
         }
+        damarisOutputModule_->clearExtractors();
         }
         {
         OPM_TIMEBLOCK(prepareFluidInPlace);
