@@ -257,6 +257,7 @@ template<class Scalar>
 struct MPITraits<::Opm::ReservoirCoupling::SlaveGroupProductionData<Scalar>>
     : detail::StructMPITraits<
           ::Opm::ReservoirCoupling::SlaveGroupProductionData<Scalar>,
+          &::Opm::ReservoirCoupling::SlaveGroupProductionData<Scalar>::has_producer_wells,
           &::Opm::ReservoirCoupling::SlaveGroupProductionData<Scalar>::potentials,
           &::Opm::ReservoirCoupling::SlaveGroupProductionData<Scalar>::surface_rates,
           &::Opm::ReservoirCoupling::SlaveGroupProductionData<Scalar>::network_surface_rates,

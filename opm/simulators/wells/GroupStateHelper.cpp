@@ -978,7 +978,10 @@ template <typename Scalar, typename IndexTraits>
 bool GroupStateHelper<Scalar, IndexTraits>::isMasterGroupEligibleForGuideRate(
                                                                 const std::string& group_name) const
 {
-    if (!this->rescoup_.isMasterGroup(group_name)) {
+    const bool is_control_point = this->rescoup_.isMasterGroup(group_name)
+        || (this->isReservoirCouplingMaster()
+            && this->reservoirCouplingMaster().isProductionControlGroup(group_name));
+    if (!is_control_point) {
         return false;
     }
     const auto& group = this->schedule_.getGroup(group_name, this->report_step_);
@@ -2437,7 +2440,8 @@ getInjectionFilterFlag_(const std::string& group_name,
 template <typename Scalar, typename IndexTraits>
 int
 GroupStateHelper<Scalar, IndexTraits>::getMasterGroupEffectiveGCW_(const std::string& group_name,
-                                                                   bool is_production_group) const
+                                                                   bool is_production_group,
+                                                                   Phase injection_phase) const
 {
     const auto& group = this->schedule_.getGroup(group_name, this->report_step_);
     int num_wells = 0;
@@ -2446,7 +2450,14 @@ GroupStateHelper<Scalar, IndexTraits>::getMasterGroupEffectiveGCW_(const std::st
     //   to exclude them from guide rate distribution, see
     //   RescoupConstraintsCalculator::calculateMasterGroupConstraintsAndSendToSlaves().
     if (is_production_group) {
-        if (group.productionGroupControlAvailable()) {
+        bool control_available = group.productionGroupControlAvailable();
+        const Group* control_group = &group;
+        while (!control_available && !control_group->is_field()) {
+            control_group = &this->schedule_.getGroup(
+                control_group->parent(), this->report_step_);
+            control_available = control_group->productionGroupControlAvailable();
+        }
+        if (control_available) {
             // Either [individual control AND GCONPROD item 8 RESPOND_TO_PARENT
             // = YES], OR a plain FLD/NONE group: the group participates in the
             // parent's guide-rate distribution.  Its GCW is decoupled from the
@@ -2460,7 +2471,7 @@ GroupStateHelper<Scalar, IndexTraits>::getMasterGroupEffectiveGCW_(const std::st
                 // A group with GCONPROD item 8 RESPOND_TO_PARENT = NO but still on FLD/NONE control
                 // is an error, throw an exception.
                 OPM_DEFLOG_THROW(std::logic_error,
-                                 "Group with GCONPROD item 8 RESPOND_TO_PARENT = NO but still on FLD/NONE control",
+                                 "Group " + group_name + " has GCONPROD item 8 RESPOND_TO_PARENT = NO but is still on FLD/NONE control",
                                  this->deferredLogger());
             }
             // Individual control with RESPOND_TO_PARENT = NO: not available
@@ -2468,7 +2479,8 @@ GroupStateHelper<Scalar, IndexTraits>::getMasterGroupEffectiveGCW_(const std::st
             num_wells = 0;
         }
     } else {
-        num_wells = 1;  // injection: not yet handled
+        num_wells = this->reservoirCouplingMaster().effectiveInjectionGCW(
+            injection_phase, group_name);
     }
     return num_wells;
 }
@@ -2754,9 +2766,27 @@ GroupStateHelper<Scalar, IndexTraits>::updateGroupControlledWellsRecursive_(
     //   target reduction and guide rate control.
     const Group& group = this->schedule_.getGroup(group_name, this->report_step_);
     int num_wells = 0;
-    if (this->isReservoirCouplingMasterGroup(group)) {
+    if ((this->isReservoirCouplingMasterGroup(group)
+         && (is_production_group
+             ? group.productionGroupControlAvailable()
+             : group.hasInjectionControl(injection_phase)))
+        || (is_production_group
+            && this->isReservoirCouplingMaster()
+            && this->reservoirCouplingMaster().isProductionControlGroup(group_name))
+        || (!is_production_group
+            && this->isReservoirCouplingMaster()
+            && this->reservoirCouplingMaster().isInjectionControlGroup(
+                injection_phase, group_name))) {
 #ifdef RESERVOIR_COUPLING_ENABLED
-        num_wells = this->getMasterGroupEffectiveGCW_(group_name, is_production_group);
+        if (this->isReservoirCouplingMasterGroup(group)) {
+            num_wells = this->getMasterGroupEffectiveGCW_(
+                group_name, is_production_group, injection_phase);
+        } else if (is_production_group) {
+            num_wells = this->reservoirCouplingMaster().effectiveProductionControlGCW(group_name);
+        } else {
+            num_wells = this->reservoirCouplingMaster().effectiveInjectionControlGCW(
+                injection_phase, group_name);
+        }
 #endif
     }
     else {

@@ -241,6 +241,8 @@ struct ProductionRates {
 // Slave group production data sent to the corresponding master group for target calculation.
 template <class Scalar>
 struct SlaveGroupProductionData {
+    // Native role derived from the slave group tree before master targets are applied.
+    std::uint8_t has_producer_wells{0};
     // Group production potentials are used by the master group for guiderate calculations
     Potentials<Scalar> potentials;
     // Production rates are used by the master group in guiderate calculations

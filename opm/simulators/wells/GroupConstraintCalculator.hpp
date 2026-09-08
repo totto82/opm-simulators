@@ -191,6 +191,8 @@ public:
         const Group& parentGroup(const Group& group) const {
             return this->schedule().getGroup(group.parent(), this->reportStepIdx());
         }
+        bool hasInjectionControlInHierarchy_(const Group& group) const;
+        bool hasProductionControlInHierarchy_(const Group& group) const;
         bool parentGroupControlAvailable_(const Group& group);
         Phase reservoirCouplingToOpmPhase_(ReservoirCoupling::Phase reservoir_coupling_phase) const;
 

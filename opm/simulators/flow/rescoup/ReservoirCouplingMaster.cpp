@@ -142,6 +142,15 @@ getSlaveGroupPotentials(const std::string &master_group_name)
 }
 
 template <class Scalar>
+bool
+ReservoirCouplingMaster<Scalar>::
+masterGroupHasProducerWells(const std::string& master_group_name) const
+{
+    assert(this->report_step_data_);
+    return this->report_step_data_->masterGroupHasProducerWells(master_group_name);
+}
+
+template <class Scalar>
 int
 ReservoirCouplingMaster<Scalar>::
 getSlaveIdx(const std::string &slave_name) const

@@ -246,26 +246,24 @@ calculateGroupConstraint()
     //   correspond to a master group. In the future we might want to port the logic to include
     //   e.g. checkGroupConstraintsProd() and checkGroupConstraintsInj() in GroupStateHelper.cpp.
     const auto& group = this->original_group_;  // The bottom group we want to calculate the target for.
-    // For injection, check if the group has injection control defined for this phase.
-    // If not, there is no target to calculate.
+    // A coupled leaf may inherit injection control from an ancestor.
     if (this->isInjectionConstraint()) {
-        if (!group.hasInjectionControl(this->injectionPhase_())) {
+        if (!this->hasInjectionControlInHierarchy_(group)) {
             return std::nullopt;
         }
+    }
+    else if (!group.isProductionGroup()) {
+        if (!this->hasProductionControlInHierarchy_(group)) {
+            return std::nullopt;
+        }
+        return this->calculateGroupConstraintRecursive_(
+            this->parentGroup(group), group.getGroupEfficiencyFactor());
     }
     if (group.is_field() || !this->parentGroupControlAvailable_(group)) {
         return this->getGroupConstraintNoGuideRate(group);
     }
     assert(this->parentGroupControlAvailable_(group));
-    if (!this->hasGuideRate(group)) {
-        if (this->hasHigherLevelControlOrNoLimit(group)) {
-            // Parent control is available, but no guide rate is defined. This is illegal for a master group
-            // under higher level control or limit.
-            OPM_DEFLOG_THROW(
-                std::runtime_error,
-                fmt::format("No guide rate defined for master group {}", group.name()),
-                this->deferredLogger());
-        }
+    if (!this->hasGuideRate(group) && !this->hasHigherLevelControlOrNoLimit(group)) {
         // A master group with:
         //   - individual (not FLD or NONE) control,
         //   - parent control available,
@@ -404,6 +402,42 @@ getProdCmode() const
 {
     assert(this->isProductionConstraint());
     return std::get<Group::ProductionCMode>(this->control_mode_);
+}
+
+template<class Scalar, class IndexTraits>
+bool
+GroupConstraintCalculator<Scalar, IndexTraits>::
+GeneralCalculator::
+hasInjectionControlInHierarchy_(const Group& group) const
+{
+    const Group* current = &group;
+    while (true) {
+        if (current->hasInjectionControl(this->injectionPhase_())) {
+            return true;
+        }
+        if (current->is_field()) {
+            return false;
+        }
+        current = &this->parentGroup(*current);
+    }
+}
+
+template<class Scalar, class IndexTraits>
+bool
+GroupConstraintCalculator<Scalar, IndexTraits>::
+GeneralCalculator::
+hasProductionControlInHierarchy_(const Group& group) const
+{
+    const Group* current = &group;
+    while (true) {
+        if (current->isProductionGroup()) {
+            return true;
+        }
+        if (current->is_field()) {
+            return false;
+        }
+        current = &this->parentGroup(*current);
+    }
 }
 
 template<class Scalar, class IndexTraits>

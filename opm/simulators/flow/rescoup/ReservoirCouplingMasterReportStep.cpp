@@ -543,6 +543,21 @@ getMasterGroupRate_(const std::string &group_name, ReservoirCoupling::Phase phas
     }
 }
 
+template <class Scalar>
+bool
+ReservoirCouplingMasterReportStep<Scalar>::
+masterGroupHasProducerWells(const std::string& master_group_name) const
+{
+    const auto it = this->getMasterGroupToSlaveNameMap().find(master_group_name);
+    if (it == this->getMasterGroupToSlaveNameMap().end()) {
+        RCOUP_LOG_THROW(std::runtime_error,
+                        fmt::format("Master group name {} not found in master-to-slave-group-name mapping",
+                                    master_group_name));
+    }
+    const auto group_idx = this->getMasterGroupCanonicalIdx(it->second, master_group_name);
+    return this->slave_group_production_data_.at(it->second)[group_idx].has_producer_wells != 0;
+}
+
 // Explicit instantiations
 template class ReservoirCouplingMasterReportStep<double>;
 #if FLOW_INSTANTIATE_FLOAT

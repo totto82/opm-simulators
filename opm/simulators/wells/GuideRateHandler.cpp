@@ -581,17 +581,9 @@ updateGuideRatesForProductionGroups_(const Group& group, std::vector<Scalar>& po
 
     // Synchronize potentials across all ranks
     this->comm().sum(potentials.data(), potentials.size());
-    if (!is_master_group) {
-        // Non-master group potentials are accumulated from sub-groups in SI;
-        // convert them to the display units (e.g. SM3/DAY for METRIC) that
-        // GuideRate::compute() and the stored group potential use. A master
-        // group's potential already arrives in display units from its slave
-        // group (the slave applied from_si before storing and sending it), so
-        // it must not be converted again here.
-        oil_pot = this->unit_system_.from_si(UnitSystem::measure::liquid_surface_rate, oil_pot);
-        water_pot = this->unit_system_.from_si(UnitSystem::measure::liquid_surface_rate, water_pot);
-        gas_pot = this->unit_system_.from_si(UnitSystem::measure::gas_surface_rate, gas_pot);
-    }
+    oil_pot = this->unit_system_.from_si(UnitSystem::measure::liquid_surface_rate, oil_pot);
+    water_pot = this->unit_system_.from_si(UnitSystem::measure::liquid_surface_rate, water_pot);
+    gas_pot = this->unit_system_.from_si(UnitSystem::measure::gas_surface_rate, gas_pot);
     this->guideRate().compute(
         group.name(), this->report_step_idx_, this->sim_time_, oil_pot, gas_pot, water_pot
     );
@@ -680,9 +672,12 @@ updateProductionGroupPotentialFromSlaveGroup_(const Group& group, std::vector<Sc
     const auto& pu = this->phaseUsage();
     // TODO: Here we should check that the master uses the same phases as the
     //   slave.
-    pot[pu.canonicalToActivePhaseIdx(IndexTraits::oilPhaseIdx)] = slave_pot[ReservoirCoupling::Phase::Oil];
-    pot[pu.canonicalToActivePhaseIdx(IndexTraits::gasPhaseIdx)] = slave_pot[ReservoirCoupling::Phase::Gas];
-    pot[pu.canonicalToActivePhaseIdx(IndexTraits::waterPhaseIdx)] = slave_pot[ReservoirCoupling::Phase::Water];
+    pot[pu.canonicalToActivePhaseIdx(IndexTraits::oilPhaseIdx)] = this->unit_system_.to_si(
+        UnitSystem::measure::liquid_surface_rate, slave_pot[ReservoirCoupling::Phase::Oil]);
+    pot[pu.canonicalToActivePhaseIdx(IndexTraits::gasPhaseIdx)] = this->unit_system_.to_si(
+        UnitSystem::measure::gas_surface_rate, slave_pot[ReservoirCoupling::Phase::Gas]);
+    pot[pu.canonicalToActivePhaseIdx(IndexTraits::waterPhaseIdx)] = this->unit_system_.to_si(
+        UnitSystem::measure::liquid_surface_rate, slave_pot[ReservoirCoupling::Phase::Water]);
 }
 #endif
 
@@ -701,8 +696,11 @@ updateProductionGroupPotentialFromSubGroups(const Group& group, std::vector<Scal
         // If group_tmp is *not* available for group control at a higher level,
         // it should not contribute to the group potentials and guide rates of the parent group
         const auto current_group_control = this->group_state_.production_control(group_name);
+        const bool is_coupled_branch_control_group = this->isReservoirCouplingMaster()
+            && this->reservoirCouplingMaster().productionBranches().hasIndirectEndpoint(group_name);
         if (current_group_control != Group::ProductionCMode::FLD
-                && current_group_control != Group::ProductionCMode::NONE) {
+                && current_group_control != Group::ProductionCMode::NONE
+                && !is_coupled_branch_control_group) {
             continue;
         }
 

@@ -152,6 +152,7 @@ public:
     /// @param master_group_name Name of the master group
     /// @return Reference to the potentials data for the specified group
     const Potentials& getSlaveGroupPotentials(const std::string &master_group_name) const;
+    bool masterGroupHasProducerWells(const std::string& master_group_name) const;
 
     /// @brief Check if this is the first substep within a "sync" timestep.
     /// @details This flag is used to control reservoir coupling synchronization.

@@ -46,6 +46,102 @@ public:
     using MasterGroupNodePressure = ReservoirCoupling::MasterGroupNodePressure<Scalar>;
     using ProductionGroupConstraints = ReservoirCoupling::ProductionGroupConstraints<Scalar>;
 
+    class ProductionBranchAdapter {
+    public:
+        void clear() {
+            this->effective_gcw_.clear();
+            this->control_group_endpoints_.clear();
+        }
+
+        void registerBranch(const std::string& control_group_name,
+                            const std::string& endpoint_name) {
+            this->control_group_endpoints_[control_group_name].insert(endpoint_name);
+        }
+
+        bool isControlGroup(const std::string& group_name) const {
+            return this->control_group_endpoints_.count(group_name) > 0;
+        }
+
+        bool hasIndirectEndpoint(const std::string& group_name) const {
+            const auto it = this->control_group_endpoints_.find(group_name);
+            if (it == this->control_group_endpoints_.end()) {
+                return false;
+            }
+            return std::ranges::any_of(it->second, [&group_name](const auto& endpoint_name) {
+                return endpoint_name != group_name;
+            });
+        }
+
+        void setEffectiveGCW(const std::string& endpoint_name, int value) {
+            this->effective_gcw_[endpoint_name] = value;
+        }
+
+        int effectiveGCW(const std::string& endpoint_name) const {
+            const auto it = this->effective_gcw_.find(endpoint_name);
+            return (it == this->effective_gcw_.end()) ? 1 : it->second;
+        }
+
+        int effectiveControlGroupGCW(const std::string& group_name) const {
+            const auto it = this->control_group_endpoints_.find(group_name);
+            if (it == this->control_group_endpoints_.end()) {
+                return 0;
+            }
+            int gcw = 0;
+            for (const auto& endpoint_name : it->second) {
+                gcw += this->effectiveGCW(endpoint_name);
+            }
+            return gcw;
+        }
+
+    private:
+        std::map<std::string, int> effective_gcw_;
+        std::map<std::string, std::set<std::string>> control_group_endpoints_;
+    };
+
+    class InjectionBranchAdapter {
+    public:
+        using BranchKey = std::pair<Phase, std::string>;
+
+        void clear() {
+            this->effective_gcw_.clear();
+            this->control_group_endpoints_.clear();
+        }
+
+        void registerBranch(Phase phase, const std::string& control_group_name,
+                            const std::string& endpoint_name) {
+            this->control_group_endpoints_[{phase, control_group_name}].insert(endpoint_name);
+        }
+
+        bool isControlGroup(Phase phase, const std::string& group_name) const {
+            return this->control_group_endpoints_.count({phase, group_name}) > 0;
+        }
+
+        void setEffectiveGCW(Phase phase, const std::string& endpoint_name, int value) {
+            this->effective_gcw_[{phase, endpoint_name}] = value;
+        }
+
+        int effectiveGCW(Phase phase, const std::string& endpoint_name) const {
+            const auto it = this->effective_gcw_.find({phase, endpoint_name});
+            return (it == this->effective_gcw_.end()) ? 1 : it->second;
+        }
+
+        int effectiveControlGroupGCW(Phase phase, const std::string& group_name) const {
+            const auto it = this->control_group_endpoints_.find({phase, group_name});
+            if (it == this->control_group_endpoints_.end()) {
+                return 0;
+            }
+            int gcw = 0;
+            for (const auto& endpoint_name : it->second) {
+                gcw += this->effectiveGCW(phase, endpoint_name);
+            }
+            return gcw;
+        }
+
+    private:
+        std::map<BranchKey, int> effective_gcw_;
+        std::map<BranchKey, std::set<std::string>> control_group_endpoints_;
+    };
+
     ReservoirCouplingMaster(
         const Parallel::Communication &comm,
         const Schedule &schedule,
@@ -81,17 +177,47 @@ public:
     /// @return The stored effective GCW, or 1 if the group has no explicit entry
     ///   (the participating-and-uncapped default).
     int effectiveGCW(const std::string& group_name) const {
-        const auto it = this->effective_gcw_.find(group_name);
-        return (it == this->effective_gcw_.end()) ? 1 : it->second;
+        return this->production_branches_.effectiveGCW(group_name);
     }
     void setEffectiveGCW(const std::string& group_name, int value) {
-        this->effective_gcw_[group_name] = value;
+        this->production_branches_.setEffectiveGCW(group_name, value);
+    }
+    void registerProductionControlGroup(const std::string& control_group_name,
+                                        const std::string& endpoint_name) {
+        this->production_branches_.registerBranch(control_group_name, endpoint_name);
+    }
+    bool isProductionControlGroup(const std::string& group_name) const {
+        return this->production_branches_.isControlGroup(group_name);
+    }
+    int effectiveProductionControlGCW(const std::string& group_name) const {
+        return this->production_branches_.effectiveControlGroupGCW(group_name);
+    }
+    void registerInjectionControlGroup(Phase phase, const std::string& control_group_name,
+                                       const std::string& endpoint_name) {
+        this->injection_branches_.registerBranch(phase, control_group_name, endpoint_name);
+    }
+    bool isInjectionControlGroup(Phase phase, const std::string& group_name) const {
+        return this->injection_branches_.isControlGroup(phase, group_name);
+    }
+    int effectiveInjectionControlGCW(Phase phase, const std::string& group_name) const {
+        return this->injection_branches_.effectiveControlGroupGCW(phase, group_name);
+    }
+    int effectiveInjectionGCW(Phase phase, const std::string& endpoint_name) const {
+        return this->injection_branches_.effectiveGCW(phase, endpoint_name);
+    }
+    void setEffectiveInjectionGCW(Phase phase, const std::string& endpoint_name, int value) {
+        this->injection_branches_.setEffectiveGCW(phase, endpoint_name, value);
     }
 
     /// @brief Clear all effective-GCW entries.  Call at the start of each
     ///   master-group constraint calculation before any entries are set, so stale
     ///   caps from a previous sync step do not leak in.
-    void resetEffectiveGCW() { this->effective_gcw_.clear(); }
+    void resetEffectiveGCW() {
+        this->production_branches_.clear();
+        this->injection_branches_.clear();
+    }
+    const ProductionBranchAdapter& productionBranches() const { return this->production_branches_; }
+    const InjectionBranchAdapter& injectionBranches() const { return this->injection_branches_; }
 
     double getActivationDate() const { return this->activation_date_; }
     int getArgc() const { return this->argc_; }
@@ -135,6 +261,7 @@ public:
         return this->slave_name_to_master_groups_map_;
     }
     const Potentials& getSlaveGroupPotentials(const std::string &master_group_name);
+    bool masterGroupHasProducerWells(const std::string& master_group_name) const;
     int getSlaveIdx(const std::string &slave_name) const;
     const std::string &getSlaveName(int index) const { return this->slave_names_[index]; }
     double getSlaveStartDate(int index) const { return this->slave_start_dates_[index]; }
@@ -329,7 +456,8 @@ private:
     // Effective group-controlled-wells count per master group, used by guide-rate
     // distribution independently of the production control mode (see effectiveGCW()).
     // Reset and repopulated on each master-group constraint calculation.
-    std::map<std::string, int> effective_gcw_;
+    ProductionBranchAdapter production_branches_;
+    InjectionBranchAdapter injection_branches_;
 
     mutable ReservoirCoupling::Logger logger_;
 

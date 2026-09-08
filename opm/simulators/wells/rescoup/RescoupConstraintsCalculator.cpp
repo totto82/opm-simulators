@@ -215,6 +215,25 @@ calculateMasterGroupConstraintsAndSendToSlaves()
     // excludeInactiveSlaveMasterGroupsFromDistribution_() (and later the
     // Phase 2 cap) repopulate the 0-entries for this step.
     rescoup_master.resetEffectiveGCW();
+    for (std::size_t slave_idx = 0; slave_idx < rescoup_master.numSlaves(); ++slave_idx) {
+        for (const auto& endpoint_name : rescoup_master.getMasterGroupNamesForSlave(slave_idx)) {
+            if (!rescoup_master.masterGroupHasProducerWells(endpoint_name)) {
+                continue;
+            }
+            const Group& endpoint = this->schedule_.getGroup(endpoint_name, this->report_step_idx_);
+            const Group& control_group = this->productionControlGroup_(endpoint);
+            if (!control_group.is_field()) {
+                rescoup_master.registerProductionControlGroup(control_group.name(), endpoint_name);
+            }
+            for (const Phase phase : {Phase::WATER, Phase::OIL, Phase::GAS}) {
+                const Group& injection_control_group = this->injectionControlGroup_(endpoint, phase);
+                if (!injection_control_group.is_field()) {
+                    rescoup_master.registerInjectionControlGroup(
+                        phase, injection_control_group.name(), endpoint_name);
+                }
+            }
+        }
+    }
     this->excludeInactiveSlaveMasterGroupsFromDistribution_();
     // Recompute GCW and reduction rates after the control changes above.
     // The earlier updateAndCommunicateGroupData() in beginTimeStep() may
@@ -226,7 +245,7 @@ calculateMasterGroupConstraintsAndSendToSlaves()
     // Phase 1: compute initial targets for all slaves
     const auto num_slaves = rescoup_master.numSlaves();
     std::vector<std::vector<InjectionGroupTarget>> all_injection_targets(num_slaves);
-    std::vector<std::vector<ProductionGroupConstraints>> all_production_constraints(num_slaves);
+    std::vector<std::vector<ResolvedProductionConstraint>> all_production_constraints(num_slaves);
     for (std::size_t slave_idx = 0; slave_idx < num_slaves; ++slave_idx) {
         if (rescoup_master.slaveIsCoupled(slave_idx)) {
             auto [inj, prod] = this->calculateSlaveGroupConstraints_(slave_idx, calculator);
@@ -299,38 +318,64 @@ recalculateInjectionTargetsAndSendToSlaves()
 template <class Scalar, class IndexTraits>
 std::tuple<
   std::vector<typename RescoupConstraintsCalculator<Scalar, IndexTraits>::InjectionGroupTarget>,
-  std::vector<typename RescoupConstraintsCalculator<Scalar, IndexTraits>::ProductionGroupConstraints>
+    std::vector<typename RescoupConstraintsCalculator<Scalar, IndexTraits>::ResolvedProductionConstraint>
 >
 RescoupConstraintsCalculator<Scalar, IndexTraits>::
 calculateSlaveGroupConstraints_(std::size_t slave_idx, GroupConstraintCalculator<Scalar, IndexTraits>& calculator) const
 {
     std::vector<InjectionGroupTarget> injection_targets =
         this->calculateSlaveGroupInjectionTargets_(slave_idx, calculator);
-    std::vector<ProductionGroupConstraints> production_constraints;
+    std::vector<ResolvedProductionConstraint> production_constraints;
     auto& rescoup_master = this->reservoir_coupling_master_;
     const auto& master_groups = rescoup_master.getMasterGroupNamesForSlave(slave_idx);
     for (std::size_t group_idx = 0; group_idx < master_groups.size(); ++group_idx) {
         const auto& group_name = master_groups[group_idx];
-        const Group& group = this->schedule_.getGroup(group_name, this->report_step_idx_);
-        if (group.isProductionGroup()) {
-            auto constraints = calculator.groupProductionConstraints(group);
-            if (constraints.has_value()) {
-                production_constraints.push_back(
-                    ProductionGroupConstraints{
-                        group_idx,
-                        constraints->active_target,
-                        constraints->active_cmode,
-                        constraints->oil_limit,
-                        constraints->water_limit,
-                        constraints->gas_limit,
-                        constraints->liquid_limit,
-                        constraints->resv_limit
-                    }
-                );
-            }
+        if (!rescoup_master.masterGroupHasProducerWells(group_name)) {
+            continue;
+        }
+        const Group& endpoint = this->schedule_.getGroup(group_name, this->report_step_idx_);
+        const Group& group = this->productionControlGroup_(endpoint);
+        auto constraints = calculator.groupProductionConstraints(group);
+        if (constraints.has_value()) {
+            production_constraints.push_back(
+                ResolvedProductionConstraint{ProductionGroupConstraints{
+                    group_idx,
+                    constraints->active_target,
+                    constraints->active_cmode,
+                    constraints->oil_limit,
+                    constraints->water_limit,
+                    constraints->gas_limit,
+                    constraints->liquid_limit,
+                    constraints->resv_limit
+                }, group.name()}
+            );
         }
     }
     return {injection_targets, production_constraints};
+}
+
+template <class Scalar, class IndexTraits>
+const Group&
+RescoupConstraintsCalculator<Scalar, IndexTraits>::
+productionControlGroup_(const Group& endpoint) const
+{
+    const Group* group = &endpoint;
+    while (!group->isProductionGroup() && !group->is_field()) {
+        group = &this->schedule_.getGroup(group->parent(), this->report_step_idx_);
+    }
+    return *group;
+}
+
+template <class Scalar, class IndexTraits>
+const Group&
+RescoupConstraintsCalculator<Scalar, IndexTraits>::
+injectionControlGroup_(const Group& endpoint, Phase phase) const
+{
+    const Group* group = &endpoint;
+    while (!group->hasInjectionControl(phase) && !group->is_field()) {
+        group = &this->schedule_.getGroup(group->parent(), this->report_step_idx_);
+    }
+    return *group;
 }
 
 template <class Scalar, class IndexTraits>
@@ -347,9 +392,6 @@ calculateSlaveGroupInjectionTargets_(std::size_t slave_idx, GroupConstraintCalcu
     for (std::size_t group_idx = 0; group_idx < master_groups.size(); ++group_idx) {
         const auto& group_name = master_groups[group_idx];
         const Group& group = this->schedule_.getGroup(group_name, this->report_step_idx_);
-        if (!group.isInjectionGroup()) {
-            continue;
-        }
         for (ReservoirCoupling::Phase phase : phases) {
             auto target_info = calculator.groupInjectionTarget(group, phase);
             if (target_info.has_value()) {
@@ -375,7 +417,7 @@ void
 RescoupConstraintsCalculator<Scalar, IndexTraits>::
 capAndRedistributeProductionTargets_(
     GroupConstraintCalculator<Scalar, IndexTraits>& calculator,
-    std::vector<std::vector<ProductionGroupConstraints>>& all_production_constraints
+    std::vector<std::vector<ResolvedProductionConstraint>>& all_production_constraints
 )
 {
     // Cap each master group's production target at its slave's reported
@@ -395,22 +437,22 @@ capAndRedistributeProductionTargets_(
     for (std::size_t slave_idx = 0; slave_idx < num_slaves; ++slave_idx) {
         const auto& master_groups = rescoup_master.getMasterGroupNamesForSlave(slave_idx);
         for (auto& pc : all_production_constraints[slave_idx]) {
-            const auto& group_name = master_groups[pc.group_name_idx];
-            const auto& potentials = rescoup_master.getSlaveGroupPotentials(group_name);
+            const auto& endpoint_name = master_groups[pc.payload.group_name_idx];
+            const auto& potentials = rescoup_master.getSlaveGroupPotentials(endpoint_name);
             const auto pot = this->potentialForProductionCmode_(
-                potentials, pc.cmode);
-            if (pot >= 0 && pc.target > pot) {
-                pc.target = pot;
-                capped_groups.insert(group_name);
+                potentials, pc.payload.cmode);
+            if (pot >= 0 && pc.payload.target > pot) {
+                pc.payload.target = pot;
+                capped_groups.insert(pc.control_group_name);
                 // Switch to individual control so updateGroupTargetReduction()
                 // includes this group's rate as reduction for the parent.
                 this->group_state_helper_.groupState().production_control(
-                    group_name, pc.cmode);
+                    pc.control_group_name, pc.payload.cmode);
                 // Drop the capped group from guide-rate distribution to its
                 // siblings: set effective GCW=0 so it is excluded from
                 // FractionCalculator::guideRateSum on the recompute below.  This
                 // must happen before updateGCWAndTargetReductions_().
-                rescoup_master.setEffectiveGCW(group_name, 0);
+                rescoup_master.setEffectiveGCW(endpoint_name, 0);
             }
         }
     }
@@ -436,22 +478,22 @@ capAndRedistributeProductionTargets_(
     for (std::size_t slave_idx = 0; slave_idx < num_slaves; ++slave_idx) {
         const auto& master_groups = rescoup_master.getMasterGroupNamesForSlave(slave_idx);
         for (auto& pc : all_production_constraints[slave_idx]) {
-            const auto& group_name = master_groups[pc.group_name_idx];
-            if (capped_groups.count(group_name) > 0) {
+            const auto& endpoint_name = master_groups[pc.payload.group_name_idx];
+            if (capped_groups.count(pc.control_group_name) > 0) {
                 this->deferred_logger_.debug(fmt::format(
                     "RC redistribution: {} capped at potential, target={:.4f}",
-                    group_name, pc.target));
+                    endpoint_name, pc.payload.target));
                 continue;  // keep the capped target
             }
-            const Scalar old_target = pc.target;
-            const Group& group = this->schedule_.getGroup(group_name, this->report_step_idx_);
+            const Scalar old_target = pc.payload.target;
+            const Group& group = this->schedule_.getGroup(pc.control_group_name, this->report_step_idx_);
             auto constraints = calculator.groupProductionConstraints(group);
             if (constraints.has_value()) {
-                pc.target = constraints->active_target;
+                pc.payload.target = constraints->active_target;
             }
             this->deferred_logger_.debug(fmt::format(
                 "RC redistribution: {} old_target={:.4f} new_target={:.4f}",
-                group_name, old_target, pc.target));
+                endpoint_name, old_target, pc.payload.target));
         }
     }
 
@@ -460,13 +502,11 @@ capAndRedistributeProductionTargets_(
     // that the production and injection rates of the slave groups remain constant
     // over the time step.
     for (std::size_t slave_idx = 0; slave_idx < num_slaves; ++slave_idx) {
-        const auto& master_groups = rescoup_master.getMasterGroupNamesForSlave(slave_idx);
         for (auto& pc : all_production_constraints[slave_idx]) {
-            const auto& group_name = master_groups[pc.group_name_idx];
-            if (capped_groups.count(group_name) == 0) {
+            if (capped_groups.count(pc.control_group_name) == 0) {
                 // Uncapped groups: switch to individual control too
                 this->group_state_helper_.groupState().production_control(
-                    group_name, pc.cmode);
+                    pc.control_group_name, pc.payload.cmode);
             }
         }
     }
@@ -552,7 +592,7 @@ sendSlaveGroupConstraintsToSlave_(
     const ReservoirCouplingMaster<Scalar>& rescoup_master,
     std::size_t slave_idx,
     const std::vector<InjectionGroupTarget>& injection_targets,
-    const std::vector<ProductionGroupConstraints>& production_constraints
+    const std::vector<ResolvedProductionConstraint>& production_constraints
 ) const
 {
     const auto& units = this->schedule_.getUnits();
@@ -575,7 +615,12 @@ sendSlaveGroupConstraintsToSlave_(
         rescoup_master.sendInjectionTargetsToSlave(slave_idx, injection_targets);
     }
     if (num_production_constraints > 0) {
-        rescoup_master.sendProductionConstraintsToSlave(slave_idx, production_constraints);
+        std::vector<ProductionGroupConstraints> payload;
+        payload.reserve(production_constraints.size());
+        for (const auto& resolved : production_constraints) {
+            payload.push_back(resolved.payload);
+        }
+        rescoup_master.sendProductionConstraintsToSlave(slave_idx, payload);
     }
 }
 

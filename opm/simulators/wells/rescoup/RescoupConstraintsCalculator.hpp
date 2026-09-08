@@ -113,6 +113,11 @@ public:
     void recalculateInjectionTargetsAndSendToSlaves();
 
 private:
+    struct ResolvedProductionConstraint {
+        ProductionGroupConstraints payload;
+        std::string control_group_name;
+    };
+
     /// @brief Phase 1: compute initial guide-rate-distributed targets and
     ///   per-rate-type limits for one slave's master groups.
     /// @details Invoked once per activated slave by
@@ -130,7 +135,7 @@ private:
     ///   reused across slaves.
     /// @return `(injection_targets, production_constraints)` for this
     ///   slave's master groups, ready for Phase 2 / Phase 3.
-    std::tuple<std::vector<InjectionGroupTarget>, std::vector<ProductionGroupConstraints>>
+    std::tuple<std::vector<InjectionGroupTarget>, std::vector<ResolvedProductionConstraint>>
         calculateSlaveGroupConstraints_(std::size_t slave_idx, GroupConstraintCalculator<Scalar, IndexTraits>& calculator) const;
 
     /// @brief Compute the per-phase injection targets for one slave's
@@ -162,7 +167,10 @@ private:
     ///   from Phase 1, modified in place.
     void capAndRedistributeProductionTargets_(
         GroupConstraintCalculator<Scalar, IndexTraits>& calculator,
-        std::vector<std::vector<ProductionGroupConstraints>>& all_production_constraints);
+        std::vector<std::vector<ResolvedProductionConstraint>>& all_production_constraints);
+
+    const Group& productionControlGroup_(const Group& endpoint) const;
+    const Group& injectionControlGroup_(const Group& endpoint, Phase phase) const;
 
     /// @brief Pre-phase: switch master groups that route to currently-
     ///   inactive slaves to individual control so they are excluded from
@@ -204,7 +212,7 @@ private:
         const ReservoirCouplingMaster<Scalar>& rescoup_master,
         std::size_t slave_idx,
         const std::vector<InjectionGroupTarget>& injection_targets,
-        const std::vector<ProductionGroupConstraints>& production_constraints
+        const std::vector<ResolvedProductionConstraint>& production_constraints
     ) const;
 
     /// @brief Recompute the Group-Controlled-Wells count and the

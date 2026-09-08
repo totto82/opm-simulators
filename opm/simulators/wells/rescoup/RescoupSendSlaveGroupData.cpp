@@ -295,6 +295,19 @@ RescoupSendSlaveGroupData<Scalar, IndexTraits>::
 collectSlaveGroupProductionData_(std::size_t group_idx) const
 {
     SlaveGroupProductionData production_data;
+    const auto& group_name = this->reservoir_coupling_slave_.slaveGroupIdxToGroupName(group_idx);
+    const auto& group = this->schedule_.getGroup(group_name, this->report_step_idx_);
+    std::function<bool(const Group&)> has_producer_wells = [this, &has_producer_wells](const Group& current) {
+        if (std::ranges::any_of(current.wells(), [this](const auto& well_name) {
+                return this->schedule_.getWell(well_name, this->report_step_idx_).isProducer();
+            })) {
+            return true;
+        }
+        return std::ranges::any_of(current.groups(), [this, &has_producer_wells](const auto& child_name) {
+            return has_producer_wells(this->schedule_.getGroup(child_name, this->report_step_idx_));
+        });
+    };
+    production_data.has_producer_wells = has_producer_wells(group);
     // Potentials are used to calculate guide rates for master production groups
     production_data.potentials = this->collectSlaveGroupPotentials_(group_idx);
     // Production rates are used to transform guiderate targets for master production groups

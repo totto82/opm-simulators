@@ -745,7 +745,8 @@ private:
     /// @param is_production_group True for the production GCW, false for injection.
     /// @return The effective GCW (0 or 1) for the master group.
     int getMasterGroupEffectiveGCW_(const std::string& group_name,
-                                    bool is_production_group) const;
+                                    bool is_production_group,
+                                    Phase injection_phase) const;
 
     /// @brief Get the effective production limit for a group and rate type,
     /// combining master limit, slave-local target, and GRUPSLAV filter flag.

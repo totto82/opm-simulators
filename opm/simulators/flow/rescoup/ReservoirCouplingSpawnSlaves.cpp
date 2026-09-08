@@ -93,29 +93,23 @@ void
 ReservoirCouplingSpawnSlaves<Scalar>::
 createMasterGroupNameOrder_()
 {
-    // When the slaves send master/slave group potentials to us, we need to know
-    // which master group corresponds to which potentials. We will use the convention
-    // that the slaves will send the potentials in the order of lexicographically sorted
-    // slave group names
+    // Slave group data is sent in the master-group order transmitted by
+    // sendMasterGroupNamesToSlaves_(). Keep the same order here.
     auto num_slaves = this->master_.numSlavesStarted();
     const auto& master_groups = this->rescoup_.masterGroups();
     for (unsigned int i = 0; i < num_slaves; i++) {
         auto slave_name = this->master_.getSlaveName(i);
-        std::vector<std::pair<std::string, std::string>> slave_group_names;
+        std::vector<std::string> master_group_names;
         for (const auto& [master_group_name, master_group] : master_groups) {
             if (master_group.slaveName() == slave_name) {
-                slave_group_names.push_back({master_group_name, master_group.slaveGroupName()});
+                master_group_names.push_back(master_group_name);
             }
         }
-        // Sort the vector based on the slave group names in lexicographical order
-        std::ranges::sort(slave_group_names,
-                          [](const auto &lhs, const auto &rhs)
-                          { return lhs.second < rhs.second; });
         // Create a map from the master group name to the index in the vector
         // This is used to determine the order in which the slaves will send the potentials
         std::map<std::string, std::size_t> master_group_map;
-        for (std::size_t j = 0; j < slave_group_names.size(); ++j) {
-            master_group_map[slave_group_names[j].first] = j;
+        for (std::size_t j = 0; j < master_group_names.size(); ++j) {
+            master_group_map[master_group_names[j]] = j;
         }
         this->master_.updateMasterGroupNameOrderMap(slave_name, master_group_map);
     }
