@@ -462,6 +462,23 @@ public:
             };
         };
 
+        const auto reservoirPoreVolume = [&model = this->simulator_.model()]
+            (const Context& ectx) -> Scalar
+        {
+            return getValue(ectx.intQuants.porosity()) *
+                   model.dofTotalVolume(ectx.globalDofIdx);
+        };
+
+        const auto phasePoreVolume = [reservoirPoreVolume](const unsigned phaseIdx) {
+            return [phaseIdx, reservoirPoreVolume](const Context& ectx) -> Scalar {
+                if (!FluidSystem::phaseIsActive(phaseIdx)) {
+                    return Scalar{0};
+                }
+
+                return getValue(ectx.fs.saturation(phaseIdx)) * reservoirPoreVolume(ectx);
+            };
+        };
+
         const auto handlers = std::array{
             Entry{ScalarEntry{std::vector{"BPR"sv, "BPRESSUR"sv},
                               [](const Context& ectx)
@@ -486,6 +503,10 @@ public:
                               }
                   }
             },
+            Entry{ScalarEntry{"BRPV"sv, reservoirPoreVolume}},
+            Entry{ScalarEntry{"BWPV"sv, phasePoreVolume(waterPhaseIdx)}},
+            Entry{ScalarEntry{"BOPV"sv, phasePoreVolume(oilPhaseIdx)}},
+            Entry{ScalarEntry{"BGPV"sv, phasePoreVolume(gasPhaseIdx)}},
             Entry{ScalarEntry{std::vector{"BSOIL"sv, "BOSAT"sv},
                               [](const Context& ectx)
                               { return getValue(ectx.fs.saturation(oilPhaseIdx)); }
