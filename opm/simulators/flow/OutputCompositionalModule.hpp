@@ -708,7 +708,12 @@ public:
     {
         // Pressure and pore-volume summaries do not require a surface-condition
         // flash. Phase in-place volumes do, so those remain unavailable here.
-        this->updateTotalVolumesAndPressures_(globalDofIdx, intQuants, totVolume);
+        const auto referencePorosity =
+            this->simulator_.problem().referencePorosity(globalDofIdx, /*timeIdx=*/0);
+        this->updateTotalVolumesAndPressures_(globalDofIdx,
+                                              intQuants,
+                                              totVolume,
+                                              referencePorosity);
     }
 
 protected:

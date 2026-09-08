@@ -909,7 +909,10 @@ private:
     {
         OPM_TIMEBLOCK_LOCAL(updateFluidInPlace, Subsystem::Output);
 
-        this->updateTotalVolumesAndPressures_(globalDofIdx, intQuants, totVolume);
+        this->updateTotalVolumesAndPressures_(globalDofIdx,
+                                              intQuants,
+                                              totVolume,
+                                              intQuants.referencePorosity());
 
         if (this->computeFip_) {
             this->updatePhaseInplaceVolumes_(globalDofIdx, intQuants, totVolume);

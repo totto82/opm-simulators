@@ -331,21 +331,6 @@ protected:
     enum { waterCompIdx = FluidSystem::waterCompIdx };
     using Dir = FaceDir::DirEnum;
 
-    /// Return the reference (undeformed) porosity of a cell.
-    ///
-    /// Compositional intensive quantities expose only the current porosity,
-    /// so use it as the reference porosity for those models.
-    template <class IntensiveQuantities>
-    static Scalar referencePorosity(const IntensiveQuantities& intQuants)
-    {
-        if constexpr (requires { intQuants.referencePorosity(); }) {
-            return intQuants.referencePorosity();
-        }
-        else {
-            return getValue(intQuants.porosity());
-        }
-    }
-
     /// Fraction of pore volume occupied by hydrocarbons.
     template <class FluidState>
     Scalar hydroCarbonFraction(const FluidState& fs) const
@@ -373,7 +358,8 @@ protected:
     template <class IntensiveQuantities>
     void updateTotalVolumesAndPressures_(const unsigned             globalDofIdx,
                                          const IntensiveQuantities& intQuants,
-                                         const double               totVolume)
+                                         const double               totVolume,
+                                         const Scalar               referencePorosity)
     {
         const auto& fs = intQuants.fluidState();
 
@@ -381,8 +367,8 @@ protected:
         const auto hydrocarbon = this->hydroCarbonFraction(fs);
 
         this->fipC_.assignPoreVolume(globalDofIdx,
-                                totVolume * referencePorosity(intQuants),
-                                pv);
+                                    totVolume * referencePorosity,
+                                    pv);
         if (! this->hydrocarbonPoreVolume_.empty()) {
             this->hydrocarbonPoreVolume_[globalDofIdx] = pv * hydrocarbon;
         }
