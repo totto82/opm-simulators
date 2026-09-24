@@ -370,7 +370,7 @@ protected:
      * @return
      */
     template<TracerTypeIdx Index>
-    std::pair<TracerEvaluation, bool>
+    TracerEvaluation
     computeDiffusiveFlux_(const int tracerPhaseIdx,
                  const ElementContext& elemCtx,
                  const unsigned scvfIdx,
@@ -389,18 +389,18 @@ protected:
         const unsigned solventCompIdx = fsys.solventComponentIndex(tracerPhaseIdx);
 
         if constexpr (enableDiffusion) {
-            v = decay<Scalar>(extQuants.diffusivity() *
-                                //1.0); //Testing: set effective diffusion coefficient to 1.
-                                extQuants.effectiveDiffusionCoefficient()[tracerPhaseIdx][solventCompIdx]);
+            auto localDiffusivity = extQuants.diffusivity();
+            auto localEffectiveDiffusionCoefficient = extQuants.effectiveDiffusionCoefficient()[tracerPhaseIdx][solventCompIdx];
+            v = decay<Scalar>(localDiffusivity *
+                                0.000001); //Testing: set effective diffusion coefficient to 1.
+                                //localEffectiveDiffusionCoefficient);
         }
         else {
             v = 0.0;
         }
 
         const Scalar A = scvf.area();
-        return inIdx == upIdx
-            ? std::pair{A * v * variable<TracerEvaluation>(1.0, 0), true}
-            : std::pair{A * v, false};
+        return A * v * variable<TracerEvaluation>(1.0, 0);
     }
 
     /**
@@ -413,7 +413,7 @@ protected:
      * @return
      */
     template<TracerTypeIdx Index>
-    std::pair<TracerEvaluation, bool>
+    TracerEvaluation
     computeDispersiveFlux_(const int tracerPhaseIdx,
                  const ElementContext& elemCtx,
                  const unsigned scvfIdx,
@@ -434,11 +434,15 @@ protected:
                         (elemCtx.intensiveQuantities(inIdx, timeIdx).normVelocityCell(tracerPhaseIdx) +
                         elemCtx.intensiveQuantities(outIdx, timeIdx).normVelocityCell(tracerPhaseIdx));
             if (normVelocityAvg > 0.0 || normVelocityAvg < 0.0){
-                std::cout << "Debug point reached: `normVelocityAvg != 0`" << std::endl;
+                std::cout << "NormVelocityAvg = " << normVelocityAvg << "." << std::endl;
             }
+            Scalar dispersivity = 100.0;//extQuants.dispersivity();
+            // if (dispersivity > 0.0 || dispersivity < 0.0){
+            //     std::cout << "Debug point reached: `dispersivity != 0`" << std::endl;
+            // }
             v = decay<Scalar>(  
                 normVelocityAvg *
-                extQuants.dispersivity());
+                dispersivity);
         }
         else {
             v = 0.0;
@@ -446,9 +450,7 @@ protected:
         
 
         const Scalar A = scvf.area();
-        return inIdx == upIdx
-            ? std::pair{A * v * variable<TracerEvaluation>(1.0, 0), true}
-            : std::pair{A * v, false};
+        return A * v * variable<TracerEvaluation>(1.0, 0);
     }
 
 
@@ -519,11 +521,14 @@ protected:
         const auto& [fFlux, isUpF] = computeFlux_<Free>(tr.phaseIdx_, elemCtx, scvfIdx, 0);
         const auto& [sFlux, isUpS] = computeFlux_<Solution>(tr.phaseIdx_, elemCtx, scvfIdx, 0);
         
-        // computeDiffusiveFlux_() provides diffusivity D (positive, I think?)
+        // computeDiffusiveFlux_() provides diffusivity D
         const auto& diffusivity_ = computeDiffusiveFlux_<Free>(tr.phaseIdx_, elemCtx, scvfIdx, 0);
-        // computeDispersiveFlux_() provides dispersivity κ(V) – I think it is in positive formulation?
+        // computeDispersiveFlux_() provides dispersivity κ(V)
         const auto& dispersivity_ = computeDispersiveFlux_<Free>(tr.phaseIdx_, elemCtx, scvfIdx, 0);
 
+        // Declare variables to be available when setting derivative matrix
+        TracerEvaluation diffusiveFlux_ = 0, dispersiveFlux_ = 0;
+        
         dVol_[Solution][tr.phaseIdx_][I] += sFlux.value() * dt;
         dVol_[Free][tr.phaseIdx_][I] += fFlux.value() * dt;
         const int fGlobalUpIdx = isUpF ? I : J;
@@ -534,18 +539,23 @@ protected:
             tr.residual_[tIdx][I][Solution] += sFlux.value()*tr.concentration_[tIdx][sGlobalUpIdx][Solution]; // residual + flux
             
             if constexpr (enableDiffusion) {
-                auto concentrationGradient = (tr.concentration_[tIdx][J][Free] - tr.concentration_[tIdx][I][Free]);
+                Scalar concentrationGradient = (tr.concentration_[tIdx][J][Free] - tr.concentration_[tIdx][I][Free]);
                 // TODO: Divide by distance? Or is 1/Δx included already in earlier code?
-
+                
                 // This calculates J = -D∇c
-                const auto& diffusiveFlux_ = - diffusivity_.first.value() * concentrationGradient;
-                tr.residual_[tIdx][I][Free] += diffusiveFlux_ * tr.concentration_[tIdx][fGlobalUpIdx][Free]; // residual + flux
-                // Still need to calculate ∂c/∂t = D∇^2 c? Or is that included in the above? Something crucial feels missing in my understanding.
-
+                diffusiveFlux_ = - diffusivity_.value() * concentrationGradient;
+                // std::cout << "Diffusivity is " << diffusivity_.value() << std::endl; -- 2e-9
+                tr.residual_[tIdx][I][Free] += diffusiveFlux_.value(); // residual + flux
+                // Still need to calculate ∂c/∂t = D∇^2 c? Or is that included in the above? Included in extquants.diffusivity().
+                
                 if constexpr (enableDispersion) {
                     // This calculates J* = -κ(V).∇c
-                    const auto& dispersiveFlux_ = -dispersivity_.first.value() * concentrationGradient;
-                    tr.residual_[tIdx][I][Free] += dispersiveFlux_ * tr.concentration_[tIdx][fGlobalUpIdx][Free];// residual + flux
+                    dispersiveFlux_ = -dispersivity_.value() * concentrationGradient;
+                    // if (dispersiveFlux_.value() > 0.0 || dispersiveFlux_.value() < 0.0){
+                        //     std::cout << "Debug point reached: `dispersiveFlux_ != 0`" << std::endl;
+                        // }
+                    std::cout << "Dispersivity is " << dispersivity_.value() << "\n" << std::endl;
+                    tr.residual_[tIdx][I][Free] += dispersiveFlux_.value();// residual + flux
                 }
             }
         }
@@ -556,9 +566,11 @@ protected:
             (*tr.mat)[I][I][Free][Free] += fFlux.derivative(0);
             if constexpr (enableDiffusion) {
                 // Should this be the actual flux or the diffusivity derivative?
-                (*tr.mat)[J][I][Free][Free] += diffusivity_.first.derivative(0);
+                (*tr.mat)[J][I][Free][Free] -= diffusivity_.derivative(0);
+                (*tr.mat)[I][I][Free][Free] += diffusivity_.derivative(0);//Do we need this as well?
                 if constexpr (enableDispersion) {
-                    (*tr.mat)[J][I][Free][Free] += dispersivity_.first.derivative(0);
+                    (*tr.mat)[J][I][Free][Free] -= dispersivity_.derivative(0);
+                    (*tr.mat)[I][I][Free][Free] += dispersivity_.derivative(0);
                 }
             }
         }
@@ -567,9 +579,11 @@ protected:
             (*tr.mat)[I][I][Solution][Solution] += sFlux.derivative(0);
             if constexpr (enableDiffusion) {
                 // Should this be the actual flux or the diffusivity derivative?
-                (*tr.mat)[J][I][Solution][Solution] += diffusivity_.first.derivative(0);
+                (*tr.mat)[J][I][Solution][Solution] -= diffusivity_.derivative(0);
+                (*tr.mat)[I][I][Solution][Solution] += diffusivity_.derivative(0);
                 if constexpr (enableDispersion) {
-                    (*tr.mat)[J][I][Solution][Solution] += dispersivity_.first.derivative(0);
+                    (*tr.mat)[J][I][Solution][Solution] -= dispersivity_.derivative(0);
+                    (*tr.mat)[I][I][Solution][Solution] += dispersivity_.derivative(0);
                 }
             }
         }

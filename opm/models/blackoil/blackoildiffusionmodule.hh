@@ -572,9 +572,9 @@ public:
                 continue;
             }
             // no diffusion in water for blackoil models
-            if (!fsys.enableDissolvedGasInWater() && fsys.waterPhaseIdx == phaseIdx) {
+            /*if (!fsys.enableDissolvedGasInWater() && fsys.waterPhaseIdx == phaseIdx) {
                 continue;
-            }
+            }*/
             for (unsigned compIdx = 0; compIdx < numComponents; ++compIdx) {
                 effectiveDiffusionCoefficient[phaseIdx][compIdx] =
                     0.5 * (intQuantsInside.effectiveDiffusionCoefficient(phaseIdx, compIdx) +

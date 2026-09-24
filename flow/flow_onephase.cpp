@@ -53,7 +53,7 @@ struct EnableDiffusion<TypeTag, TTag::FlowWaterOnlyProblem>
 
 template<class TypeTag>
 struct EnableDispersion<TypeTag, TTag::FlowWaterOnlyProblem>
-{ static constexpr bool value = true; };
+{ static constexpr bool value = false; };
 
 //! The indices required by the model
 template<class TypeTag>
