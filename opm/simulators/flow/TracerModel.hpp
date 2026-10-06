@@ -156,6 +156,20 @@ public:
         DeferredLogger local_deferredLogger;
 
         for (std::size_t tracerIdx = 0; tracerIdx < this->tracerPhaseIdx_.size(); ++tracerIdx) {
+            // Tracers of the same phase are solved together with a common system matrix,
+            // which requires a common diffusion coefficient.
+            {
+                auto& batch = tbatch[this->tracerPhaseIdx_[tracerIdx]];
+                const Scalar D = this->eclState_.tracer()[tracerIdx].diffusion_coefficient;
+                if (batch.numTracer() == 0) {
+                    batch.diffusionCoefficient_ = D;
+                }
+                else if (batch.diffusionCoefficient_ != D) {
+                    throw std::runtime_error("TRCDIFF: tracers in the same phase must have the same "
+                                             "diffusion coefficient (tracer " + this->name(tracerIdx) + ")");
+                }
+            }
+
             if (this->tracerPhaseIdx_[tracerIdx] == FluidSystem::waterPhaseIdx) {
                 if (! FluidSystem::phaseIsActive(FluidSystem::waterPhaseIdx)){
                     throw std::runtime_error("Water tracer specified for non-water fluid system: " +
@@ -363,46 +377,23 @@ protected:
     }
 
     /**
-     * @brief This function calculates the diffusive coefficient D, as used in the Fickian type equations for diffusion. ∇c is calculated in the function that calls this.
-     *        This will probably have to change per tracer in future.
-     * @param 
-     * @param 
-     * @param 
-     * @param
-     * @return
+     * @brief Geometric (porosity weighted) diffusivity of a face, i.e. the factor that
+     *        multiplies the molecular diffusion coefficient D_mol of the tracer (TRCDIFF)
+     *        in the Fickian flux J = -D_mol * diffusivity * A * (c_J - c_I).
      */
-    template<TracerTypeIdx Index>
     TracerEvaluation
-    computeDiffusiveFlux_(const int tracerPhaseIdx,
-                 const ElementContext& elemCtx,
-                 const unsigned scvfIdx,
-                 const unsigned timeIdx) const
+    computeDiffusivity_(const ElementContext& elemCtx,
+                        const unsigned scvfIdx,
+                        const unsigned timeIdx) const
     {
-        const auto& stencil = elemCtx.stencil(timeIdx);
-        const auto& scvf = stencil.interiorFace(scvfIdx);
-        Scalar v;
-        unsigned upIdx;
+        const auto& scvf = elemCtx.stencil(timeIdx).interiorFace(scvfIdx);
 
-        const auto& extQuants = elemCtx.extensiveQuantities(scvfIdx, timeIdx);
-        const unsigned inIdx = extQuants.interiorIndex();
-        upIdx = extQuants.upstreamIndex(tracerPhaseIdx);
-        const auto& intQuants = elemCtx.intensiveQuantities(upIdx, timeIdx);
-        const FluidSystem& fsys = intQuants.getFluidSystem();
-        const unsigned solventCompIdx = fsys.solventComponentIndex(tracerPhaseIdx);
-
+        Scalar v = 0.0;
         if constexpr (enableDiffusion) {
-            auto localDiffusivity = extQuants.diffusivity();
-            auto localEffectiveDiffusionCoefficient = extQuants.effectiveDiffusionCoefficient()[tracerPhaseIdx][solventCompIdx];
-            v = decay<Scalar>(localDiffusivity *
-                                0.000001); //Testing: set effective diffusion coefficient to 1.
-                                //localEffectiveDiffusionCoefficient);
-        }
-        else {
-            v = 0.0;
+            v = decay<Scalar>(elemCtx.extensiveQuantities(scvfIdx, timeIdx).diffusivity());
         }
 
-        const Scalar A = scvf.area();
-        return A * v * variable<TracerEvaluation>(1.0, 0);
+        return scvf.area() * v * variable<TracerEvaluation>(1.0, 0);
     }
 
     /**
@@ -523,8 +514,8 @@ protected:
         const auto& [fFlux, isUpF] = computeFlux_<Free>(tr.phaseIdx_, elemCtx, scvfIdx, 0);
         const auto& [sFlux, isUpS] = computeFlux_<Solution>(tr.phaseIdx_, elemCtx, scvfIdx, 0);
         
-        // computeDiffusiveFlux_() provides diffusivity D
-        const auto& diffusivity_ = computeDiffusiveFlux_<Free>(tr.phaseIdx_, elemCtx, scvfIdx, 0);
+        // Geometric diffusivity, scaled by the molecular diffusion coefficient of the tracer batch (TRCDIFF)
+        const TracerEvaluation diffusivity_ = computeDiffusivity_(elemCtx, scvfIdx, 0) * tr.diffusionCoefficient_;
         // computeDispersiveFlux_() provides dispersivity κ(V)
         const auto& dispersivity_ = computeDispersiveFlux_<Free>(tr.phaseIdx_, elemCtx, scvfIdx, 0);
 
@@ -1326,6 +1317,8 @@ protected:
         std::vector<TV> storageOfTimeIndex1_;
         std::vector<TV> residual_;
         std::unique_ptr<TracerMatrix> mat;
+        // Molecular diffusion coefficient [m2/s] (TRCDIFF), common to all tracers in the batch
+        Scalar diffusionCoefficient_ = 0.0;
 
         bool operator==(const TracerBatch& rhs) const
         {
