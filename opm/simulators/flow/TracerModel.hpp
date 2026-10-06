@@ -397,56 +397,40 @@ protected:
     }
 
     /**
-     * @brief This function calculates the dispersive coefficient κ, as used in the Fickian type equations for dispersion. ∇c is calculated in the function that calls this.
-     *        This will probably have to change per tracer in future.
-     * @param 
-     * @param 
-     * @param 
-     * @param
-     * @return
+     * @brief Dispersive coefficient of a face for the Fickian flux
+     *        J = -(bAvg * |u| * disp) * (c_J - c_I), where disp is the geometric
+     *        dispersivity (DISPERC, as in the blackoil dispersion module), |u| the
+     *        average max-norm filter velocity of the two cells and bAvg the average
+     *        inverse formation volume factor. Zero unless DISPERC is in the deck.
      */
-    template<TracerTypeIdx Index>
     TracerEvaluation
-    computeDispersiveFlux_(const int tracerPhaseIdx,
-                 const ElementContext& elemCtx,
-                 const unsigned scvfIdx,
-                 const unsigned timeIdx) const
+    computeDispersivity_(const int tracerPhaseIdx,
+                         const ElementContext& elemCtx,
+                         const unsigned scvfIdx,
+                         const unsigned timeIdx) const
     {
-        const auto& stencil = elemCtx.stencil(timeIdx);
-        const auto& scvf = stencil.interiorFace(scvfIdx);
-        Scalar v;
-        unsigned upIdx;
-        
-        const auto& extQuants = elemCtx.extensiveQuantities(scvfIdx, timeIdx);
-        const unsigned inIdx = extQuants.interiorIndex();
-        const unsigned outIdx = extQuants.exteriorIndex();
-        upIdx = extQuants.upstreamIndex(tracerPhaseIdx);
-        
+        Scalar flux = 0.0;
         if constexpr (enableDispersion) {
-            const auto& normVelocityAvg = 0.5 * 
-                        (elemCtx.intensiveQuantities(inIdx, timeIdx).normVelocityCell(tracerPhaseIdx) +
-                        elemCtx.intensiveQuantities(outIdx, timeIdx).normVelocityCell(tracerPhaseIdx));
-            if (normVelocityAvg > 0.0 || normVelocityAvg < 0.0){
-                std::cout << "NormVelocityAvg = " << normVelocityAvg << "." << std::endl;
+            if (this->dispersionActive_) {
+                const auto& extQuants = elemCtx.extensiveQuantities(scvfIdx, timeIdx);
+                const unsigned inIdx = extQuants.interiorIndex();
+                const unsigned outIdx = extQuants.exteriorIndex();
+                const auto& inIq = elemCtx.intensiveQuantities(inIdx, timeIdx);
+                const auto& outIq = elemCtx.intensiveQuantities(outIdx, timeIdx);
+
+                const Scalar normVelocityAvg = 0.5 * (inIq.normVelocityCell(tracerPhaseIdx) +
+                                                      outIq.normVelocityCell(tracerPhaseIdx));
+                const Scalar bAvg = 0.5 * (decay<Scalar>(inIq.fluidState().invB(tracerPhaseIdx)) +
+                                           decay<Scalar>(outIq.fluidState().invB(tracerPhaseIdx)));
+                const Scalar dispersivity =
+                    simulator_.problem().dispersivity(elemCtx.globalSpaceIndex(inIdx, timeIdx),
+                                                      elemCtx.globalSpaceIndex(outIdx, timeIdx));
+                flux = bAvg * normVelocityAvg * dispersivity;
             }
-            Scalar dispersivity = 100.0;//extQuants.dispersivity();
-            // if (dispersivity > 0.0 || dispersivity < 0.0){
-            //     std::cout << "Debug point reached: `dispersivity != 0`" << std::endl;
-            // }
-            v = decay<Scalar>(  
-                normVelocityAvg *
-                dispersivity);
         }
-        else {
-            v = 0.0;
-        }
-        
 
-        const Scalar A = scvf.area();
-        return A * v * variable<TracerEvaluation>(1.0, 0);
+        return flux * variable<TracerEvaluation>(1.0, 0);
     }
-
-
 
     template<TracerTypeIdx Index, class TrRe>
     Scalar storage1_(const TrRe& tr,
@@ -516,12 +500,9 @@ protected:
         
         // Geometric diffusivity, scaled by the molecular diffusion coefficient of the tracer batch (TRCDIFF)
         const TracerEvaluation diffusivity_ = computeDiffusivity_(elemCtx, scvfIdx, 0) * tr.diffusionCoefficient_;
-        // computeDispersiveFlux_() provides dispersivity κ(V)
-        const auto& dispersivity_ = computeDispersiveFlux_<Free>(tr.phaseIdx_, elemCtx, scvfIdx, 0);
+        // Dispersive coefficient (DISPERC), zero if dispersion is not active
+        const TracerEvaluation dispersivity_ = computeDispersivity_(tr.phaseIdx_, elemCtx, scvfIdx, 0);
 
-        // Declare variables to be available when setting derivative matrix
-        TracerEvaluation diffusiveFlux_ = 0, dispersiveFlux_ = 0;
-        
         dVol_[Solution][tr.phaseIdx_][I] += sFlux.value() * dt;
         dVol_[Free][tr.phaseIdx_][I] += fFlux.value() * dt;
         const int fGlobalUpIdx = isUpF ? I : J;
@@ -531,25 +512,14 @@ protected:
             tr.residual_[tIdx][I][Free] += fFlux.value()*tr.concentration_[tIdx][fGlobalUpIdx][Free]; // residual + flux
             tr.residual_[tIdx][I][Solution] += sFlux.value()*tr.concentration_[tIdx][sGlobalUpIdx][Solution]; // residual + flux
             
+            // Fickian fluxes J = -(D + D_disp) * grad(c), diffusion and dispersion both
+            // being implicit in the free tracer concentration
+            const Scalar concentrationGradient = tr.concentration_[tIdx][J][Free] - tr.concentration_[tIdx][I][Free];
             if constexpr (enableDiffusion) {
-                Scalar concentrationGradient = (tr.concentration_[tIdx][J][Free] - tr.concentration_[tIdx][I][Free]);
-                // TODO: Divide by distance? Or is 1/Δx included already in earlier code?
-                
-                // This calculates J = -D∇c
-                diffusiveFlux_ = - diffusivity_.value() * concentrationGradient;
-                // std::cout << "Diffusivity is " << diffusivity_.value() << std::endl; -- 2e-9
-                tr.residual_[tIdx][I][Free] += diffusiveFlux_.value(); // residual + flux
-                // Still need to calculate ∂c/∂t = D∇^2 c? Or is that included in the above? Included in extquants.diffusivity().
-                
-                if constexpr (enableDispersion) {
-                    // This calculates J* = -κ(V).∇c
-                    dispersiveFlux_ = -dispersivity_.value() * concentrationGradient;
-                    // if (dispersiveFlux_.value() > 0.0 || dispersiveFlux_.value() < 0.0){
-                        //     std::cout << "Debug point reached: `dispersiveFlux_ != 0`" << std::endl;
-                        // }
-                    std::cout << "Dispersivity is " << dispersivity_.value() << "\n" << std::endl;
-                    tr.residual_[tIdx][I][Free] += dispersiveFlux_.value();// residual + flux
-                }
+                tr.residual_[tIdx][I][Free] -= diffusivity_.value() * concentrationGradient;
+            }
+            if constexpr (enableDispersion) {
+                tr.residual_[tIdx][I][Free] -= dispersivity_.value() * concentrationGradient;
             }
         }
 
@@ -557,29 +527,21 @@ protected:
         if (isUpF){
             (*tr.mat)[J][I][Free][Free] += -fFlux.derivative(0);
             (*tr.mat)[I][I][Free][Free] += fFlux.derivative(0);
-            if constexpr (enableDiffusion) {
-                if constexpr (enableDispersion) {
-                    (*tr.mat)[J][I][Free][Free] -= dispersivity_.derivative(0);
-                    (*tr.mat)[I][I][Free][Free] += dispersivity_.derivative(0);
-                }
-            }
         }
         if (isUpS) {
             (*tr.mat)[J][I][Solution][Solution] += -sFlux.derivative(0);
             (*tr.mat)[I][I][Solution][Solution] += sFlux.derivative(0);
-            if constexpr (enableDiffusion) {
-                if constexpr (enableDispersion) {
-                    (*tr.mat)[J][I][Solution][Solution] -= dispersivity_.derivative(0);
-                    (*tr.mat)[I][I][Solution][Solution] += dispersivity_.derivative(0);
-                }
-            }
         }
 
-        // Diffusion: d(residual_I)/d(c_I) = +D and d(residual_I)/d(c_J) = -D, for every face
-        // irrespective of the flow direction.
+        // Diffusion and dispersion: d(residual_I)/d(c_I) = +D and d(residual_I)/d(c_J) = -D,
+        // for every face irrespective of the flow direction.
         if constexpr (enableDiffusion) {
             (*tr.mat)[I][I][Free][Free] += diffusivity_.derivative(0);
             (*tr.mat)[I][J][Free][Free] -= diffusivity_.derivative(0);
+        }
+        if constexpr (enableDispersion) {
+            (*tr.mat)[I][I][Free][Free] += dispersivity_.derivative(0);
+            (*tr.mat)[I][J][Free][Free] -= dispersivity_.derivative(0);
         }
     }
 
@@ -1299,6 +1261,10 @@ protected:
     }
 
     Simulator& simulator_;
+
+    // True if DISPERC is given in the deck
+    bool dispersionActive_ =
+        simulator_.vanguard().eclState().getSimulationConfig().rock_config().dispersion();
 
     // This struct collects tracers of the same type (i.e, transported in same phase).
     // The idea being that, under the assumption of linearity, tracers of same type can
