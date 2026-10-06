@@ -32,6 +32,8 @@
 #include <opm/common/TimingMacros.hpp>
 
 #include <opm/input/eclipse/EclipseState/Aquifer/AquiferConfig.hpp>
+#include <opm/input/eclipse/Schedule/BCState.hpp>
+#include <opm/input/eclipse/Schedule/Schedule.hpp>
 #include <opm/input/eclipse/Schedule/Well/Well.hpp>
 #include <opm/input/eclipse/Schedule/Well/WellConnections.hpp>
 
@@ -689,6 +691,97 @@ protected:
         }
     }
 
+    /*!
+     * \brief Boundary conditions for the tracer equations.
+     *
+     * The phase rate is taken from the BCPROP rate boundary conditions (via
+     * the problem's boundaryCondition()), and the concentration of the fluid
+     * entering through the face is taken from BCTRACER. As for BCPROP, a
+     * positive rate is a flow out of the domain and a negative rate is a flow
+     * into the domain. Outflow carries the tracer concentration of the cell.
+     */
+    template<class TrRe>
+    void assembleTracerEquationBoundary(TrRe& tr,
+                                        const ElementContext& elemCtx,
+                                        const unsigned I,
+                                        const Scalar dt)
+    {
+        if (tr.numTracer() == 0) {
+            return;
+        }
+
+        const auto& problem = simulator_.problem();
+        if (!problem.nonTrivialBoundaryConditions()) {
+            return;
+        }
+
+        const auto& stencil = elemCtx.stencil(/*timeIdx=*/0);
+        const auto& bcstate = simulator_.vanguard().schedule()[problem.episodeIndex()].bcstate;
+        for (unsigned bfIdx = 0; bfIdx < stencil.numBoundaryFaces(); ++bfIdx) {
+            const auto& bf = stencil.boundaryFace(bfIdx);
+            const int dirId = bf.dirId();
+            if (dirId < 0) { // not for NNCs
+                continue;
+            }
+
+            const int bcIndex = problem.boundaryConditionIndex(I, dirId);
+            if (bcIndex == 0) {
+                continue;
+            }
+
+            const auto [type, massRate] = problem.boundaryCondition(I, dirId);
+            if (type != BCType::RATE) {
+                continue;
+            }
+
+            // BCPROP gives a mass rate per unit area of the BC component. Convert to
+            // the surface volume rate (out of the cell) of the tracer phase.
+            BCComponent phaseComp;
+            int compIdx;
+            if (tr.phaseIdx_ == FluidSystem::waterPhaseIdx) {
+                phaseComp = BCComponent::WATER;
+                compIdx = FluidSystem::waterCompIdx;
+            }
+            else if (tr.phaseIdx_ == FluidSystem::oilPhaseIdx) {
+                phaseComp = BCComponent::OIL;
+                compIdx = FluidSystem::oilCompIdx;
+            }
+            else {
+                phaseComp = BCComponent::GAS;
+                compIdx = FluidSystem::gasCompIdx;
+            }
+
+            const Scalar massRateComp = decay<Scalar>(massRate[FluidSystem::canonicalToActiveCompIdx(compIdx)]);
+            if (massRateComp == Scalar{0}) {
+                continue;
+            }
+
+            const unsigned pvtRegionIdx = problem.pvtRegionIndex(I);
+            const Scalar rateOut = massRateComp * bf.area() /
+                                   FluidSystem::referenceDensity(tr.phaseIdx_, pvtRegionIdx);
+
+            for (int tIdx = 0; tIdx < tr.numTracer(); ++tIdx) {
+                if (rateOut < 0) {
+                    // Inflow: concentration from BCTRACER, no tracer if not specified
+                    const auto bcConc = bcstate.tracerConcentration(bcIndex,
+                                                                    this->name(tr.idx_[tIdx]),
+                                                                    phaseComp);
+                    tr.residual_[tIdx][I][Free] += rateOut * bcConc.value_or(0.0);
+                }
+                else {
+                    // Outflow: tracer leaves with the concentration of the cell
+                    tr.residual_[tIdx][I][Free] += rateOut * tr.concentration_[tIdx][I][Free];
+                }
+            }
+            dVol_[Free][tr.phaseIdx_][I] += rateOut * dt;
+
+            if (rateOut > 0) {
+                // Derivative matrix for outflow
+                (*tr.mat)[I][I][Free][Free] += rateOut * variable<TracerEvaluation>(1.0, 0).derivative(0);
+            }
+        }
+    }
+
     template<class TrRe>
     void assembleTracerEquationSource(TrRe& tr,
                                       const Scalar dt,
@@ -848,6 +941,11 @@ protected:
                             }
                             this->assembleTracerEquationFlux(tr, elemCtx, scvfIdx, I, J, dt);
                         }
+                    }
+
+                    // Boundary conditions (BCCON + BCPROP + BCTRACER)
+                    for (auto& tr : tbatch) {
+                        this->assembleTracerEquationBoundary(tr, elemCtx, I, dt);
                     }
 
                      // Source terms (mass transfer between free and solution tracer)
