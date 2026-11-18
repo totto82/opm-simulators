@@ -213,6 +213,14 @@ public:
 
     void finishInit()
     {
+        const auto& simConfig = this->simulator().vanguard().eclState().getSimulationConfig();
+        if (!simConfig.isEnthalpy() || !simConfig.hasSTEAM()) {
+            throw std::runtime_error("flow_steam requires the ENTHALPY and STEAM keywords in the RUNSPEC section "
+                                     "(and no THERMAL or TEMP).");
+        }
+        if (this->simulator().vanguard().eclState().runspec().phases().active(Phase::OIL)) {
+            throw std::runtime_error("flow_steam does not support the OIL phase.");
+        }
         FlowProblemType::finishInit();
 
         auto& simulator = this->simulator();

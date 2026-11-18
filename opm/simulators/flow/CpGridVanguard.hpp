@@ -137,7 +137,8 @@ public:
         const auto& phases = runspec.phases();
 
         // check for correct module setup
-        if (config.isThermal()) {
+        // ENTHALPY (flow_steam) uses the fully implicit energy module type tag
+        if (config.isThermal() || config.isEnthalpy()) {
             if (getPropValue<TypeTag, Properties::EnergyModuleType>() != EnergyModules::FullyImplicitThermal) {
                 throw std::runtime_error("Input specifies energy while simulator has disabled it, try xxx_energy");
             }

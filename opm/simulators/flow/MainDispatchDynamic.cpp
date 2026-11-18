@@ -85,6 +85,16 @@ int Opm::Main::dispatchDynamic_()
     const bool thermal = eclipseState_->getSimulationConfig().isThermal();
     const bool temp = eclipseState_->getSimulationConfig().isTemp();
 
+    // ENTHALPY/STEAM (enthalpy as primary variable) is only available in flow_steam
+    if (eclipseState_->getSimulationConfig().isEnthalpy() ||
+        eclipseState_->getSimulationConfig().hasSTEAM()) {
+        if (outputCout_) {
+            std::cerr << "The ENTHALPY and STEAM keywords are not supported by this simulator, "
+                      << "use flow_steam.\n";
+        }
+        return EXIT_FAILURE;
+    }
+
     // Single-phase case
     if (rspec.micp()) {
         return this->runMICP(phases);

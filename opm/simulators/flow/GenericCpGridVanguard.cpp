@@ -227,6 +227,7 @@ doLoadBalance_(const Dune::EdgeWeightMethod             edgeWeightsMethod,
                 // in mechanical runs (same reasoning as for thermal runs).
                 const bool useTransToFilterOverlap =
                         !(eclState1.getSimulationConfig().isThermal() ||
+                            eclState1.getSimulationConfig().isEnthalpy() ||
                             eclState1.getSimulationConfig().isTemp() ||
                             eclState1.runspec().mech());
         // Distribute the grid and switch to the distributed view.
