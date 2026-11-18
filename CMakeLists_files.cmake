@@ -490,6 +490,7 @@ list (APPEND TEST_SOURCE_FILES
   tests/test_compequil.cpp
   tests/test_compequil_solvd.cpp
   tests/test_compositional_cpr_weights.cpp
+  tests/test_enthalpynewtonlimits.cpp
   tests/test_compositionalcontainer.cpp
   tests/test_compwell_bhp_limit.cpp
   tests/test_compwell_connection_pressure.cpp
@@ -890,6 +891,8 @@ list (APPEND PUBLIC_HEADER_FILES
   opm/models/common/diffusionmodule.hh
   opm/models/common/directionalmobility.hh
   opm/models/common/energymodule.hh
+  opm/models/common/enthalpyenergyterms.hh
+  opm/models/common/enthalpynewtonlimits.hh
   opm/models/common/flux.hh
   opm/models/common/forchheimerfluxmodule.hh
   opm/models/common/multiphasebaseextensivequantities.hh

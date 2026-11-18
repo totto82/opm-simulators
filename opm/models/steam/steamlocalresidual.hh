@@ -21,6 +21,7 @@
 /*!
  * \file
  * \brief Local residual of the steam model: mass of water and energy.
+ *        The energy terms are the shared ones of Opm::EnthalpyEnergyTerms.
  *
  *   d/dt [ phi sum_a S_a rho_a ]                   + div(sum_a rho_a v_a) = q_m
  *   d/dt [ phi sum_a S_a rho_a u_a + (1-phi) u_R ] + div(sum_a rho_a h_a v_a - lambda grad T) = q_e
@@ -31,14 +32,10 @@
 #include <opm/material/common/MathToolbox.hpp>
 #include <opm/material/common/Valgrind.hpp>
 
+#include <opm/models/common/enthalpyenergyterms.hh>
 #include <opm/models/steam/steamindices.hh>
 
 namespace Opm {
-
-namespace Parameters {
-//! Scaling of the energy equation so that its residual is of the order of the mass residual
-struct SteamEnergyScaling { static constexpr double value = 1.0e-6; };
-}
 
 template <class TypeTag>
 class SteamLocalResidual : public GetPropType<TypeTag, Properties::DiscLocalResidual>
@@ -50,6 +47,7 @@ class SteamLocalResidual : public GetPropType<TypeTag, Properties::DiscLocalResi
     using IntensiveQuantities = GetPropType<TypeTag, Properties::IntensiveQuantities>;
     using ElementContext = GetPropType<TypeTag, Properties::ElementContext>;
     using FluidSystem = GetPropType<TypeTag, Properties::FluidSystem>;
+    using EnergyTerms = EnthalpyEnergyTerms<TypeTag>;
 
     enum { numEq = getPropValue<TypeTag, Properties::NumEq>() };
     enum { numPhases = getPropValue<TypeTag, Properties::NumPhases>() };
@@ -57,8 +55,6 @@ class SteamLocalResidual : public GetPropType<TypeTag, Properties::DiscLocalResi
     enum { contiEnergyEqIdx = Indices::contiEnergyEqIdx };
 
     using Toolbox = MathToolbox<Evaluation>;
-
-    static constexpr Scalar energyScale() { return Parameters::SteamEnergyScaling::value; }
 
 public:
     template <class LhsEval>
@@ -78,16 +74,9 @@ public:
             }
             const LhsEval rho = Toolbox::template decay<LhsEval>(fs.density(phaseIdx));
             const LhsEval S = Toolbox::template decay<LhsEval>(fs.saturation(phaseIdx));
-            const LhsEval h = Toolbox::template decay<LhsEval>(fs.enthalpy(phaseIdx));
-            const LhsEval p = Toolbox::template decay<LhsEval>(fs.pressure(phaseIdx));
-            // internal energy u = h - p/rho
-            const LhsEval u = h - p / rho;
             storage[conti0EqIdx] += poro * S * rho;
-            storage[contiEnergyEqIdx] += poro * S * rho * u;
         }
-        storage[contiEnergyEqIdx] +=
-            iq.rockFraction() * Toolbox::template decay<LhsEval>(iq.rockInternalEnergy());
-        storage[contiEnergyEqIdx] *= energyScale();
+        EnergyTerms::template addStorage<LhsEval>(storage, iq, contiEnergyEqIdx);
     }
 
     void computeFlux(RateVector& flux,
@@ -96,15 +85,16 @@ public:
                      unsigned timeIdx) const
     {
         flux = 0.0;
-        addAdvectiveFlux(flux, elemCtx, scvfIdx, timeIdx);
-        addConductiveFlux(flux, elemCtx, scvfIdx, timeIdx);
+        addAdvectiveMassFlux(flux, elemCtx, scvfIdx, timeIdx);
+        EnergyTerms::addAdvectiveFlux(flux, elemCtx, scvfIdx, timeIdx, contiEnergyEqIdx);
+        EnergyTerms::addConductiveFlux(flux, elemCtx, scvfIdx, timeIdx, contiEnergyEqIdx);
         Valgrind::CheckDefined(flux);
     }
 
-    void addAdvectiveFlux(RateVector& flux,
-                          const ElementContext& elemCtx,
-                          unsigned scvfIdx,
-                          unsigned timeIdx) const
+    void addAdvectiveMassFlux(RateVector& flux,
+                              const ElementContext& elemCtx,
+                              unsigned scvfIdx,
+                              unsigned timeIdx) const
     {
         const auto& extQuants = elemCtx.extensiveQuantities(scvfIdx, timeIdx);
         const unsigned focusDofIdx = elemCtx.focusDofIndex();
@@ -113,50 +103,13 @@ public:
                 continue;
             }
             const auto upIdx = static_cast<unsigned>(extQuants.upstreamIndex(phaseIdx));
-            const IntensiveQuantities& up = elemCtx.intensiveQuantities(upIdx, timeIdx);
-            const auto& fs = up.fluidState();
+            const auto& fs = elemCtx.intensiveQuantities(upIdx, timeIdx).fluidState();
             if (upIdx == focusDofIdx) {
-                const Evaluation massFlux = fs.density(phaseIdx) * extQuants.volumeFlux(phaseIdx);
-                flux[conti0EqIdx] += massFlux;
-                flux[contiEnergyEqIdx] += fs.enthalpy(phaseIdx) * massFlux;
+                flux[conti0EqIdx] += fs.density(phaseIdx) * extQuants.volumeFlux(phaseIdx);
             }
             else {
-                const Evaluation massFlux = Toolbox::value(fs.density(phaseIdx)) * extQuants.volumeFlux(phaseIdx);
-                flux[conti0EqIdx] += massFlux;
-                flux[contiEnergyEqIdx] += Toolbox::value(fs.enthalpy(phaseIdx)) * massFlux;
+                flux[conti0EqIdx] += Toolbox::value(fs.density(phaseIdx)) * extQuants.volumeFlux(phaseIdx);
             }
-        }
-        flux[contiEnergyEqIdx] *= energyScale();
-    }
-
-    //! Heat conduction with the thermal half transmissibilities of the problem
-    void addConductiveFlux(RateVector& flux,
-                           const ElementContext& elemCtx,
-                           unsigned scvfIdx,
-                           unsigned timeIdx) const
-    {
-        const auto& stencil = elemCtx.stencil(timeIdx);
-        const auto& scvf = stencil.interiorFace(scvfIdx);
-        const unsigned inIdx = scvf.interiorIndex();
-        const unsigned exIdx = scvf.exteriorIndex();
-        const unsigned focusIdx = elemCtx.focusDofIndex();
-        const auto& inIq = elemCtx.intensiveQuantities(inIdx, timeIdx);
-        const auto& exIq = elemCtx.intensiveQuantities(exIdx, timeIdx);
-
-        const Scalar inAlpha = elemCtx.problem().thermalHalfTransmissibilityIn(elemCtx, scvfIdx, timeIdx);
-        const Scalar outAlpha = elemCtx.problem().thermalHalfTransmissibilityOut(elemCtx, scvfIdx, timeIdx);
-
-        const auto pick = [&](unsigned idx, const Evaluation& e) {
-            return idx == focusIdx ? e : Evaluation(Toolbox::value(e));
-        };
-        const Evaluation Tin = pick(inIdx, inIq.fluidState().temperature(0));
-        const Evaluation Tex = pick(exIdx, exIq.fluidState().temperature(0));
-        const Evaluation inH = pick(inIdx, inIq.totalThermalConductivity()) * inAlpha;
-        const Evaluation exH = pick(exIdx, exIq.totalThermalConductivity()) * outAlpha;
-
-        if (inH > 0 && exH > 0) {
-            const Evaluation H = 1.0 / (1.0 / inH + 1.0 / exH);
-            flux[contiEnergyEqIdx] += -(Tex - Tin) * H / scvf.area() * energyScale();
         }
     }
 

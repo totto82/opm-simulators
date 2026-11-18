@@ -25,6 +25,7 @@
 #ifndef OPM_FLOW_PROBLEM_STEAM_HPP
 #define OPM_FLOW_PROBLEM_STEAM_HPP
 
+#include <opm/models/common/enthalpyenergyterms.hh>
 #include <opm/models/steam/steamlocalresidual.hh>
 #include <opm/simulators/flow/FlowProblem.hpp>
 #include <opm/simulators/flow/OutputSteamModule.hpp>
@@ -361,7 +362,7 @@ public:
         const Evaluation mg = fs.saturation(gasPhaseIdx) * fs.density(gasPhaseIdx);
         const Evaluation hMix = (ml * fs.enthalpy(waterPhaseIdx) + mg * fs.enthalpy(gasPhaseIdx)) / (ml + mg);
 
-        constexpr Scalar energyScale = Parameters::SteamEnergyScaling::value;
+        constexpr Scalar energyScale = Parameters::EnthalpyEnergyScaling::value;
 
         for (const auto& [comp, isSteam] : {std::pair{SourceComponent::WATER, false},
                                             std::pair{SourceComponent::GAS, true}}) {
