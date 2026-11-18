@@ -28,6 +28,7 @@
 #include <opm/material/fluidsystems/BlackOilDefaultFluidSystemIndices.hpp>
 #include <opm/material/fluidsystems/BlackOilFluidSystem.hpp>
 #include <opm/material/fluidsystems/GenericOilGasWaterFluidSystem.hpp>
+#include <opm/material/fluidsystems/SteamFluidSystem.hpp>
 
 #include <opm/output/data/Solution.hpp>
 
@@ -153,5 +154,7 @@ INSTANTIATE_COMP(7)
 INSTANTIATE_COMP(8)
 INSTANTIATE_COMP(9)
 INSTANTIATE_COMP(10)
+
+template class TracerContainer<SteamFluidSystem<double>>;
 
 } // namespace Opm

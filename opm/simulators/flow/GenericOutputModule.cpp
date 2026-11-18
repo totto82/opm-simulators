@@ -32,6 +32,7 @@
 #include <opm/material/fluidsystems/BlackOilFluidSystem.hpp>
 #include <opm/material/fluidsystems/BlackOilDefaultFluidSystemIndices.hpp>
 #include <opm/material/fluidsystems/GenericOilGasWaterFluidSystem.hpp>
+#include <opm/material/fluidsystems/SteamFluidSystem.hpp>
 
 #include <opm/input/eclipse/EclipseState/EclipseState.hpp>
 #include <opm/input/eclipse/EclipseState/Runspec.hpp>
@@ -112,6 +113,21 @@ namespace {
     //!          BlackoilFluidSystem order.
     template<class Scalar, int NumComp, bool enableWater>
     struct PhaseReorder<Opm::GenericOilGasWaterFluidSystem<Scalar,NumComp,enableWater>>
+    {
+        int operator()(const int phase)
+        {
+            switch (phase) {
+            case 0: return 1;
+            case 1: return 2;
+            default: return 0;
+            }
+        }
+    };
+
+    //! \brief The steam fluid system has the phase order of the generic
+    //!        oil-gas-water system (oil, gas, water).
+    template<class Scalar>
+    struct PhaseReorder<Opm::SteamFluidSystem<Scalar>>
     {
         int operator()(const int phase)
         {
@@ -1362,5 +1378,7 @@ INSTANTIATE_COMP(7)
 INSTANTIATE_COMP(8)
 INSTANTIATE_COMP(9)
 INSTANTIATE_COMP(10)
+
+template class GenericOutputModule<SteamFluidSystem<double>>;
 
 } // namespace Opm

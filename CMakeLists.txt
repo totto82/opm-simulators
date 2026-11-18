@@ -1020,6 +1020,18 @@ macro(opm-simulators_targets_hook)
       OPM_COMPILE_COMPONENTS_TEMPLATE_LIST=${OPM_COMPILE_COMPONENTS_TEMPLATE_LIST}
   )
 
+  # pure water, liquid and steam, with pressure and enthalpy as primary variables
+  opm_add_executable(
+    TARGET
+      flow_steam
+    SOURCES
+      flowexperimental/steam/flow_steam.cpp
+      $<TARGET_OBJECTS:moduleVersion>
+    LIBRARIES
+      opmsimulators
+    EXCLUDE_FROM_ALL
+  )
+
   opm_add_executable(
     TARGET
       flow_comp2_2p
