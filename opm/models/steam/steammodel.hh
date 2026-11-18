@@ -40,6 +40,9 @@
 
 #include <opm/models/steam/steamindices.hh>
 #include <opm/models/steam/steamintensivequantities.hh>
+#include <opm/material/constraintsolvers/SteamPressureEnthalpyProvider.hpp>
+
+#include <opm/models/common/enthalpyproperties.hh>
 #include <opm/models/steam/steamlocalresidual.hh>
 #include <opm/models/steam/steamnewtonmethod.hh>
 #include <opm/models/steam/steamprimaryvariables.hh>
@@ -83,6 +86,11 @@ struct RateVector<TypeTag, TTag::SteamModel>
 template<class TypeTag>
 struct BoundaryRateVector<TypeTag, TTag::SteamModel>
 { using type = SteamBoundaryRateVector<TypeTag>; };
+
+// raw IAPWS steam tables; a tabulated provider can be set in a derived type tag
+template<class TypeTag>
+struct PressureEnthalpyProvider<TypeTag, TTag::SteamModel>
+{ using type = SteamPressureEnthalpyProvider<GetPropType<TypeTag, Properties::Scalar>>; };
 
 template<class TypeTag>
 struct IntensiveQuantities<TypeTag, TTag::SteamModel>

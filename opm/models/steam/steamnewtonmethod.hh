@@ -25,9 +25,8 @@
 #ifndef OPM_STEAM_NEWTON_METHOD_HH
 #define OPM_STEAM_NEWTON_METHOD_HH
 
-#include <opm/material/constraintsolvers/WaterPHFlash.hpp>
-
 #include <opm/models/common/enthalpynewtonlimits.hh>
+#include <opm/models/common/enthalpyproperties.hh>
 #include <opm/models/nonlinear/newtonmethod.hh>
 
 #include <algorithm>
@@ -51,7 +50,7 @@ class SteamNewtonMethod : public GetPropType<TypeTag, Properties::DiscNewtonMeth
     using Simulator = GetPropType<TypeTag, Properties::Simulator>;
     using Scalar = GetPropType<TypeTag, Properties::Scalar>;
     using Indices = GetPropType<TypeTag, Properties::Indices>;
-    using Flash = WaterPHFlash<Scalar>;
+    using Provider = GetPropType<TypeTag, Properties::PressureEnthalpyProvider>;
 
 public:
     explicit SteamNewtonMethod(Simulator& simulator) : ParentType(simulator) {}
@@ -72,36 +71,10 @@ protected:
 
         Scalar p = nextValue[Indices::pressure0Idx];
         Scalar h = nextValue[Indices::enthalpy0Idx];
-        limitPressureEnthalpyStep(old[Indices::pressure0Idx], old[Indices::enthalpy0Idx], p, h, WaterLimits{});
+        limitPressureEnthalpyStep(old[Indices::pressure0Idx], old[Indices::enthalpy0Idx], p, h, Provider{});
         nextValue[Indices::pressure0Idx] = p;
         nextValue[Indices::enthalpy0Idx] = h;
     }
-
-    //! Validity range and phase regions of pure water from the steam tables
-    struct WaterLimits
-    {
-        Scalar minPressure() const { return Flash::minPressure(); }
-        Scalar maxPressure() const { return Flash::maxPressure(); }
-        Scalar minEnthalpy(Scalar p) const { return Flash::minEnthalpy(p); }
-        Scalar maxEnthalpy(Scalar p) const { return Flash::maxEnthalpy(p); }
-
-        // a step is limited to a fraction of the latent heat, so a cell cannot
-        // jump across the whole two-phase region in one iteration
-        Scalar maxEnthalpyStep(Scalar p) const
-        {
-            constexpr Scalar maxLatentFraction = 0.25;
-            return maxLatentFraction * (Flash::saturatedVaporEnthalpy(p) - Flash::saturatedLiquidEnthalpy(p));
-        }
-
-        // 0: liquid, 1: two-phase, 2: vapour
-        int region(Scalar p, Scalar h) const
-        {
-            if (h <= Flash::saturatedLiquidEnthalpy(p)) {
-                return 0;
-            }
-            return h >= Flash::saturatedVaporEnthalpy(p) ? 2 : 1;
-        }
-    };
 };
 
 } // namespace Opm

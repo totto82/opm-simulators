@@ -892,6 +892,7 @@ list (APPEND PUBLIC_HEADER_FILES
   opm/models/common/directionalmobility.hh
   opm/models/common/energymodule.hh
   opm/models/common/enthalpyenergyterms.hh
+  opm/models/common/enthalpyproperties.hh
   opm/models/common/enthalpynewtonlimits.hh
   opm/models/common/flux.hh
   opm/models/common/forchheimerfluxmodule.hh

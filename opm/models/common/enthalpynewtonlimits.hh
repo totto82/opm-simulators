@@ -31,7 +31,8 @@
  * over the boundary.
  *
  * What is specific to the fluid description is supplied by a policy
- * (see Opm::PressureEnthalpyLimitsPolicy): the validity range, the largest
+ * (see Opm::PressureEnthalpyLimitsPolicy in opm-common, which every
+ * pressure-enthalpy provider satisfies): the validity range, the largest
  * enthalpy step and an identifier of the phase region of a (p,h) point.
  * For pure water the policy is built from the steam tables (saturated liquid
  * and vapour enthalpies); for a mixture the region would be the number of
@@ -40,23 +41,11 @@
 #ifndef OPM_ENTHALPY_NEWTON_LIMITS_HH
 #define OPM_ENTHALPY_NEWTON_LIMITS_HH
 
+#include <opm/material/constraintsolvers/PressureEnthalpyProvider.hpp>
+
 #include <algorithm>
-#include <concepts>
 
 namespace Opm {
-
-template <class Policy, class Scalar>
-concept PressureEnthalpyLimitsPolicy = requires(const Policy& policy, Scalar p, Scalar h) {
-    { policy.minPressure() } -> std::convertible_to<Scalar>;
-    { policy.maxPressure() } -> std::convertible_to<Scalar>;
-    //! lowest/highest enthalpy of the validity range at pressure p
-    { policy.minEnthalpy(p) } -> std::convertible_to<Scalar>;
-    { policy.maxEnthalpy(p) } -> std::convertible_to<Scalar>;
-    //! largest allowed enthalpy change in one iteration at pressure p
-    { policy.maxEnthalpyStep(p) } -> std::convertible_to<Scalar>;
-    //! identifier of the phase region of (p,h); a change of the value means a phase boundary was crossed
-    { policy.region(p, h) } -> std::convertible_to<int>;
-};
 
 /*!
  * \brief Limits the update (p0,h0) -> (p,h); the result is returned in p and h.

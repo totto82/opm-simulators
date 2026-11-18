@@ -22,7 +22,7 @@
  * \file
  * \brief Intensive quantities of the steam model.
  *
- * (p, h) are the primary variables. WaterPHFlash turns them into the
+ * (p, h) are the primary variables. the pressure-enthalpy provider turns them into the
  * temperature, the steam saturation and the phase properties, so T and S_g
  * are secondary variables with correct derivatives wrt (p, h).
  */
@@ -34,10 +34,9 @@
 #include <opm/input/eclipse/EclipseState/Grid/FaceDir.hpp>
 
 #include <opm/material/common/Valgrind.hpp>
-#include <opm/material/components/H2O.hpp>
-#include <opm/material/constraintsolvers/WaterPHFlash.hpp>
 #include <opm/material/fluidstates/SimpleModularFluidState.hpp>
 
+#include <opm/models/common/enthalpyproperties.hh>
 #include <opm/models/steam/steamindices.hh>
 
 #include <array>
@@ -63,14 +62,12 @@ class SteamIntensiveQuantities
     using SolidEnergyLaw = GetPropType<TypeTag, Properties::SolidEnergyLaw>;
     using ThermalConductionLaw = GetPropType<TypeTag, Properties::ThermalConductionLaw>;
     using FluxIntensiveQuantities = typename FluxModule::FluxIntensiveQuantities;
-    using Flash = WaterPHFlash<Scalar>;
-    using Water = H2O<Scalar>;
+    using Provider = GetPropType<TypeTag, Properties::PressureEnthalpyProvider>;
 
     enum { numPhases = getPropValue<TypeTag, Properties::NumPhases>() };
     enum { dimWorld = GridView::dimensionworld };
     enum { waterPhaseIdx = FluidSystem::waterPhaseIdx };
     enum { gasPhaseIdx = FluidSystem::gasPhaseIdx };
-    enum { oilPhaseIdx = FluidSystem::oilPhaseIdx };
 
     using DimMatrix = Dune::FieldMatrix<Scalar, dimWorld, dimWorld>;
 
@@ -111,23 +108,15 @@ public:
         const Evaluation p = priVars.makeEvaluation(Indices::pressure0Idx, timeIdx);
         const Evaluation h = priVars.makeEvaluation(Indices::enthalpy0Idx, timeIdx);
 
-        // p-h flash: temperature, steam quality/saturation and phase properties
-        const auto st = Flash::solve(p, h);
-        region_ = st.region;
-        steamQuality_ = st.steamQuality;
-
-        // phases that are absent are evaluated on the saturation line
-        const Evaluation& Tsat = st.saturationTemperature;
-        const Evaluation Tl = st.region == WaterRegion::Vapor ? Tsat : st.temperature;
-        const Evaluation Tg = st.region == WaterRegion::Liquid ? Tsat : st.temperature;
+        // p-h flash of the provider: temperature, saturations and phase properties
+        const auto st = Provider::solve(p, h);
+        regionId_ = st.regionId();
 
         for (unsigned phaseIdx = 0; phaseIdx < numPhases; ++phaseIdx) {
-            fluidState_.setSaturation(phaseIdx, Evaluation(0.0));
+            fluidState_.setSaturation(phaseIdx, st.saturation(phaseIdx));
             fluidState_.setPressure(phaseIdx, p);
-            fluidState_.setTemperature(phaseIdx, st.temperature);
+            fluidState_.setTemperature(phaseIdx, st.temperature());
         }
-        fluidState_.setSaturation(gasPhaseIdx, st.steamSaturation);
-        fluidState_.setSaturation(waterPhaseIdx, 1.0 - st.steamSaturation);
 
         // capillary pressure: the primary pressure is the liquid pressure
         const MaterialLawParams& materialParams = problem.materialLawParams(elemCtx, dofIdx, timeIdx);
@@ -140,25 +129,19 @@ public:
         }
 
         // phase properties
-        fluidState_.setDensity(waterPhaseIdx, st.liquidDensity);
-        fluidState_.setDensity(gasPhaseIdx, st.vaporDensity);
-        fluidState_.setEnthalpy(waterPhaseIdx, st.liquidEnthalpy);
-        fluidState_.setEnthalpy(gasPhaseIdx, st.vaporEnthalpy);
-        // inactive oil slot: keep the state defined
-        fluidState_.setDensity(oilPhaseIdx, st.liquidDensity);
-        fluidState_.setEnthalpy(oilPhaseIdx, st.liquidEnthalpy);
-
-        const Evaluation muL = Water::liquidViscosity(Tl, p);
-        const Evaluation muG = Water::gasViscosity(Tg, p);
-        fluidState_.setViscosity(waterPhaseIdx, muL);
-        fluidState_.setViscosity(gasPhaseIdx, muG);
-        fluidState_.setViscosity(oilPhaseIdx, muL);
+        for (unsigned phaseIdx = 0; phaseIdx < numPhases; ++phaseIdx) {
+            fluidState_.setDensity(phaseIdx, st.density(phaseIdx));
+            fluidState_.setEnthalpy(phaseIdx, st.enthalpy(phaseIdx));
+            fluidState_.setViscosity(phaseIdx, st.viscosity(phaseIdx));
+        }
 
         // relative permeabilities and mobilities
         MaterialLaw::relativePermeabilities(relativePermeability_, materialParams, fluidState_);
-        mobility_[oilPhaseIdx] = 0.0;
-        mobility_[waterPhaseIdx] = relativePermeability_[waterPhaseIdx] / muL;
-        mobility_[gasPhaseIdx] = relativePermeability_[gasPhaseIdx] / muG;
+        for (unsigned phaseIdx = 0; phaseIdx < numPhases; ++phaseIdx) {
+            mobility_[phaseIdx] = FluidSystem::phaseIsActive(phaseIdx)
+                ? relativePermeability_[phaseIdx] / st.viscosity(phaseIdx)
+                : Evaluation(0.0);
+        }
 
         // porosity, scaled with pressure by the rock compressibility
         porosity_ = problem.porosity(elemCtx, dofIdx, timeIdx);
@@ -182,8 +165,8 @@ public:
     }
 
     const FluidState& fluidState() const { return fluidState_; }
-    WaterRegion region() const { return region_; }
-    const Evaluation& steamQuality() const { return steamQuality_; }
+    //! id of the phase region of the provider
+    int regionId() const { return regionId_; }
 
     const DimMatrix& intrinsicPermeability() const { return intrinsicPerm_; }
     const Evaluation& relativePermeability(unsigned phaseIdx) const { return relativePermeability_[phaseIdx]; }
@@ -204,8 +187,7 @@ public:
     { return FluidSystem::phaseIsActive(phaseIdx) ? getValue(fluidState_.saturation(phaseIdx)) : Scalar{0}; }
 
 private:
-    WaterRegion region_{WaterRegion::Liquid};
-    Evaluation steamQuality_;
+    int regionId_{0};
     DimMatrix intrinsicPerm_;
     FluidState fluidState_;
     Evaluation porosity_;

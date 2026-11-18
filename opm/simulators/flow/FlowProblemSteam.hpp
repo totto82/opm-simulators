@@ -26,6 +26,7 @@
 #define OPM_FLOW_PROBLEM_STEAM_HPP
 
 #include <opm/models/common/enthalpyenergyterms.hh>
+#include <opm/models/common/enthalpyproperties.hh>
 #include <opm/models/steam/steamlocalresidual.hh>
 #include <opm/simulators/flow/FlowProblem.hpp>
 #include <opm/simulators/flow/OutputSteamModule.hpp>
@@ -33,8 +34,6 @@
 #include <opm/simulators/linalg/FlowLinearSolverParameters.hpp>
 #include <opm/simulators/utils/DeferredLoggingErrorHelpers.hpp>
 
-#include <opm/material/components/H2O.hpp>
-#include <opm/material/constraintsolvers/WaterPHFlash.hpp>
 #include <opm/material/fluidmatrixinteractions/EclMaterialLawManager.hpp>
 #include <opm/material/fluidstates/SimpleModularFluidState.hpp>
 #include <opm/material/thermal/EclThermalLawManager.hpp>
@@ -178,8 +177,7 @@ class FlowProblemSteam : public FlowProblem<TypeTag>
     using typename FlowProblemType::MaterialLaw;
     using typename FlowProblemType::RateVector;
 
-    using Flash = WaterPHFlash<Scalar>;
-    using Water = H2O<Scalar>;
+    using Provider = GetPropType<TypeTag, Properties::PressureEnthalpyProvider>;
     using EclWriterType = EclWriter<TypeTag, OutputSteamModule<TypeTag>>;
 
     // pressure, temperature and saturations of the initial state of a cell
@@ -381,15 +379,7 @@ public:
             }
             else {
                 const Scalar T = source.temperature(ijk, comp).value_or(getValue(fs.temperature(0)));
-                const Evaluation Tsat = Flash::saturationTemperature(p);
-                if (isSteam) {
-                    const Evaluation Tinj = max(Evaluation(T), Tsat);
-                    energyRate = massRate * Water::gasEnthalpy(Tinj, p);
-                }
-                else {
-                    const Evaluation Tinj = min(Evaluation(T), Tsat);
-                    energyRate = massRate * Water::liquidEnthalpy(Tinj, p);
-                }
+                energyRate = massRate * Provider::injectionEnthalpy(isSteam ? gasPhaseIdx : waterPhaseIdx, p, Evaluation(T));
             }
             rate[Indices::contiEnergyEqIdx] += energyRate * energyScale;
         }
@@ -460,50 +450,24 @@ protected:
             const Scalar p = pressure[dofIdx];
             const Scalar T = temperature[dofIdx];
             const Scalar Sg = sgas ? (*sgas)[dofIdx] : 0.0;
-            if (!(p >= Flash::minPressure() && p <= Flash::maxPressure())) {
-                throw std::invalid_argument(fmt::format("Pressure {} Pa in {} is outside the steam "
-                                                        "table range", p, cell));
-            }
-
-            const Scalar Tsat = Flash::saturationTemperature(p);
-            const Scalar hl = Flash::saturatedLiquidEnthalpy(p);
-            const Scalar hg = Flash::saturatedVaporEnthalpy(p);
-
             Scalar h;
-            if (Sg > 0.0 && Sg < 1.0) {
-                // two-phase: steam mass fraction from the saturation
-                const Scalar rhoL = Water::liquidDensity(Tsat, p);
-                const Scalar rhoG = Water::gasDensity(Tsat, p);
-                const Scalar x = Sg * rhoG / (Sg * rhoG + (1.0 - Sg) * rhoL);
-                h = hl + x * (hg - hl);
+            try {
+                h = Provider::initialEnthalpy(p, T, Sg);
             }
-            else if (Sg >= 1.0) {
-                if (T < Tsat) {
-                    throw std::invalid_argument(fmt::format("SGAS=1 but TEMPI {} K is below the saturation "
-                                                            "temperature {} K in {}", T, Tsat, cell));
-                }
-                h = Water::gasEnthalpy(T, p);
-            }
-            else {
-                if (T > Tsat) {
-                    throw std::invalid_argument(fmt::format("SGAS=0 but TEMPI {} K is above the saturation "
-                                                            "temperature {} K in {}: give SGAS=1 for steam",
-                                                            T, Tsat, cell));
-                }
-                h = Water::liquidEnthalpy(T, p);
+            catch (const std::invalid_argument& e) {
+                throw std::invalid_argument(fmt::format("{} in {}", e.what(), cell));
             }
             initialPressure_[dofIdx] = p;
             initialEnthalpy_[dofIdx] = h;
 
+            // secondary variables of the initial state
+            const auto st = Provider::solve(Evaluation(p), Evaluation(h));
             auto& ifs = initialFluidStates_[dofIdx];
-            const Scalar sg = (h > hl && h < hg) ? Sg : (h >= hg ? 1.0 : 0.0);
             for (unsigned phaseIdx = 0; phaseIdx < numPhases; ++phaseIdx) {
                 ifs.setPressure(phaseIdx, p);
-                ifs.setTemperature(phaseIdx, h > hl && h < hg ? Tsat : T);
-                ifs.setSaturation(phaseIdx, 0.0);
+                ifs.setTemperature(phaseIdx, getValue(st.temperature()));
+                ifs.setSaturation(phaseIdx, getValue(st.saturation(phaseIdx)));
             }
-            ifs.setSaturation(gasPhaseIdx, sg);
-            ifs.setSaturation(waterPhaseIdx, 1.0 - sg);
         }
     }
 
