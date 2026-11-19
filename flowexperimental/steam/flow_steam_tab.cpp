@@ -17,6 +17,7 @@
 
   You should have received a copy of the GNU General Public License
   along with OPM.  If not, see <http://www.gnu.org/licenses/>.
+*/
 /*!
  * \file
  * \brief flow_steam with the tabulated steam provider instead of the raw IAPWS flash.
