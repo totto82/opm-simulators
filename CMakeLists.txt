@@ -1045,6 +1045,17 @@ macro(opm-simulators_targets_hook)
 
   opm_add_executable(
     TARGET
+      flow_co2store
+    SOURCES
+      flowexperimental/co2store/flow_co2store.cpp
+      $<TARGET_OBJECTS:moduleVersion>
+    LIBRARIES
+      opmsimulators
+    EXCLUDE_FROM_ALL
+  )
+
+  opm_add_executable(
+    TARGET
       flow_comp2_2p
     SOURCES
       flowexperimental/comp/flow_comp2_2p.cpp

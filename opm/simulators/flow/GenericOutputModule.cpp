@@ -32,6 +32,7 @@
 #include <opm/material/fluidsystems/BlackOilFluidSystem.hpp>
 #include <opm/material/fluidsystems/BlackOilDefaultFluidSystemIndices.hpp>
 #include <opm/material/fluidsystems/GenericOilGasWaterFluidSystem.hpp>
+#include <opm/material/fluidsystems/Co2StoreFluidSystem.hpp>
 #include <opm/material/fluidsystems/SteamFluidSystem.hpp>
 
 #include <opm/input/eclipse/EclipseState/EclipseState.hpp>
@@ -128,6 +129,20 @@ namespace {
     //!        oil-gas-water system (oil, gas, water).
     template<class Scalar>
     struct PhaseReorder<Opm::SteamFluidSystem<Scalar>>
+    {
+        int operator()(const int phase)
+        {
+            switch (phase) {
+            case 0: return 1;
+            case 1: return 2;
+            default: return 0;
+            }
+        }
+    };
+
+    //! \brief The CO2 storage fluid system has the same phase order (oil = liquid CO2, gas, water).
+    template<class Scalar>
+    struct PhaseReorder<Opm::Co2StoreFluidSystem<Scalar>>
     {
         int operator()(const int phase)
         {
@@ -1380,5 +1395,6 @@ INSTANTIATE_COMP(9)
 INSTANTIATE_COMP(10)
 
 template class GenericOutputModule<SteamFluidSystem<double>>;
+template class GenericOutputModule<Co2StoreFluidSystem<double>>;
 
 } // namespace Opm
