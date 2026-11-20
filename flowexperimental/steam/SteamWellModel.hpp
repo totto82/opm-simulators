@@ -180,7 +180,26 @@ public:
             const auto& well = wellData_[w];
             const auto& conn = well.connections[c];
             // the pressure of the well fluid follows the cell pressure with the sensitivity of the well solution
-            const Evaluation pWell = conn.wellPressure + conn.sensitivity * (p - conn.cellPressure);
+            Evaluation pWell = conn.wellPressure + conn.sensitivity * (p - conn.cellPressure);
+            // the coefficient and the enthalpy of what flows (with the derivatives of the cell) decide the wellbore solution
+            Evaluation coefficient = 0.0;
+            if (well.injector) {
+                coefficient = conn.wellIndex * (iq.mobility(waterPhaseIdx) + iq.mobility(gasPhaseIdx));
+            }
+            else {
+                Evaluation hSum = 0.0;
+                for (const unsigned phaseIdx : {waterPhaseIdx, gasPhaseIdx}) {
+                    const Evaluation c_a = conn.wellIndex * fs.density(phaseIdx) * iq.mobility(phaseIdx);
+                    coefficient += c_a;
+                    hSum += c_a * fs.enthalpy(phaseIdx);
+                }
+                if (conn.enthalpySensitivity != 0.0 && coefficient > 0.0) {
+                    pWell += conn.enthalpySensitivity * (hSum / coefficient - conn.inflowEnthalpy);
+                }
+            }
+            if (conn.coefficientSensitivity != 0.0) {
+                pWell += conn.coefficientSensitivity * (coefficient - conn.coefficient);
+            }
             if (well.injector) {
                 const Evaluation dp = pWell - p;
                 if (!(dp > 0.0)) {
@@ -270,6 +289,14 @@ private:
         //! d(wellPressure)/d(cell pressure) of this connection: 1 for a well with a rate control (its pressure
         //! follows the cell), about 0 for a producer with a pressure control
         Scalar sensitivity{0};
+        //! d(wellPressure)/d(cell enthalpy) of a producer: the enthalpy of the produced fluid decides how much it flashes
+        //! in the wellbore and so how heavy the column is
+        Scalar enthalpySensitivity{0};
+        //! the inflow (producer) or outflow (injector) coefficient of the connection when the well was solved, and the
+        //! sensitivity of the pressure of the well fluid to it: the mobilities of the cell change with its state
+        Scalar coefficient{0};
+        Scalar coefficientSensitivity{0};
+        Scalar inflowEnthalpy{0};     //!< producer: enthalpy of the inflow when the well was solved
         Scalar wellDensity{0};        //!< injector: density of the well fluid at the connection
         Scalar wellEnthalpy{0};       //!< injector: enthalpy of the well fluid at the connection
         Scalar massRate{0};           //!< last rate through the connection [kg/s], positive in the flow direction
@@ -444,6 +471,8 @@ private:
                 conn.wellDensity = 0.0;
                 conn.wellEnthalpy = 0.0;
                 conn.sensitivity = 0.0;
+                conn.enthalpySensitivity = 0.0;
+                conn.coefficientSensitivity = 0.0;
                 conn.cellPressure = 0.0;
                 conn.massRate = 0.0;
             }
@@ -466,6 +495,10 @@ private:
             assert(it != well.result.profile.end());
             conn.cellPressure = perforations[c].pressure;
             conn.sensitivity = 0.0;
+            conn.enthalpySensitivity = 0.0;
+            conn.coefficient = well.injector ? perforations[c].injectivity : perforations[c].productivity;
+            conn.coefficientSensitivity = 0.0;
+            conn.inflowEnthalpy = perforations[c].inflowEnthalpy;
             if (!well.flowing) {
                 conn.wellPressure = well.injector ? 0.0 : std::numeric_limits<Scalar>::max();
                 conn.wellDensity = 0.0;
@@ -489,6 +522,38 @@ private:
             }
             catch (const std::exception&) {
                 conn.sensitivity = 0.0;
+            }
+            {
+                // sensitivity to the coefficient of the connection: a relative change of 0.1%
+                auto perturbedC = perforations;
+                const Scalar factor = 1.0e-3;
+                Scalar& coefficient = well.injector ? perturbedC[c].injectivity : perturbedC[c].productivity;
+                const Scalar change = factor * coefficient;
+                coefficient += change;
+                try {
+                    const auto r = solve(perturbedC, well.injector ? well.result.surfacePressure : well.result.bottomHolePressure);
+                    if (r.flowing && change != 0.0) {
+                        conn.coefficientSensitivity = (nodePressure(r, conn.md) - conn.wellPressure) / change;
+                    }
+                }
+                catch (const std::exception&) {
+                    conn.coefficientSensitivity = 0.0;
+                }
+            }
+            if (!well.injector) {
+                // sensitivity to the enthalpy of the cell: the inflow enthalpy of the perforation changes with it
+                const Scalar dh = 1.0e3;   // J/kg
+                auto perturbedH = perforations;
+                perturbedH[c].inflowEnthalpy += dh;
+                try {
+                    const auto r = solve(perturbedH, well.result.bottomHolePressure);
+                    if (r.flowing) {
+                        conn.enthalpySensitivity = (nodePressure(r, conn.md) - conn.wellPressure) / dh;
+                    }
+                }
+                catch (const std::exception&) {
+                    conn.enthalpySensitivity = 0.0;
+                }
             }
         }
         for (std::size_t c = 0; c < well.connections.size(); ++c) {
