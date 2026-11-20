@@ -31,7 +31,7 @@
 #include <opm/simulators/timestepping/SimulatorReport.hpp>
 #include <opm/simulators/timestepping/SimulatorTimer.hpp>
 
-#include <flowexperimental/steam/SteamWellModel.hpp>
+#include <flowexperimental/co2store/Co2StoreWellModel.hpp>
 
 #include <filesystem>
 #include <vector>
@@ -59,7 +59,7 @@ public:
 
     NonlinearSystemCo2Store(Simulator& simulator,
                                  const ModelParameters& param,
-                                 SteamWellModel<TypeTag>& wellModel,
+                                 Co2StoreWellModel<TypeTag>& wellModel,
                                  bool terminalOutput);
 
     SimulatorReportSingle prepareStep(const SimulatorTimerInterface& timer);

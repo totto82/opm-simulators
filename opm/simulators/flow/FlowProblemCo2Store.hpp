@@ -346,6 +346,9 @@ public:
      */
     void addToSourceDense(RateVector& rate, unsigned globalDofIdx, unsigned /*timeIdx*/) const override
     {
+        // the connections of the wells
+        this->wellModel().addConnectionSources(rate, globalDofIdx, this->model().dofTotalVolume(globalDofIdx));
+
         const auto& source = this->simulator().vanguard().schedule()[this->episodeIndex()].source();
         std::array<int, 3> ijk;
         this->simulator().vanguard().cartesianCoordinate(globalDofIdx, ijk);

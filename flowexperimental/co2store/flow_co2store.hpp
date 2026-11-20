@@ -35,7 +35,7 @@
 
 #include <flowexperimental/comp/CompAquiferModel.hpp>
 #include <flowexperimental/comp/EmptyModel.hpp>
-#include <flowexperimental/steam/SteamWellModel.hpp>
+#include <flowexperimental/co2store/Co2StoreWellModel.hpp>
 
 namespace Opm::Properties {
 
@@ -87,7 +87,7 @@ struct AquiferModel<TypeTag, TTag::FlowCo2StoreProblem> {
 
 template<class TypeTag>
 struct WellModel<TypeTag, TTag::FlowCo2StoreProblem> {
-    using type = SteamWellModel<TypeTag>;
+    using type = Co2StoreWellModel<TypeTag>;
 };
 
 template<class TypeTag>

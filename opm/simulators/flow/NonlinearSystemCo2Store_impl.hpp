@@ -47,7 +47,7 @@ template <class TypeTag>
 NonlinearSystemCo2Store<TypeTag>::
 NonlinearSystemCo2Store(Simulator& simulator,
                              const ModelParameters& param,
-                             SteamWellModel<TypeTag>& wellModel,
+                             Co2StoreWellModel<TypeTag>& wellModel,
                              const bool terminalOutput)
     : ParentType(simulator, param, wellModel, terminalOutput)
 {
