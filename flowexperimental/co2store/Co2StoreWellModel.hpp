@@ -181,7 +181,34 @@ public:
             const auto& well = wellData_[w];
             const auto& conn = well.connections[c];
             // the pressure of the well fluid follows the cell pressure with the sensitivity of the well solution
-            const Evaluation pWell = conn.wellPressure + conn.sensitivity * (p - conn.cellPressure);
+            Evaluation pWell = conn.wellPressure + conn.sensitivity * (p - conn.cellPressure);
+            // what the cell delivers (with its derivatives) decides the wellbore solution
+            Evaluation coefficient = 0.0;
+            if (well.injector) {
+                for (unsigned phaseIdx = 0; phaseIdx < numPhases; ++phaseIdx) {
+                    coefficient += conn.wellIndex * iq.mobility(phaseIdx);
+                }
+            }
+            else {
+                Evaluation hSum = 0.0, co2Sum = 0.0;
+                for (unsigned phaseIdx = 0; phaseIdx < numPhases; ++phaseIdx) {
+                    const Evaluation c_a = conn.wellIndex * fs.density(phaseIdx) * iq.mobility(phaseIdx);
+                    coefficient += c_a;
+                    hSum += c_a * fs.enthalpy(phaseIdx);
+                    co2Sum += c_a * iq.massFraction(phaseIdx, co2CompIdx);
+                }
+                if (coefficient > 0.0) {
+                    if (conn.enthalpySensitivity != 0.0) {
+                        pWell += conn.enthalpySensitivity * (hSum / coefficient - conn.inflowEnthalpy);
+                    }
+                    if (conn.co2Sensitivity != 0.0) {
+                        pWell += conn.co2Sensitivity * (co2Sum / coefficient - conn.inflowCo2);
+                    }
+                }
+            }
+            if (conn.coefficientSensitivity != 0.0) {
+                pWell += conn.coefficientSensitivity * (coefficient - conn.coefficient);
+            }
             if (well.injector) {
                 const Evaluation dp = pWell - p;
                 if (!(dp > 0.0)) {
@@ -279,6 +306,16 @@ private:
         //! d(wellPressure)/d(cell pressure) of this connection: 1 for a well with a rate control (its pressure
         //! follows the cell), about 0 for a producer with a pressure control
         Scalar sensitivity{0};
+        //! the inflow (producer) or outflow (injector) coefficient, the enthalpy and the CO2 mass fraction of what a producer draws
+        //! when the well was solved, and the sensitivity of the pressure of the well fluid to them: the wellbore solution
+        //! depends on what the cells deliver (the enthalpy and the composition decide how the fluid expands and how heavy the column is,
+        //! the mobilities decide the rate)
+        Scalar coefficient{0};
+        Scalar coefficientSensitivity{0};
+        Scalar inflowEnthalpy{0};
+        Scalar enthalpySensitivity{0};
+        Scalar inflowCo2{0};
+        Scalar co2Sensitivity{0};
         Scalar wellDensity{0};        //!< injector: density of the well fluid at the connection
         Scalar wellEnthalpy{0};       //!< injector: enthalpy of the well fluid at the connection
         Scalar massRate{0};           //!< last rate through the connection [kg/s], positive in the flow direction
@@ -451,6 +488,9 @@ private:
                 conn.wellDensity = 0.0;
                 conn.wellEnthalpy = 0.0;
                 conn.sensitivity = 0.0;
+                conn.coefficientSensitivity = 0.0;
+                conn.enthalpySensitivity = 0.0;
+                conn.co2Sensitivity = 0.0;
                 conn.cellPressure = 0.0;
                 conn.massRate = 0.0;
             }
@@ -473,6 +513,12 @@ private:
             assert(it != well.result.profile.end());
             conn.cellPressure = perforations[c].pressure;
             conn.sensitivity = 0.0;
+            conn.coefficient = well.injector ? perforations[c].injectivity : perforations[c].productivity;
+            conn.coefficientSensitivity = 0.0;
+            conn.inflowEnthalpy = perforations[c].inflowEnthalpy;
+            conn.enthalpySensitivity = 0.0;
+            conn.inflowCo2 = perforations[c].inflowComposition[0];
+            conn.co2Sensitivity = 0.0;
             if (!well.flowing) {
                 conn.wellPressure = well.injector ? 0.0 : std::numeric_limits<Scalar>::max();
                 conn.wellDensity = 0.0;
@@ -496,6 +542,36 @@ private:
             }
             catch (const std::exception&) {
                 conn.sensitivity = 0.0;
+            }
+            // sensitivities to the other descriptors of the connection, each from the wellbore solution with a perturbed perforation
+            const Scalar hint2 = well.injector ? well.result.surfacePressure : well.result.bottomHolePressure;
+            const auto sensitivityTo = [&](auto&& perturb, Scalar change, Scalar& result) {
+                auto perturbed = perforations;
+                perturb(perturbed[c], change);
+                try {
+                    const auto r = solve(perturbed, hint2);
+                    if (r.flowing) {
+                        result = (nodePressure(r, conn.md) - conn.wellPressure) / change;
+                    }
+                }
+                catch (const std::exception&) {
+                    result = 0.0;
+                }
+            };
+            {
+                // a relative change of 0.1% of the coefficient
+                const Scalar change = 1.0e-3 * conn.coefficient;
+                if (change > 0.0) {
+                    sensitivityTo([&](WellPerforation& perf, Scalar d) { (well.injector ? perf.injectivity : perf.productivity) += d; },
+                                  change, conn.coefficientSensitivity);
+                }
+            }
+            if (!well.injector) {
+                sensitivityTo([](WellPerforation& perf, Scalar d) { perf.inflowEnthalpy += d; }, 1.0e3, conn.enthalpySensitivity);
+                sensitivityTo([](WellPerforation& perf, Scalar d) {
+                    perf.inflowComposition[0] += d;
+                    perf.inflowComposition[1] -= d;
+                }, perforations[c].inflowComposition[0] < 0.99 ? 0.01 : -0.01, conn.co2Sensitivity);
             }
         }
         for (std::size_t c = 0; c < well.connections.size(); ++c) {
