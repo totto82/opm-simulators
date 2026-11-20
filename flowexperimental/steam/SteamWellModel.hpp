@@ -79,6 +79,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -406,10 +407,13 @@ private:
 
         auto geometry = WellBoreGeometry<Scalar>::vertical(mdMax, well.diameter);
         geometry.maxStepLength = 20.0;
-        const auto solve = [&](const std::vector<WellBorePerforation<Scalar>>& perfs) {
+        // the solution of the previous iteration is the starting point of the root search of the wellbore
+        const auto hintIt = pressureHints_.find(well.name);
+        const std::optional<Scalar> hint = hintIt != pressureHints_.end() ? std::optional<Scalar>(hintIt->second) : std::nullopt;
+        const auto solve = [&](const std::vector<WellBorePerforation<Scalar>>& perfs, std::optional<Scalar> pressureHint) {
             const WellBoreType wellbore(geometry, perfs);
-            return well.injector ? wellbore.solveInjector(well.volumeRate, well.temperature, well.steam)
-                                 : wellbore.solveProducer(well.pressureTarget);
+            return well.injector ? wellbore.solveInjector(well.volumeRate, well.temperature, well.steam, pressureHint)
+                                 : wellbore.solveProducer(well.pressureTarget, pressureHint);
         };
         const auto nodePressure = [](const WellBoreResult<Scalar>& r, Scalar md) {
             const auto it = std::find_if(r.profile.begin(), r.profile.end(), [&](const auto& pt) {
@@ -420,13 +424,14 @@ private:
         };
         well.failed = false;
         try {
-            well.result = solve(perforations);
+            well.result = solve(perforations, hint);
         }
         catch (const std::exception& e) {
             // The states of a Newton iteration can be outside what the wellbore can handle (for example a cell
             // pressure beyond the range of the fluid). The well is switched off for this iteration and
             // the iteration cannot converge while it is failed (getWellConvergence()).
             well.failed = true;
+            pressureHints_.erase(well.name);
             std::string message = "Well " + well.name + ": the wellbore could not be solved (" + e.what() + "), cell pressures";
             for (const auto& perf : perforations) {
                 message += " " + std::to_string(perf.pressure / 1e5) + " bar";
@@ -446,6 +451,12 @@ private:
         }
         well.flowing = well.result.flowing;
         well.rateReached = well.result.rateReached;
+        if (well.flowing && well.rateReached) {
+            pressureHints_[well.name] = well.injector ? well.result.surfacePressure : well.result.bottomHolePressure;
+        }
+        else {
+            pressureHints_.erase(well.name);
+        }
 
         for (std::size_t c = 0; c < well.connections.size(); ++c) {
             auto& conn = well.connections[c];
@@ -471,7 +482,7 @@ private:
             auto perturbed = perforations;
             perturbed[c].pressure += dp;
             try {
-                const auto r = solve(perturbed);
+                const auto r = solve(perturbed, well.injector ? well.result.surfacePressure : well.result.bottomHolePressure);
                 if (r.flowing) {
                     conn.sensitivity = (nodePressure(r, conn.md) - conn.wellPressure) / dp;
                 }
@@ -511,6 +522,8 @@ private:
     Simulator& simulator_;
     std::vector<WellData> wellData_;
     std::map<unsigned, std::vector<std::pair<std::size_t, std::size_t>>> cellConnections_;
+    //! last solution of every well: BHP of a producer, surface pressure of an injector
+    std::map<std::string, Scalar> pressureHints_;
     std::vector<std::shared_ptr<SteamWellPlaceholder>> wells_;
     SimulatorReportSingle last_report_{};
     std::map<std::string, double> well_open_times_;
