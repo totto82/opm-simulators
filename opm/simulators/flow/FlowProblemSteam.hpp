@@ -148,7 +148,7 @@ namespace Opm {
  *        pressure and specific enthalpy as primary variables.
  *
  * The model is initialised explicitly (PRESSURE, TEMPI and optionally SGAS) and
- * driven by the SOURCE keyword; there are no wells yet.
+ * driven by the SOURCE keyword and by wells (see Opm::SteamWellModel).
  */
 template <class TypeTag>
 class FlowProblemSteam : public FlowProblem<TypeTag>
@@ -343,6 +343,9 @@ public:
      */
     void addToSourceDense(RateVector& rate, unsigned globalDofIdx, unsigned /*timeIdx*/) const override
     {
+        // the connections of the wells
+        this->wellModel().addConnectionSources(rate, globalDofIdx, this->model().dofTotalVolume(globalDofIdx));
+
         const auto& source = this->simulator().vanguard().schedule()[this->episodeIndex()].source();
         std::array<int, 3> ijk;
         this->simulator().vanguard().cartesianCoordinate(globalDofIdx, ijk);

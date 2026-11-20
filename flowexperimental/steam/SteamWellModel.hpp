@@ -20,30 +20,70 @@
 */
 /*!
  * \file
- * \brief Placeholder well model of the steam model. There are no wells yet:
- *        injection and production are specified with the SOURCE keyword. All
- *        well interfaces needed by the Flow stack are provided as no-ops.
+ * \brief Well model of the steam model: wells with a wellbore (opm-common Opm::WellBore) that
+ *        flashes between the perforations and the reference depth.
+ *
+ * Wells come from the Schedule (WELSPECS, COMPDAT, WCONINJE, WCONPROD, WINJTEMP):
+ *  - the reference depth of the well (WELSPECS) is the depth of the control. Put it at the surface (0): the
+ *    wellbore then runs from the deepest connection up to the surface and the pressure of a producer
+ *    (the BHP item of WCONPROD, control mode BHP) is the pressure at the surface. A reference depth
+ *    at the connections makes the wellbore trivial. The wellbore is vertical (measured depth = depth - reference
+ *    depth), its diameter is twice the largest connection radius, and it is adiabatic with homogeneous flow.
+ *  - an injector has control mode RESV: the reservoir volume rate is the volume of the injected fluid at the
+ *    injection temperature (WINJTEMP) and the pressure at the reference depth. Type WATER injects liquid
+ *    water, type GAS injects steam.
+ *
+ * Coupling. At the start of every Newton iteration the wellbore of each open well is solved from the
+ * current cell states: the cells give pressure, enthalpy and mobilities of the connections, and the
+ * solution gives the pressure of the well fluid at every connection (and, for an injector, its density and
+ * enthalpy). The connections enter the cell residuals as sources with derivatives wrt the pressure and the
+ * enthalpy of the cell,
+ *   producer: sum_a WI rho_a lambda_a (p_cell - p_well)^+  of mass, carrying h_a,
+ *   injector: WI sum_a lambda_a (p_well - p_cell)^+ rho_well  of mass, carrying h_well,
+ * while the pressure of the well fluid is that of the last well solution. At convergence the well
+ * solution is consistent with the cells. The wellbore uses the tabulated steam provider (the
+ * raw IAPWS flash is too slow for the root searches).
+ *
+ * Not supported yet: parallel runs (wells with cells on other processes), group and rate controls,
+ * BHP limits of injectors, wells in the restart file and in the summary file.
  */
 #ifndef OPM_STEAM_WELL_MODEL_HPP
 #define OPM_STEAM_WELL_MODEL_HPP
 
 #include <opm/common/ErrorMacros.hpp>
+#include <opm/common/Exceptions.hpp>
+#include <opm/common/OpmLog/OpmLog.hpp>
 #include <opm/output/data/Wells.hpp>
+
+#include <opm/material/constraintsolvers/TabulatedSteamPressureEnthalpyProvider.hpp>
+#include <opm/material/fluidsystems/SteamFluidSystem.hpp>
+#include <opm/material/wellbore/SteamWellFluid.hpp>
+#include <opm/material/wellbore/WellBore.hpp>
 
 #include <opm/input/eclipse/Schedule/Events.hpp>
 #include <opm/input/eclipse/Schedule/Schedule.hpp>
+#include <opm/input/eclipse/Schedule/Well/Connection.hpp>
+#include <opm/input/eclipse/Schedule/Well/Well.hpp>
+#include <opm/input/eclipse/Schedule/Well/WellEnums.hpp>
 #include <opm/input/eclipse/Schedule/Well/WellTestState.hpp>
 
+#include <opm/models/common/enthalpyenergyterms.hh>
 #include <opm/models/discretization/common/baseauxiliarymodule.hh>
 
 #include <opm/simulators/timestepping/SimulatorReport.hpp>
 
+#include <algorithm>
+#include <cassert>
+#include <cmath>
 #include <cstddef>
+#include <limits>
 #include <map>
 #include <memory>
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace Opm {
@@ -67,6 +107,16 @@ class SteamWellModel : public BaseAuxiliaryModule<TypeTag>
     using RateVector = GetPropType<TypeTag, Properties::RateVector>;
     using GlobalEqVector = GetPropType<TypeTag, Properties::GlobalEqVector>;
     using SparseMatrixAdapter = GetPropType<TypeTag, Properties::SparseMatrixAdapter>;
+    using Evaluation = GetPropType<TypeTag, Properties::Evaluation>;
+    using FluidSystem = GetPropType<TypeTag, Properties::FluidSystem>;
+
+    // the wellbore always uses the tabulated steam provider: the raw IAPWS flash is too slow for the root searches
+    using WellProvider = TabulatedSteamPressureEnthalpyProvider<Scalar>;
+    using WellFluid = SteamWellFluid<Scalar, WellProvider>;
+    using WellBoreType = WellBore<Scalar, WellFluid>;
+
+    static constexpr unsigned waterPhaseIdx = FluidSystem::waterPhaseIdx;
+    static constexpr unsigned gasPhaseIdx = FluidSystem::gasPhaseIdx;
 
 public:
     using Simulator = GetPropType<TypeTag, Properties::Simulator>;
@@ -91,19 +141,72 @@ public:
     template <class Restarter> void deserialize(Restarter&) {}
     template <class Serializer> void serializeOp(Serializer&) {}
 
-    void beginEpisode() {}
+    void beginEpisode() { buildWells_(); }
     void beginReportStep(unsigned) {}
     void beginTimeStep() {}
-    void beginIteration() {}
+    void beginIteration()
+    {
+        for (auto& well : wellData_) {
+            solveWell_(well);
+        }
+    }
     void restoreLastValidState() {}
     void updateFailed() {}
     void advanceTimeLevel() {}
     void init() {}
     void endIteration() const {}
     void endTimeStep() {}
-    void endEpisode() {}
+    void endEpisode() { report_(); }
 
     void computeTotalRatesForDof(RateVector&, unsigned) const {}
+
+    /*!
+     * \brief Adds the connections of the wells in a cell to the source (per volume, in the units of
+     *        the residual) with derivatives wrt the pressure and the enthalpy of the cell.
+     */
+    void addConnectionSources(RateVector& rate, unsigned cell, Scalar volume) const
+    {
+        const auto it = cellConnections_.find(cell);
+        if (it == cellConnections_.end()) {
+            return;
+        }
+        const auto& iq = simulator_.model().intensiveQuantities(cell, /*timeIdx=*/0);
+        const auto& fs = iq.fluidState();
+        const Evaluation& p = fs.pressure(waterPhaseIdx);
+        constexpr Scalar energyScale = Parameters::EnthalpyEnergyScaling::value;
+
+        for (const auto& [w, c] : it->second) {
+            const auto& well = wellData_[w];
+            const auto& conn = well.connections[c];
+            // the pressure of the well fluid follows the cell pressure with the sensitivity of the well solution
+            const Evaluation pWell = conn.wellPressure + conn.sensitivity * (p - conn.cellPressure);
+            if (well.injector) {
+                const Evaluation dp = pWell - p;
+                if (!(dp > 0.0)) {
+                    continue;
+                }
+                const Evaluation lambda = conn.wellIndex * (iq.mobility(waterPhaseIdx) + iq.mobility(gasPhaseIdx));
+                const Evaluation mass = lambda * dp * conn.wellDensity;
+                rate[Indices::conti0EqIdx] += mass / volume;
+                rate[Indices::contiEnergyEqIdx] += mass * conn.wellEnthalpy / volume * energyScale;
+            }
+            else {
+                const Evaluation dp = p - pWell;
+                if (!(dp > 0.0)) {
+                    continue;
+                }
+                Evaluation mass = 0.0;
+                Evaluation energy = 0.0;
+                for (const unsigned phaseIdx : {waterPhaseIdx, gasPhaseIdx}) {
+                    const Evaluation c_a = conn.wellIndex * fs.density(phaseIdx) * iq.mobility(phaseIdx) * dp;
+                    mass += c_a;
+                    energy += c_a * fs.enthalpy(phaseIdx);
+                }
+                rate[Indices::conti0EqIdx] -= mass / volume;
+                rate[Indices::contiEnergyEqIdx] -= energy / volume * energyScale;
+            }
+        }
+    }
 
     [[nodiscard]] data::Wells wellData() const { return data::Wells{}; }
     [[nodiscard]] data::WellBlockAveragePressures wellBlockAveragePressures() const
@@ -148,11 +251,266 @@ public:
     template <class ReservoirCouplingSlave> void setReservoirCouplingSlave(ReservoirCouplingSlave*) {}
     template <class ReservoirCouplingMaster> void setReservoirCouplingMaster(ReservoirCouplingMaster*) {}
 
-    bool getWellConvergence() const { return true; }
+    bool getWellConvergence() const
+    {
+        return std::none_of(wellData_.begin(), wellData_.end(), [](const auto& well) { return well.failed; });
+    }
     bool updateWellStatusAtConvergence() { return false; }
 
 private:
+    struct ConnectionData
+    {
+        unsigned cell{0};
+        Scalar md{0};                 //!< measured depth below the reference depth [m]
+        Scalar wellIndex{0};          //!< [m3]
+        Scalar radius{0};
+        Scalar wellPressure{std::numeric_limits<Scalar>::max()};   //!< pressure of the well fluid at the connection [Pa]
+        Scalar cellPressure{0};       //!< pressure of the cell when the well was solved [Pa]
+        //! d(wellPressure)/d(cell pressure) of this connection: 1 for a well with a rate control (its pressure
+        //! follows the cell), about 0 for a producer with a pressure control
+        Scalar sensitivity{0};
+        Scalar wellDensity{0};        //!< injector: density of the well fluid at the connection
+        Scalar wellEnthalpy{0};       //!< injector: enthalpy of the well fluid at the connection
+        Scalar massRate{0};           //!< last rate through the connection [kg/s], positive in the flow direction
+    };
+
+    struct WellData
+    {
+        std::string name;
+        bool injector{false};
+        bool steam{false};            //!< injector: steam (type GAS) or liquid water (type WATER)
+        Scalar referenceDepth{0};
+        Scalar pressureTarget{0};     //!< producer: pressure at the reference depth [Pa]
+        Scalar volumeRate{0};         //!< injector: volume rate at the reference depth [m3/s]
+        Scalar temperature{0};        //!< injector: [K]
+        Scalar diameter{0.2};
+        std::vector<ConnectionData> connections;
+        WellBoreResult<Scalar> result;
+        bool flowing{false};
+        bool rateReached{true};       //!< injector: false if the weight of the column alone injects more than the rate
+        bool failed{false};           //!< the wellbore could not be solved in the last iteration
+    };
+
+    //! the wells of the current report step
+    void buildWells_()
+    {
+        wellData_.clear();
+        cellConnections_.clear();
+        const auto& vanguard = simulator_.vanguard();
+        const auto& schedule = vanguard.schedule();
+        const auto& summaryState = vanguard.summaryState();
+        const std::size_t reportStep = static_cast<std::size_t>(std::max(0, simulator_.episodeIndex()));
+
+        for (const auto& well : schedule.getWells(reportStep)) {
+            if (well.getStatus() != WellStatus::OPEN) {
+                continue;
+            }
+            // this model and its wellbore are for water and steam; the placeholder is shared with other models
+            if constexpr (!std::is_same_v<FluidSystem, SteamFluidSystem<Scalar>>) {
+                OPM_THROW(std::runtime_error, "Well " + well.name() + ": wells are not supported by this model yet "
+                          "(only by flow_steam); use the SOURCE keyword");
+            }
+            WellData wd;
+            wd.name = well.name();
+            wd.injector = well.isInjector();
+            wd.referenceDepth = well.getRefDepth();
+            Scalar maxRadius = 0.0;
+            for (const auto& conn : well.getConnections()) {
+                if (conn.state() != Connection::State::OPEN) {
+                    continue;
+                }
+                const int cell = vanguard.compressedIndexForInterior(static_cast<int>(conn.global_index()));
+                if (cell < 0) {
+                    continue;   // the cell is not on this process
+                }
+                ConnectionData cd;
+                cd.cell = static_cast<unsigned>(cell);
+                const Scalar below = conn.depth() - wd.referenceDepth;
+                if (below < -1.0) {
+                    OPM_THROW(std::runtime_error, "Well " + wd.name + ": the connection at depth " +
+                              std::to_string(conn.depth()) + " m is above the reference depth " +
+                              std::to_string(wd.referenceDepth) + " m");
+                }
+                // a connection at the reference depth gets a wellbore of a millimetre
+                cd.md = std::max(below, Scalar(1.0e-3));
+                cd.wellIndex = conn.CF();
+                cd.radius = conn.rw();
+                maxRadius = std::max(maxRadius, cd.radius);
+                wd.connections.push_back(cd);
+            }
+            if (wd.connections.empty()) {
+                continue;
+            }
+            wd.diameter = maxRadius > 0.0 ? 2.0 * maxRadius : 0.2;
+
+            if (wd.injector) {
+                const auto controls = well.injectionControls(summaryState);
+                if (controls.cmode != WellInjectorCMode::RESV) {
+                    OPM_THROW(std::runtime_error, "Well " + wd.name + ": the steam model only supports RESV control "
+                              "for injectors (the volume at the reference depth)");
+                }
+                if (controls.injector_type != InjectorType::WATER && controls.injector_type != InjectorType::GAS) {
+                    OPM_THROW(std::runtime_error, "Well " + wd.name + ": the injector must be of type WATER (liquid) or GAS (steam)");
+                }
+                wd.steam = controls.injector_type == InjectorType::GAS;
+                wd.volumeRate = controls.reservoir_rate;
+                wd.temperature = well.inj_temperature();
+            }
+            else {
+                const auto controls = well.productionControls(summaryState);
+                if (controls.cmode != WellProducerCMode::BHP) {
+                    OPM_THROW(std::runtime_error, "Well " + wd.name + ": the steam model only supports BHP control "
+                              "for producers (the pressure at the reference depth)");
+                }
+                wd.pressureTarget = controls.bhp_limit;
+            }
+            wellData_.push_back(std::move(wd));
+        }
+
+        for (std::size_t w = 0; w < wellData_.size(); ++w) {
+            for (std::size_t c = 0; c < wellData_[w].connections.size(); ++c) {
+                cellConnections_[wellData_[w].connections[c].cell].emplace_back(w, c);
+            }
+            OpmLog::info("Well " + wellData_[w].name + (wellData_[w].injector ? " (injector of " +
+                         std::string(wellData_[w].steam ? "steam" : "water") + ")" : " (producer)") + ": " +
+                         std::to_string(wellData_[w].connections.size()) + " connections, reference depth " +
+                         std::to_string(wellData_[w].referenceDepth) + " m");
+        }
+    }
+
+    //! solves the wellbore of a well from the current states of its cells
+    void solveWell_(WellData& well)
+    {
+        std::vector<WellBorePerforation<Scalar>> perforations;
+        Scalar mdMax = 0.0;
+        for (const auto& conn : well.connections) {
+            const auto& iq = simulator_.model().intensiveQuantities(conn.cell, /*timeIdx=*/0);
+            const auto& fs = iq.fluidState();
+            WellBorePerforation<Scalar> perf;
+            perf.md = conn.md;
+            perf.pressure = getValue(fs.pressure(waterPhaseIdx));
+            Scalar productivity = 0.0, hSum = 0.0, mobility = 0.0;
+            for (const unsigned phaseIdx : {waterPhaseIdx, gasPhaseIdx}) {
+                const Scalar lambda = getValue(iq.mobility(phaseIdx));
+                const Scalar c = conn.wellIndex * getValue(fs.density(phaseIdx)) * lambda;
+                productivity += c;
+                hSum += c * getValue(fs.enthalpy(phaseIdx));
+                mobility += conn.wellIndex * lambda;
+            }
+            perf.productivity = productivity;
+            perf.injectivity = mobility;
+            perf.inflowEnthalpy = productivity > 0.0 ? hSum / productivity : getValue(fs.enthalpy(waterPhaseIdx));
+            perforations.push_back(perf);
+            mdMax = std::max(mdMax, conn.md);
+        }
+
+        auto geometry = WellBoreGeometry<Scalar>::vertical(mdMax, well.diameter);
+        geometry.maxStepLength = 20.0;
+        const auto solve = [&](const std::vector<WellBorePerforation<Scalar>>& perfs) {
+            const WellBoreType wellbore(geometry, perfs);
+            return well.injector ? wellbore.solveInjector(well.volumeRate, well.temperature, well.steam)
+                                 : wellbore.solveProducer(well.pressureTarget);
+        };
+        const auto nodePressure = [](const WellBoreResult<Scalar>& r, Scalar md) {
+            const auto it = std::find_if(r.profile.begin(), r.profile.end(), [&](const auto& pt) {
+                return std::abs(pt.md - md) < 1e-6 * (1.0 + md);
+            });
+            assert(it != r.profile.end());
+            return it->pressure;
+        };
+        well.failed = false;
+        try {
+            well.result = solve(perforations);
+        }
+        catch (const std::exception& e) {
+            // The states of a Newton iteration can be outside what the wellbore can handle (for example a cell
+            // pressure beyond the range of the fluid). The well is switched off for this iteration and
+            // the iteration cannot converge while it is failed (getWellConvergence()).
+            well.failed = true;
+            std::string message = "Well " + well.name + ": the wellbore could not be solved (" + e.what() + "), cell pressures";
+            for (const auto& perf : perforations) {
+                message += " " + std::to_string(perf.pressure / 1e5) + " bar";
+            }
+            OpmLog::debug(message);
+            well.flowing = false;
+            well.rateReached = true;
+            for (auto& conn : well.connections) {
+                conn.wellPressure = well.injector ? 0.0 : std::numeric_limits<Scalar>::max();
+                conn.wellDensity = 0.0;
+                conn.wellEnthalpy = 0.0;
+                conn.sensitivity = 0.0;
+                conn.cellPressure = 0.0;
+                conn.massRate = 0.0;
+            }
+            return;
+        }
+        well.flowing = well.result.flowing;
+        well.rateReached = well.result.rateReached;
+
+        for (std::size_t c = 0; c < well.connections.size(); ++c) {
+            auto& conn = well.connections[c];
+            const auto it = std::find_if(well.result.profile.begin(), well.result.profile.end(), [&](const auto& pt) {
+                return std::abs(pt.md - conn.md) < 1e-6 * (1.0 + conn.md);
+            });
+            assert(it != well.result.profile.end());
+            conn.cellPressure = perforations[c].pressure;
+            conn.sensitivity = 0.0;
+            if (!well.flowing) {
+                conn.wellPressure = well.injector ? 0.0 : std::numeric_limits<Scalar>::max();
+                conn.wellDensity = 0.0;
+                conn.wellEnthalpy = 0.0;
+                continue;
+            }
+            conn.wellPressure = it->pressure;
+            conn.wellDensity = it->density;
+            conn.wellEnthalpy = it->enthalpy;
+
+            // sensitivity of the pressure of the well fluid at this connection to its own cell pressure
+            // (the cross terms between the cells of a well are neglected)
+            const Scalar dp = 1.0e-5 * perforations[c].pressure;
+            auto perturbed = perforations;
+            perturbed[c].pressure += dp;
+            try {
+                const auto r = solve(perturbed);
+                if (r.flowing) {
+                    conn.sensitivity = (nodePressure(r, conn.md) - conn.wellPressure) / dp;
+                }
+            }
+            catch (const std::exception&) {
+                conn.sensitivity = 0.0;
+            }
+        }
+        for (std::size_t c = 0; c < well.connections.size(); ++c) {
+            // perforation rates are in the order of the perforations, which is that of the connections
+            well.connections[c].massRate = well.result.perforationRate[c];
+        }
+    }
+
+    //! one line per well at the end of a report step
+    void report_() const
+    {
+        for (const auto& well : wellData_) {
+            const auto& r = well.result;
+            std::string line = "Well " + well.name + ": " + (well.injector ? "injecting " : "producing ") +
+                std::to_string(r.massFlow) + " kg/s, pressure at the reference depth " +
+                std::to_string(r.surfacePressure / 1e5) + " bar, bottom-hole pressure " +
+                std::to_string(r.bottomHolePressure / 1e5) + " bar";
+            if (!well.injector && r.flowing && !r.profile.empty()) {
+                line += ", steam quality at the reference depth " + std::to_string(r.profile.front().steamQuality);
+            }
+            if (!well.rateReached) {
+                line += ", the weight of the fluid column alone injects more than the specified rate";
+            }
+            if (r.phaseChangeMd) {
+                line += ", phase change at " + std::to_string(*r.phaseChangeMd + well.referenceDepth) + " m depth";
+            }
+            OpmLog::info(line);
+        }
+    }
+
     Simulator& simulator_;
+    std::vector<WellData> wellData_;
+    std::map<unsigned, std::vector<std::pair<std::size_t, std::size_t>>> cellConnections_;
     std::vector<std::shared_ptr<SteamWellPlaceholder>> wells_;
     SimulatorReportSingle last_report_{};
     std::map<std::string, double> well_open_times_;
