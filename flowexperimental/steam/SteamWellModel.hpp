@@ -487,6 +487,32 @@ private:
             pressureHints_.erase(well.name);
         }
 
+        // The sensitivities of all connections from the implicit function theorem: one march of the wellbore for the slope
+        // and one per descriptor (pressure, coefficient and, for a producer, enthalpy), instead of the solution of a perturbed
+        // well for each of them; the finite differences of the solutions below are the fallback.
+        const std::size_t perConnection = well.injector ? 2 : 3;
+        std::optional<std::vector<std::vector<Scalar>>> implicit;
+        if (well.flowing && well.rateReached) {
+            using Perturbation = typename WellBoreType::Perturbation;
+            std::vector<Perturbation> perturbations;
+            for (std::size_t c = 0; c < perforations.size(); ++c) {
+                const Scalar dp = 1.0e-5 * perforations[c].pressure;
+                perturbations.push_back({c, [dp](WellBorePerforation<Scalar>& perf) { perf.pressure += dp; }, dp});
+                const bool injector = well.injector;
+                const Scalar change = 1.0e-3 * (injector ? perforations[c].injectivity : perforations[c].productivity);
+                perturbations.push_back({c, [injector, change](WellBorePerforation<Scalar>& perf) {
+                                              (injector ? perf.injectivity : perf.productivity) += change;
+                                          }, change > 0.0 ? change : 1.0});
+                if (!injector) {
+                    perturbations.push_back({c, [](WellBorePerforation<Scalar>& perf) { perf.inflowEnthalpy += 1.0e3; }, 1.0e3});
+                }
+            }
+            const WellBoreType wellbore(geometry, perforations);
+            implicit = well.injector
+                ? wellbore.injectorSensitivities(well.result, well.volumeRate, well.temperature, well.steam, perturbations)
+                : wellbore.producerSensitivities(well.result, perturbations);
+        }
+
         for (std::size_t c = 0; c < well.connections.size(); ++c) {
             auto& conn = well.connections[c];
             const auto it = std::find_if(well.result.profile.begin(), well.result.profile.end(), [&](const auto& pt) {
@@ -508,6 +534,19 @@ private:
             conn.wellPressure = it->pressure;
             conn.wellDensity = it->density;
             conn.wellEnthalpy = it->enthalpy;
+
+            if (implicit) {
+                // the derivative of the pressure at this connection wrt its own descriptors
+                const std::size_t k0 = c * perConnection;
+                conn.sensitivity = (*implicit)[k0][c];
+                if (conn.coefficient > 0.0) {
+                    conn.coefficientSensitivity = (*implicit)[k0 + 1][c];
+                }
+                if (!well.injector) {
+                    conn.enthalpySensitivity = (*implicit)[k0 + 2][c];
+                }
+                continue;
+            }
 
             // sensitivity of the pressure of the well fluid at this connection to its own cell pressure
             // (the cross terms between the cells of a well are neglected)
