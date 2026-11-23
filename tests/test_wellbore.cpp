@@ -783,3 +783,24 @@ BOOST_AUTO_TEST_CASE(DeadWellWithSeveralPerforations)
     BOOST_CHECK_EQUAL(r.perforationRate[0], 0.0);
     BOOST_CHECK_EQUAL(r.perforationRate[1], 0.0);
 }
+
+BOOST_AUTO_TEST_CASE(DriftFluxProducerNearTheZeroFlowJump)
+{
+    // With drift flux the surface pressure of a vanishing flow (about 42 bar) is far below that of the static column
+    // (52 bar): f jumps at zero flow. A tubing head pressure between the two used to end in an exception, because the
+    // bracket of the first crossing holds the jump and no root.
+    const Scalar H = 1500.0;
+    const Scalar pRes = 150 * bar;
+    const Scalar hRes = Raw::initialEnthalpy(pRes, celsius(300.0), 0.0);
+    Options drift;
+    drift.slip.driftFlux = true;
+    const Well well(Geometry::vertical(H, 0.2), {Perf{H, pRes, 2e-6, hRes, 0.0}}, drift);
+    const auto r = well.solveProducer(45 * bar);
+    BOOST_REQUIRE(r.flowing);
+    BOOST_CHECK_CLOSE(r.surfacePressure, 45 * bar, 1e-6);
+    BOOST_CHECK_GT(r.massFlow, 1.0);   // the operating point of the outflow curve, not the jump at zero flow
+    // above the highest surface pressure that a flow can deliver (49.06 bar) the well is dead
+    const auto dead = well.solveProducer(50 * bar);
+    BOOST_CHECK(!dead.flowing);
+    BOOST_CHECK_EQUAL(dead.massFlow, 0.0);
+}

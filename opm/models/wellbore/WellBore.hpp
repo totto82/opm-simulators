@@ -329,6 +329,7 @@ public:
         Scalar fLower = fUpper;
         bool seenPositive = fUpper > 0.0;
         bool found = false;
+        std::optional<Scalar> solution;
         while (lower - step > pMin) {
             upper = lower;
             fUpper = fLower;
@@ -339,7 +340,19 @@ public:
             }
             else if (seenPositive) {
                 found = true;
-                break;
+                if (fLower <= -0.5 * huge_) {
+                    break;   // the end of the validity range of the fluid, checked below
+                }
+                // A crossing that is a jump of f and not a root is not an operating point. It is the zero-flow
+                // limit of the slip model: the static column (no flow) is heavier than the column of a vanishing
+                // flow, where the gas already rises through the liquid. The scan goes on below the jump.
+                const Scalar root = brent_(f, lower, upper, fLower, fUpper, 1e-10 * pHigh);
+                if (std::abs(f(root)) < 1e-6 * tubingHeadPressure) {
+                    solution = root;
+                    break;
+                }
+                found = false;
+                seenPositive = false;
             }
         }
         if (!seenPositive) {
@@ -352,6 +365,9 @@ public:
         }
         if (!found) {
             throw std::runtime_error("WellBore: no producer solution above the minimum pressure");
+        }
+        if (solution) {
+            return producerAt(*solution, true);
         }
         const Scalar pb = brent_(f, lower, upper, fLower, fUpper, 1e-10 * pHigh);
         if (!(std::abs(f(pb)) < 1e-6 * tubingHeadPressure)) {
