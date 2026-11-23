@@ -57,8 +57,8 @@
 
 #include <opm/material/constraintsolvers/TabulatedSteamPressureEnthalpyProvider.hpp>
 #include <opm/material/fluidsystems/SteamFluidSystem.hpp>
-#include <opm/material/wellbore/SteamWellFluid.hpp>
-#include <opm/material/wellbore/WellBore.hpp>
+#include <opm/models/wellbore/SteamWellFluid.hpp>
+#include <opm/models/wellbore/WellBore.hpp>
 
 #include <opm/input/eclipse/Schedule/Events.hpp>
 #include <opm/input/eclipse/Schedule/Schedule.hpp>

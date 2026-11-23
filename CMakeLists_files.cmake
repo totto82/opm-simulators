@@ -575,6 +575,8 @@ list (APPEND TEST_SOURCE_FILES
   tests/test_WellMatrixMerger.cpp
   tests/test_WellPerformanceEventTracker.cpp
   tests/test_WaterSatfuncConsistencyChecks.cpp
+  tests/test_wellbore.cpp
+  tests/test_co2well.cpp
   tests/test_wellmodel.cpp
   tests/test_wellprodindexcalculator.cpp
   tests/test_wellstate.cpp
@@ -1096,6 +1098,9 @@ list (APPEND PUBLIC_HEADER_FILES
   opm/models/utils/terminal.hpp
   opm/models/utils/timer.hpp
   opm/models/utils/timerguard.hh
+  opm/models/wellbore/Co2WellFluid.hpp
+  opm/models/wellbore/SteamWellFluid.hpp
+  opm/models/wellbore/WellBore.hpp
   opm/simulators/flow/ActionHandler.hpp
   opm/simulators/flow/AluGridCartesianIndexMapper.hpp
   opm/simulators/flow/AluGridLevelCartesianIndexMapper.hpp

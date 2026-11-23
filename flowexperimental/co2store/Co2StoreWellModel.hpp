@@ -55,8 +55,8 @@
 #include <opm/common/OpmLog/OpmLog.hpp>
 #include <opm/output/data/Wells.hpp>
 
-#include <opm/material/wellbore/Co2WellFluid.hpp>
-#include <opm/material/wellbore/WellBore.hpp>
+#include <opm/models/wellbore/Co2WellFluid.hpp>
+#include <opm/models/wellbore/WellBore.hpp>
 
 #include <opm/input/eclipse/Schedule/Events.hpp>
 #include <opm/input/eclipse/Schedule/Schedule.hpp>
