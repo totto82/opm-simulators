@@ -1054,6 +1054,40 @@ macro(opm-simulators_targets_hook)
     EXCLUDE_FROM_ALL
   )
 
+# generic compositional pressure-enthalpy model, the flash is chosen per binary
+  opm_add_executable(
+    TARGET
+      flow_ph_steam
+    SOURCES
+      flowexperimental/ph/flow_ph_steam.cpp
+      $<TARGET_OBJECTS:moduleVersion>
+    LIBRARIES
+      opmsimulators
+    EXCLUDE_FROM_ALL
+  )
+
+  opm_add_executable(
+    TARGET
+      flow_ph_steam_tab
+    SOURCES
+      flowexperimental/ph/flow_ph_steam_tab.cpp
+      $<TARGET_OBJECTS:moduleVersion>
+    LIBRARIES
+      opmsimulators
+    EXCLUDE_FROM_ALL
+  )
+
+  opm_add_executable(
+    TARGET
+      flow_ph_co2store
+    SOURCES
+      flowexperimental/ph/flow_ph_co2store.cpp
+      $<TARGET_OBJECTS:moduleVersion>
+    LIBRARIES
+      opmsimulators
+    EXCLUDE_FROM_ALL
+  )
+
   opm_add_executable(
     TARGET
       flow_comp2_2p

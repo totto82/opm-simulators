@@ -1047,6 +1047,16 @@ list (APPEND PUBLIC_HEADER_FILES
   opm/models/co2store/co2storemodel.hh
   opm/models/co2store/co2storenewtonmethod.hh
   opm/models/co2store/co2storeprimaryvariables.hh
+  opm/models/ph/co2storeflash.hh
+  opm/models/ph/phflash.hh
+  opm/models/ph/phindices.hh
+  opm/models/ph/phintensivequantities.hh
+  opm/models/ph/phlocalresidual.hh
+  opm/models/ph/phmodel.hh
+  opm/models/ph/phnewtonmethod.hh
+  opm/models/ph/phprimaryvariables.hh
+  opm/models/ph/phratevector.hh
+  opm/models/ph/steamflash.hh
   opm/models/steam/steamindices.hh
   opm/models/steam/steamintensivequantities.hh
   opm/models/steam/steamlocalresidual.hh
@@ -1157,6 +1167,10 @@ list (APPEND PUBLIC_HEADER_FILES
   opm/simulators/flow/FlowProblemSteam.hpp
   opm/simulators/flow/NonlinearSystemCo2Store.hpp
   opm/simulators/flow/NonlinearSystemCo2Store_impl.hpp
+  opm/simulators/flow/FlowProblemPh.hpp
+  opm/simulators/flow/NonlinearSystemPh.hpp
+  opm/simulators/flow/NonlinearSystemPh_impl.hpp
+  opm/simulators/flow/OutputPhModule.hpp
   opm/simulators/flow/NonlinearSystemSteam.hpp
   opm/simulators/flow/NonlinearSystemSteam_impl.hpp
   opm/simulators/flow/OutputCo2StoreModule.hpp
