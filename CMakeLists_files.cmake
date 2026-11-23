@@ -1041,12 +1041,6 @@ list (APPEND PUBLIC_HEADER_FILES
   opm/models/ptflash/flashnewtonmethod.hh
   opm/models/ptflash/flashparameters.hh
   opm/models/ptflash/flashprimaryvariables.hh
-  opm/models/co2store/co2storeindices.hh
-  opm/models/co2store/co2storeintensivequantities.hh
-  opm/models/co2store/co2storelocalresidual.hh
-  opm/models/co2store/co2storemodel.hh
-  opm/models/co2store/co2storenewtonmethod.hh
-  opm/models/co2store/co2storeprimaryvariables.hh
   opm/models/ph/co2storeflash.hh
   opm/models/ph/phflash.hh
   opm/models/ph/phindices.hh
@@ -1057,13 +1051,6 @@ list (APPEND PUBLIC_HEADER_FILES
   opm/models/ph/phprimaryvariables.hh
   opm/models/ph/phratevector.hh
   opm/models/ph/steamflash.hh
-  opm/models/steam/steamindices.hh
-  opm/models/steam/steamintensivequantities.hh
-  opm/models/steam/steamlocalresidual.hh
-  opm/models/steam/steammodel.hh
-  opm/models/steam/steamnewtonmethod.hh
-  opm/models/steam/steamprimaryvariables.hh
-  opm/models/steam/steamratevector.hh
   opm/models/pvs/pvsboundaryratevector.hh
   opm/models/pvs/pvsextensivequantities.hh
   opm/models/pvs/pvsindices.hh
@@ -1163,18 +1150,10 @@ list (APPEND PUBLIC_HEADER_FILES
   opm/simulators/flow/FlowProblemBlackoilProperties.hpp
   opm/simulators/flow/FlowProblemComp.hpp
   opm/simulators/flow/FlowProblemCompProperties.hpp
-  opm/simulators/flow/FlowProblemCo2Store.hpp
-  opm/simulators/flow/FlowProblemSteam.hpp
-  opm/simulators/flow/NonlinearSystemCo2Store.hpp
-  opm/simulators/flow/NonlinearSystemCo2Store_impl.hpp
   opm/simulators/flow/FlowProblemPh.hpp
   opm/simulators/flow/NonlinearSystemPh.hpp
   opm/simulators/flow/NonlinearSystemPh_impl.hpp
   opm/simulators/flow/OutputPhModule.hpp
-  opm/simulators/flow/NonlinearSystemSteam.hpp
-  opm/simulators/flow/NonlinearSystemSteam_impl.hpp
-  opm/simulators/flow/OutputCo2StoreModule.hpp
-  opm/simulators/flow/OutputSteamModule.hpp
   opm/simulators/flow/FlowProblemParameters.hpp
   opm/simulators/flow/FlowProblemTPSA.hpp
   opm/simulators/flow/FlowsContainer.hpp

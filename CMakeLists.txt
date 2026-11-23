@@ -1020,40 +1020,6 @@ macro(opm-simulators_targets_hook)
       OPM_COMPILE_COMPONENTS_TEMPLATE_LIST=${OPM_COMPILE_COMPONENTS_TEMPLATE_LIST}
   )
 
-  # pure water, liquid and steam, with pressure and enthalpy as primary variables
-  opm_add_executable(
-    TARGET
-      flow_steam
-    SOURCES
-      flowexperimental/steam/flow_steam.cpp
-      $<TARGET_OBJECTS:moduleVersion>
-    LIBRARIES
-      opmsimulators
-    EXCLUDE_FROM_ALL
-  )
-
-  opm_add_executable(
-    TARGET
-      flow_steam_tab
-    SOURCES
-      flowexperimental/steam/flow_steam_tab.cpp
-      $<TARGET_OBJECTS:moduleVersion>
-    LIBRARIES
-      opmsimulators
-    EXCLUDE_FROM_ALL
-  )
-
-  opm_add_executable(
-    TARGET
-      flow_co2store
-    SOURCES
-      flowexperimental/co2store/flow_co2store.cpp
-      $<TARGET_OBJECTS:moduleVersion>
-    LIBRARIES
-      opmsimulators
-    EXCLUDE_FROM_ALL
-  )
-
 # generic compositional pressure-enthalpy model, the flash is chosen per binary
   opm_add_executable(
     TARGET
